@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PROTEUS — Personal AI Companion</title>
+<meta name="description" content="PROTEUS — a personal AI companion for meaningful work. One intelligence. Any form." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script type="importmap">{ "imports": { "three": "./lib/three.module.min.js" } }</script>
+<script type="module" src="orb3d.js"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='35%25' cy='35%25'%3E%3Cstop offset='0%25' stop-color='%23a7e5d3'/%3E%3Cstop offset='100%25' stop-color='%23c8b8e0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='14' fill='url(%23g)'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+  <!-- Atmospheric gradient orbs: pure decoration, per design system -->
+  <div class="ambient" aria-hidden="true">
+    <div class="ambient-orb amb-mint"></div>
+    <div class="ambient-orb amb-lavender"></div>
+    <div class="ambient-orb amb-sky"></div>
+  </div>
+
+  <div class="app-shell">
+
+  <!-- ============ SIDEBAR (collapsible) ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-top">
+      <button class="brand" data-view="companion" aria-label="PROTEUS home">
+        <span class="brand-orb" aria-hidden="true"></span>
+        <span class="brand-word sb-label">PROTEUS</span>
+      </button>
+      <button class="sb-toggle" id="sbToggle" aria-label="Collapse sidebar" aria-expanded="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+    </div>
+    <nav class="sb-menu" aria-label="Primary">
+      <button class="sb-link active" data-view="companion">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
+        <span class="sb-label">Companion</span>
+      </button>
+      <button class="sb-link" data-view="projects">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h3l2 2.5h7.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5V7.5"/></svg>
+        <span class="sb-label">Projects</span>
+      </button>
+      <button class="sb-link" data-view="memory">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7.5 4.3v8.4L12 20.5l-7.5-4.3V7.8L12 3.5z"/><circle cx="12" cy="12" r="2.2"/></svg>
+        <span class="sb-label">Memory</span>
+      </button>
+      <button class="sb-link" data-view="settings">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M18.7 5.3l-1.8 1.8M7.1 16.9l-1.8 1.8"/></svg>
+        <span class="sb-label">Settings</span>
+      </button>
+    </nav>
+    <div class="sb-bottom">
+      <span class="presence" id="presence" title="PROTEUS status">
+        <span class="presence-dot" id="presenceDot"></span><span class="sb-label" id="presenceLabel">At rest</span>
+      </span>
+    </div>
+  </aside>
+
+  <main>
+    <!-- ============ COMPANION VIEW ============ -->
+    <section id="view-companion" class="view active">
+      <div class="companion-grid">
+
+        <!-- Stage: orb + conversation + composer -->
+        <div class="stage">
+          <div class="stage-center" id="stageCenter">
+            <div class="orb-float" id="orbFloat" data-state="idle">
+              <div class="orb-shadow" aria-hidden="true"></div>
+              <canvas class="orb-canvas" id="orbCanvas"></canvas>
+              <div class="orb-css" id="orbCss">
+                <div class="orb-layer l0" id="orbLayer0"></div>
+                <div class="orb-layer l1" id="orbLayer1"></div>
+                <div class="orb-swirl" aria-hidden="true"></div>
+                <div class="orb-sheen" aria-hidden="true"></div>
+              </div>
+              <div class="orb-ring r1" aria-hidden="true"></div>
+              <div class="orb-ring r2" aria-hidden="true"></div>
+              <div class="orb-ring r3" aria-hidden="true"></div>
+              <div class="orb-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
+            </div>
+            <div class="orb-meta" id="orbMeta">
+              <span class="orb-state-label" id="orbStateLabel">At rest</span>
+              <span class="orb-state-desc" id="orbStateDesc">Speak or type below — English or Thai.</span>
+            </div>
+          </div>
+
+          <div class="thread" id="thread" aria-live="polite"></div>
+
+          <div class="dock-row" id="dockRow" hidden>
+            <div class="orb-slot" id="slotBottom"></div>
+            <div class="dock-meta" id="dockMeta"></div>
+          </div>
+
+          <div class="chips" id="chips"></div>
+
+          <div class="mode-bar">
+            <div class="mode-seg" role="tablist" aria-label="Interaction mode">
+              <button class="mode-btn active" id="modeVoice" role="tab" aria-selected="true">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                Voice
+              </button>
+              <button class="mode-btn" id="modeChat" role="tab" aria-selected="false">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>
+                Chat
+              </button>
+            </div>
+            <span class="mode-hint" id="modeHint">Voice is the natural front door — hold the mic and just talk.</span>
+          </div>
+
+          <div class="voice-bar" id="voiceBar">
+            <button type="button" class="voice-mic" id="voiceMic" aria-label="Hold to talk">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+            </button>
+            <div class="voice-status">
+              <span class="voice-status-text" id="voiceStatus">Tap the mic and talk — English or Thai.</span>
+              <span class="voice-transcript" id="voiceTranscript"></span>
+            </div>
+            <button type="button" class="stop-btn voice-stop" id="stopBtn" hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              Stop
+            </button>
+          </div>
+
+          <form class="composer" id="composer" autocomplete="off" hidden>
+            <button type="button" class="mic-btn" id="micBtn" aria-label="Speak" title="Speak to PROTEUS">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+            </button>
+            <input class="composer-input" id="composerInput" type="text"
+                   placeholder="Message PROTEUS — English or Thai…" aria-label="Message PROTEUS" />
+            <button type="button" class="stop-btn" id="stopBtnChat" hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              Stop
+            </button>
+            <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+            </button>
+          </form>
+          <p class="composer-note">PROTEUS asks before anything consequential. Press Esc to interrupt at any time.</p>
+        </div>
+
+        <!-- Workbench: visible work + adaptive surface -->
+        <aside class="workbench" id="workbench" aria-label="Current work">
+          <div class="workbench-empty" id="workbenchEmpty">
+            <div class="wb-empty-orb" aria-hidden="true"></div>
+            <p class="wb-empty-title">Nothing in progress</p>
+            <p class="wb-empty-text">When a request involves real work, the goal, steps, evidence, uncertainties, and decisions appear here — before anything consequential happens.</p>
+          </div>
+          <div class="workbench-live" id="workbenchLive" hidden>
+            <div class="wb-head">
+              <div class="wb-head-main">
+                <span class="caption-uppercase">Current work</span>
+                <div class="wb-goal" id="wbGoal"></div>
+              </div>
+              <span class="badge-pill wb-status" id="wbStatus">Active</span>
+            </div>
+            <div class="wb-groups">
+              <section class="wb-group" id="grpPlan" hidden>
+                <header class="wb-group-head"><h4>Plan</h4><span class="wb-count" id="planCount"></span></header>
+                <div class="wb-group-body"><ol class="wb-steps" id="wbSteps"></ol></div>
+              </section>
+              <section class="wb-group" id="grpEvidence" hidden>
+                <header class="wb-group-head"><h4>Evidence in use</h4><span class="wb-count" id="evCount"></span></header>
+                <div class="wb-group-body"><div class="wb-evidence" id="wbEvidence"></div></div>
+              </section>
+              <section class="wb-group" id="grpSurface" hidden>
+                <header class="wb-group-head"><h4>Surface</h4><span class="wb-count" id="surfaceKind"></span></header>
+                <div class="wb-group-body"><div class="wb-surface" id="wbSurface"></div></div>
+              </section>
+              <section class="wb-group" id="grpAction" hidden>
+                <header class="wb-group-head"><h4 id="wbActionLabel">Needs you</h4></header>
+                <div class="wb-group-body" id="wbAction"></div>
+              </section>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============ PROJECTS VIEW ============ -->
+    <section id="view-projects" class="view">
+      <div class="page-narrow" id="projectListPage">
+        <div class="page-head">
+          <p class="caption-uppercase">Your contexts</p>
+          <h1 class="display-lg">Projects</h1>
+          <p class="page-sub">A Project is not a folder. It is the story of what you are trying to accomplish — what is known, what changed, what remains open, and where to continue.</p>
+        </div>
+        <div class="project-grid" id="projectGrid"></div>
+      </div>
+      <div class="page-narrow" id="projectDetailPage" hidden>
+        <button class="btn-tertiary back-btn" id="projectBack">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+          All Projects
+        </button>
+        <div id="projectDetail"></div>
+      </div>
+    </section>
+
+    <!-- ============ MEMORY VIEW ============ -->
+    <section id="view-memory" class="view">
+      <div class="page-narrow">
+        <div class="page-head">
+          <p class="caption-uppercase">You decide what stays</p>
+          <h1 class="display-lg">Memory</h1>
+          <p class="page-sub">PROTEUS remembers only what you choose to keep. Proposed items wait for your review; delete anything at any time.</p>
+        </div>
+        <div class="memory-cols">
+          <section class="card memory-card">
+            <h2 class="title-md">Proposed — awaiting your review</h2>
+            <div id="proposedMemories" class="memory-list"></div>
+          </section>
+          <section class="card memory-card">
+            <h2 class="title-md">Kept by you</h2>
+            <div id="keptMemories" class="memory-list"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS VIEW ============ -->
+    <section id="view-settings" class="view">
+      <div class="page-narrow">
+        <div class="page-head">
+          <p class="caption-uppercase">Yours to control</p>
+          <h1 class="display-lg">Settings</h1>
+          <p class="page-sub">Permissions default to ask-first. PROTEUS explains what it knows, what it inferred, and what it could not verify.</p>
+        </div>
+
+        <section class="card settings-card">
+          <h2 class="title-md">Voice &amp; language</h2>
+          <div class="setting-row">
+            <div><p class="setting-name">Voice input</p><p class="setting-desc">Speak to PROTEUS with your microphone — the Orb listens and responds.</p></div>
+            <button class="toggle on" id="toggleVoice" role="switch" aria-checked="true" aria-label="Voice input"></button>
+          </div>
+          <div class="setting-row">
+            <div><p class="setting-name">Preferred language</p><p class="setting-desc">PROTEUS understands English and Thai, and replies in the language you use.</p></div>
+            <div class="seg" id="langSeg">
+              <button class="seg-btn active" data-lang="en">English</button>
+              <button class="seg-btn" data-lang="th">ไทย</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card settings-card">
+          <h2 class="title-md">Permissions</h2>
+          <div class="setting-row">
+            <div><p class="setting-name">Read notes &amp; project files</p><p class="setting-desc">Allowed. Sources are shown as evidence with confidence.</p></div>
+            <span class="badge-pill">Allowed</span>
+          </div>
+          <div class="setting-row">
+            <div><p class="setting-name">Read connected email</p><p class="setting-desc">Read-only. Every message used appears in the evidence list.</p></div>
+            <span class="badge-pill">Read-only</span>
+          </div>
+          <div class="setting-row">
+            <div><p class="setting-name">Draft messages &amp; documents</p><p class="setting-desc">Drafts are prepared for your review — never sent.</p></div>
+            <span class="badge-pill">Ask first</span>
+          </div>
+          <div class="setting-row">
+            <div><p class="setting-name">Send, purchase, delete</p><p class="setting-desc">Consequential actions always require your explicit approval, every time.</p></div>
+            <span class="badge-pill badge-lock">Always ask</span>
+          </div>
+        </section>
+
+        <section class="card settings-card">
+          <h2 class="title-md">Data on this device</h2>
+          <p class="setting-desc about-text">Kept memories and project stories live on this PC. You can delete any memory at any time from Memory — deletion is immediate and total.</p>
+          <button class="btn-outline" id="resetDemo">Erase all local data</button>
+        </section>
+      </div>
+    </section>
+  </main>
+  </div><!-- /app-shell -->
+
+  <script src="app.js"></script>
+</body>
+</html>

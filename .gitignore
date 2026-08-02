@@ -1,0 +1,13 @@
+desktop/node_modules/
+desktop/dist/
+desktop/build/
+graphify-out/
+desktop/.cache/
+desktop/playwright-report/
+desktop/test-results/
+desktop/.env
+desktop/.env.*
+!desktop/.env.example
+desktop/*.db
+desktop/*.db-*
+.codex/

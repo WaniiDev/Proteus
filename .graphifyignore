@@ -1,0 +1,10 @@
+# Generated knowledge-graph artifacts
+graphify-out/
+
+# Build and dependency output
+desktop/node_modules/
+desktop/dist/
+desktop/build/
+
+# Vendored third-party bundle; Three.js is represented by the package dependency.
+app/lib/three.module.min.js
