@@ -1,5 +1,6 @@
 import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater } from "electrobun/bun";
 import type { OpenRouterModelId, ProteusRPCSchema } from "../shared/contracts";
+import { encodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { TextRuntime } from "./runtime";
 
 const DEV_SERVER_PORT = 5173;
@@ -53,7 +54,7 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
   maxRequestTime: 60_000,
   handlers: {
     requests: {
-      "runtime.bootstrap": async () => runtime.initialize(),
+      "runtime.bootstrap": async () => encodeRuntimeSnapshot(await runtime.initialize()),
       "credentials.connect": async ({ apiKey }) => {
         try {
           await runtime.connect(apiKey);
@@ -227,7 +228,7 @@ const mainWindow = new BrowserWindow({
 });
 
 runtime.onSnapshot((snapshot) => {
-  rpc.send["runtime.changed"](snapshot);
+  rpc.send["runtime.changed"](encodeRuntimeSnapshot(snapshot));
 });
 
 let windowVisible = true;

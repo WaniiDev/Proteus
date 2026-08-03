@@ -47,12 +47,14 @@ import type {
   QueuedFollowUp,
   RuntimeError,
   RuntimeSnapshot,
+  RuntimeSnapshotEnvelope,
   ThreadSummary,
   WorkbenchTask,
 } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
+import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { goalFromMessages, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 
 type View = "companion" | "projects" | "memory" | "settings";
@@ -358,7 +360,23 @@ export default function App() {
   const [, setOrbState] = useState<OrbState>("idle");
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(DEFAULT_SNAPSHOT);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
-  useEffect(() => { const onChanged = (next: RuntimeSnapshot) => setSnapshot(next); rpc.addMessageListener("runtime.changed", onChanged); void rpc.request["runtime.bootstrap"]().then(setSnapshot).catch(() => setSnapshot((current) => ({ ...current, status: "offline", error: { code: "offline", message: "The desktop runtime is not reachable.", retryable: true } }))); return () => rpc.removeMessageListener("runtime.changed", onChanged); }, []);
+  useEffect(() => {
+    const applyEnvelope = (envelope: RuntimeSnapshotEnvelope) => {
+      try {
+        setSnapshot(decodeRuntimeSnapshot(envelope));
+      } catch {
+        setSnapshot((current) => ({
+          ...current,
+          status: "error",
+          error: { code: "unknown", message: "A runtime update could not be decoded. Restart PROTEUS and try again.", retryable: true },
+        }));
+      }
+    };
+    const onChanged = (next: RuntimeSnapshotEnvelope) => applyEnvelope(next);
+    rpc.addMessageListener("runtime.changed", onChanged);
+    void rpc.request["runtime.bootstrap"]().then(applyEnvelope).catch(() => setSnapshot((current) => ({ ...current, status: "offline", error: { code: "offline", message: "The desktop runtime is not reachable.", retryable: true } })));
+    return () => rpc.removeMessageListener("runtime.changed", onChanged);
+  }, []);
   useEffect(() => { const onKeyDown = (event: KeyboardEvent) => { if (event.defaultPrevented) return; if (event.key === "Escape" && snapshot.activeRun) ignoreRpc(rpc.request["chat.abort"]()); }; window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown); }, [snapshot.activeRun]);
   const activeTitle = useMemo(() => snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId)?.title ?? "New chat", [snapshot.threads, snapshot.activeThreadId]);
   const handleNavigate = (next: View) => { setView(next); setSidebarOpen(false); };

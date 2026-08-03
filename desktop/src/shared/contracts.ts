@@ -201,10 +201,26 @@ export const runtimeSnapshotSchema = z.object({
 });
 export type RuntimeSnapshot = z.infer<typeof runtimeSnapshotSchema>;
 
+/**
+ * Runtime snapshots cross Electrobun's native JavaScript-evaluation fallback.
+ * Keep the outer packet ASCII-only and carry the original UTF-8 JSON in Base64.
+ */
+export const runtimeSnapshotEnvelopeSchema = z.object({
+  version: z.literal(1),
+  encoding: z.literal("utf8-base64-json"),
+  data: z.string()
+    .min(1)
+    .regex(
+      /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+      "Runtime snapshot envelope data must be standard Base64",
+    ),
+}).strict();
+export type RuntimeSnapshotEnvelope = z.infer<typeof runtimeSnapshotEnvelopeSchema>;
+
 export const proteusRpcSchema = {
   bun: {
     requests: {
-      "runtime.bootstrap": { params: undefined as undefined, response: {} as RuntimeSnapshot },
+      "runtime.bootstrap": { params: undefined as undefined, response: {} as RuntimeSnapshotEnvelope },
       "credentials.connect": { params: {} as { apiKey: string }, response: {} as { accepted: boolean } },
       "credentials.disconnect": { params: undefined as undefined, response: {} as { accepted: boolean } },
       "models.refresh": { params: undefined as undefined, response: {} as { accepted: boolean } },
@@ -229,7 +245,7 @@ export const proteusRpcSchema = {
   webview: {
     requests: {},
     messages: {
-      "runtime.changed": {} as RuntimeSnapshot,
+      "runtime.changed": {} as RuntimeSnapshotEnvelope,
     },
   },
 } as const;
