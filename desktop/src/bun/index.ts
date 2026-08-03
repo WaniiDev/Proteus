@@ -108,9 +108,18 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { accepted: false };
         }
       },
-      "threads.rename": async ({ title }) => {
+      "threads.select": async ({ threadId }) => {
         try {
-          await runtime.renameActiveThread(title);
+          await runtime.selectThread(threadId);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "threads.rename": async ({ threadId, title }) => {
+        try {
+          await runtime.renameThread(threadId, title);
           return { accepted: true };
         } catch (error) {
           runtime.reportError(error);
@@ -128,11 +137,74 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       },
       "chat.send": async ({ text }) => {
         try {
-          const { runId } = runtime.send(text);
+          const { runId } = await runtime.send(text);
           return { accepted: true, runId };
         } catch (error) {
           runtime.reportError(error);
           return { accepted: false, runId: "" };
+        }
+      },
+      "chat.steer": async ({ text }) => {
+        try {
+          const { runId } = await runtime.steer(text);
+          return { accepted: true, runId };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false, runId: "" };
+        }
+      },
+      "chat.retry": async ({ messageId }) => {
+        try {
+          const { runId } = await runtime.retry(messageId);
+          return { accepted: true, runId };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false, runId: "" };
+        }
+      },
+      "chat.continue": async ({ messageId }) => {
+        try {
+          const { runId } = await runtime.continueFrom(messageId);
+          return { accepted: true, runId };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false, runId: "" };
+        }
+      },
+      "chat.interaction.respond": async ({ toolCallId, response }) => {
+        try {
+          await runtime.respondToInteraction(toolCallId, response);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "chat.queue.update": async ({ id, content }) => {
+        try {
+          await runtime.updateQueuedFollowUp(id, content);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "chat.queue.remove": async ({ id }) => {
+        try {
+          await runtime.removeQueuedFollowUp(id);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "chat.queue.restore": async ({ id }) => {
+        try {
+          await runtime.restoreQueuedFollowUp(id);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
         }
       },
       "chat.abort": async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { openRouterModelIdSchema, runtimeSnapshotSchema } from "./contracts";
+import { openRouterModelIdSchema, pendingInteractionSchema, runtimeSnapshotSchema } from "./contracts";
 
 describe("OpenRouter contracts", () => {
   it("accepts only OpenRouter model IDs", () => {
@@ -16,9 +16,44 @@ describe("OpenRouter contracts", () => {
       threads: [],
       activeThreadId: null,
       messages: [],
+      events: [],
+      interactions: [],
+      resolvedInteractions: [],
+      workbench: {
+        status: "idle",
+        tasks: [],
+        pendingInteractions: [],
+        queuedFollowUps: [],
+        clearedFollowUps: [],
+        tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        activeTools: [],
+      },
       activeRun: null,
       error: null,
     });
     expect(snapshot.selectedModelId).toBe("openrouter/auto");
+  });
+
+  it("keeps resumable interaction and raw plan history data", () => {
+    const interaction = pendingInteractionSchema.parse({
+      id: "tool-1",
+      toolCallId: "tool-1",
+      kind: "submit_plan",
+      title: "Plan review",
+      options: [],
+      plan: {
+        version: 2,
+        title: "Plan review",
+        summary: "A concise summary.",
+        steps: ["Do the work"],
+        raw: "# Plan review\n\nA concise summary.\n\n- Do the work",
+        status: "approved",
+        feedback: "Looks good",
+      },
+      status: "resolving",
+      createdAt: new Date().toISOString(),
+    });
+    expect(interaction.status).toBe("resolving");
+    expect(interaction.plan?.raw).toContain("Do the work");
   });
 });
