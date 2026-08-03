@@ -1,43 +1,24 @@
-import { describe, expect, test } from "bun:test";
-import { modelSelectionSchema, proteusCommandSchema, proteusEventSchema } from "./contracts";
+import { describe, expect, it } from "bun:test";
+import { openRouterModelIdSchema, runtimeSnapshotSchema } from "./contracts";
 
-describe("PROTEUS shared contracts", () => {
-  test("accepts a model selection used by Settings", () => {
-    const result = modelSelectionSchema.safeParse({
-      route: "openrouter-api",
-      provider: "Anthropic",
-      model: "anthropic/claude-sonnet-5",
-      thinking: "high",
-    });
-
-    expect(result.success).toBe(true);
+describe("OpenRouter contracts", () => {
+  it("accepts only OpenRouter model IDs", () => {
+    expect(openRouterModelIdSchema.parse("openrouter/auto")).toBe("openrouter/auto");
+    expect(() => openRouterModelIdSchema.parse("openai/gpt-4.1")).toThrow();
   });
 
-  test("rejects an empty user message command", () => {
-    const result = proteusCommandSchema.safeParse({
-      type: "message.send",
-      text: "",
-      conversationId: "conversation-1",
+  it("validates a complete runtime snapshot", () => {
+    const snapshot = runtimeSnapshotSchema.parse({
+      status: "ready",
+      credential: { configured: true, verified: true },
+      models: [{ id: "openrouter/auto", rawId: "auto", name: "Auto Router" }],
+      selectedModelId: "openrouter/auto",
+      threads: [],
+      activeThreadId: null,
+      messages: [],
+      activeRun: null,
+      error: null,
     });
-
-    expect(result.success).toBe(false);
-  });
-
-  test("accepts an interrupt command", () => {
-    const result = proteusCommandSchema.safeParse({
-      type: "run.interrupt",
-      conversationId: "conversation-1",
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  test("rejects unknown Orb states", () => {
-    const result = proteusEventSchema.safeParse({
-      type: "orb.state",
-      state: "unknown",
-    });
-
-    expect(result.success).toBe(false);
+    expect(snapshot.selectedModelId).toBe("openrouter/auto");
   });
 });

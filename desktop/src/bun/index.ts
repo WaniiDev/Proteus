@@ -1,7 +1,38 @@
-import { BrowserWindow, GlobalShortcut, Tray, Updater } from "electrobun/bun";
+import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater } from "electrobun/bun";
+import type { OpenRouterModelId, ProteusRPCSchema } from "../shared/contracts";
+import { TextRuntime } from "./runtime";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
+const WINDOW_MARGIN = 24;
+const DEFAULT_WINDOW_FRAME = {
+  width: 1440,
+  height: 760,
+  x: 120,
+  y: 40,
+};
+const runtime = new TextRuntime();
+
+function getInitialWindowFrame() {
+  try {
+    const { workArea } = Screen.getPrimaryDisplay();
+    if (workArea.width > 0 && workArea.height > 0) {
+      const width = Math.min(DEFAULT_WINDOW_FRAME.width, workArea.width - WINDOW_MARGIN * 2);
+      const height = Math.min(DEFAULT_WINDOW_FRAME.height, workArea.height - WINDOW_MARGIN * 2);
+
+      return {
+        width,
+        height,
+        x: workArea.x + Math.max(WINDOW_MARGIN, Math.floor((workArea.width - width) / 2)),
+        y: workArea.y + Math.max(WINDOW_MARGIN, Math.floor((workArea.height - height) / 2)),
+      };
+    }
+  } catch (error) {
+    console.warn("Unable to read the primary display work area; using the default window frame.", error);
+  }
+
+  return DEFAULT_WINDOW_FRAME;
+}
 
 async function getMainViewUrl(): Promise<string> {
   const channel = await Updater.localInfo.channel();
@@ -18,16 +49,113 @@ async function getMainViewUrl(): Promise<string> {
   return "views://mainview/index.html";
 }
 
+const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
+  maxRequestTime: 60_000,
+  handlers: {
+    requests: {
+      "runtime.bootstrap": async () => runtime.initialize(),
+      "credentials.connect": async ({ apiKey }) => {
+        try {
+          await runtime.connect(apiKey);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "credentials.disconnect": async () => {
+        try {
+          await runtime.disconnect();
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "models.refresh": async () => {
+        try {
+          await runtime.refreshModels();
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "models.select": async ({ modelId }) => {
+        try {
+          await runtime.selectModel(modelId as OpenRouterModelId);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "threads.create": async (params) => {
+        try {
+          const threadId = await runtime.createThread(params?.title);
+          return { threadId };
+        } catch (error) {
+          runtime.reportError(error);
+          return { threadId: "" };
+        }
+      },
+      "threads.switch": async ({ threadId }) => {
+        try {
+          await runtime.switchThread(threadId);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "threads.rename": async ({ title }) => {
+        try {
+          await runtime.renameActiveThread(title);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "threads.delete": async ({ threadId }) => {
+        try {
+          await runtime.deleteThread(threadId);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "chat.send": async ({ text }) => {
+        try {
+          const { runId } = runtime.send(text);
+          return { accepted: true, runId };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false, runId: "" };
+        }
+      },
+      "chat.abort": async () => {
+        runtime.abort();
+        return { accepted: true };
+      },
+    },
+    messages: {},
+  },
+});
+
 const mainWindow = new BrowserWindow({
   title: "PROTEUS",
   url: await getMainViewUrl(),
-  frame: {
-    width: 1440,
-    height: 900,
-    x: 120,
-    y: 80,
-  },
+  // Keep the initial window inside the OS work area, including scaled Windows
+  // displays where a fixed frame can otherwise extend behind the taskbar.
+  frame: getInitialWindowFrame(),
   titleBarStyle: "hidden",
+  rpc,
+});
+
+runtime.onSnapshot((snapshot) => {
+  rpc.send["runtime.changed"](snapshot);
 });
 
 let windowVisible = true;
