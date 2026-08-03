@@ -13,15 +13,10 @@ import {
 import {
   ArrowDown,
   ArrowRight,
-  Box,
   Check,
   ChevronDown,
-  ChevronLeft,
-  Circle,
   Copy,
-  Folder,
   KeyRound,
-  MessageSquarePlus,
   PanelRight,
   Pencil,
   Play,
@@ -30,11 +25,9 @@ import {
   RotateCcw,
   Search,
   Send,
-  Settings,
   Square,
   Trash2,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -48,6 +41,7 @@ import type {
   RuntimeError,
   RuntimeSnapshot,
   RuntimeSnapshotEnvelope,
+  ToolApproval,
   ThreadSummary,
   WorkbenchTask,
 } from "../shared/contracts";
@@ -56,35 +50,32 @@ import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
 import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { goalFromMessages, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
-
-type View = "companion" | "projects" | "memory" | "settings";
+import { Sidebar, type View } from "./Sidebar";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
+  revision: 0,
   status: "booting",
   credential: { configured: false, verified: false },
   models: [{ id: "openrouter/auto", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] }],
   selectedModelId: "openrouter/auto",
   threads: [],
   activeThreadId: null,
+  retryMessageId: null,
   messages: [],
   events: [],
   interactions: [],
   resolvedInteractions: [],
+  toolApproval: null,
   workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUps: [], clearedFollowUps: [], tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, activeTools: [] },
   activeRun: null,
   error: null,
 };
 
-type IconName = "companion" | "projects" | "memory" | "settings" | "send" | "stop" | "chevron" | "down" | "plus" | "trash" | "refresh" | "key" | "edit" | "copy" | "retry" | "play" | "close" | "latest" | "steer" | "panel" | "search" | "check" | "new-chat" | "arrow-right";
+type IconName = "send" | "stop" | "down" | "plus" | "trash" | "refresh" | "key" | "edit" | "copy" | "retry" | "play" | "close" | "latest" | "steer" | "panel" | "search" | "check" | "arrow-right";
 
-const ICONS: Record<IconName, LucideIcon> = {
-  companion: Circle,
-  projects: Folder,
-  memory: Box,
-  settings: Settings,
+const ICONS = {
   send: Send,
   stop: Square,
-  chevron: ChevronLeft,
   down: ChevronDown,
   plus: Plus,
   trash: Trash2,
@@ -100,9 +91,8 @@ const ICONS: Record<IconName, LucideIcon> = {
   panel: PanelRight,
   search: Search,
   check: Check,
-  "new-chat": MessageSquarePlus,
   "arrow-right": ArrowRight,
-};
+} satisfies Record<IconName, (typeof Send)>;
 
 function Icon({ name, size = 18, className }: { name: IconName; size?: number; className?: string }) {
   const Glyph = ICONS[name];
@@ -126,20 +116,6 @@ const Orb = forwardRef<OrbHandle, { state: OrbState }>(function Orb({ state }, r
   useEffect(() => { controllerRef.current?.setState(state); }, [state]);
   return <div className="orb-float" ref={floatRef} data-state={state}><div className="orb-shadow" aria-hidden="true" /><canvas className="orb-canvas" ref={canvasRef} aria-hidden="true" /><div className="orb-css" aria-hidden="true"><div className="orb-layer l0" /><div className="orb-layer l1" /><div className="orb-swirl" /><div className="orb-sheen" /></div><div className="orb-ring r1" aria-hidden="true" /><div className="orb-ring r2" aria-hidden="true" /><div className="orb-ring r3" aria-hidden="true" /><div className="orb-orbit" aria-hidden="true"><i /><i /><i /></div></div>;
 });
-
-function BrandMark() {
-  return <span className="brand-mark" aria-hidden="true"><span className="brand-mark-core" /></span>;
-}
-
-function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: { view: View; open: boolean; disabled: boolean; onView: (view: View) => void; onToggle: () => void; onCreate: () => void }) {
-  const links: Array<{ view: View; label: string; icon: IconName }> = [
-    { view: "companion", label: "Companion", icon: "companion" },
-    { view: "projects", label: "Projects", icon: "projects" },
-    { view: "memory", label: "Memory", icon: "memory" },
-  ];
-  const navigate = (next: View) => onView(next);
-  return <aside className={`sidebar${open ? " sidebar-open" : ""}`} aria-label="Main navigation"><div className="sidebar-panel"><div className="sb-top window-drag-region electrobun-webkit-app-region-drag"><button className="brand electrobun-webkit-app-region-no-drag" type="button" onClick={() => navigate("companion")} aria-label="PROTEUS home" title="PROTEUS home"><BrandMark /><span className="brand-word sb-label">PROTEUS</span></button><button className="sb-toggle electrobun-webkit-app-region-no-drag" type="button" onClick={onToggle} aria-label={open ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={open}><Icon name="chevron" size={16} /></button></div><button className="sb-new electrobun-webkit-app-region-no-drag" type="button" onClick={onCreate} disabled={disabled} title={disabled ? "Available when the current response finishes" : "New chat"}><Icon name="new-chat" size={18} /><span className="sb-label">New chat</span></button><nav className="sb-menu" aria-label="Primary">{links.map((link) => <button className={`sb-link${view === link.view ? " active" : ""}`} type="button" key={link.view} onClick={() => navigate(link.view)} aria-current={view === link.view ? "page" : undefined} title={link.label}><Icon name={link.icon} /><span className="sb-label">{link.label}</span></button>)}</nav><div className="sb-bottom"><button className={`sb-link${view === "settings" ? " active" : ""}`} type="button" onClick={() => navigate("settings")} aria-current={view === "settings" ? "page" : undefined} title="Settings"><Icon name="settings" /><span className="sb-label">Settings</span></button></div></div></aside>;
-}
 
 function ConversationPopover({ snapshot, open, disabled, initialEditingId, onClose, onCreate, onSwitch, onRename, onDelete }: { snapshot: RuntimeSnapshot; open: boolean; disabled: boolean; initialEditingId?: string | null; onClose: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDelete: (thread: ThreadSummary) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -231,12 +207,13 @@ function useConversationOrbState(snapshot: RuntimeSnapshot): { state: OrbState; 
     const clearTimers = () => { timersRef.current.forEach((timer) => window.clearTimeout(timer)); timersRef.current = []; transientRef.current = false; };
     const sequence = (steps: Array<{ state: OrbState; duration: number }>) => { clearTimers(); transientRef.current = true; let elapsed = 0; setState(steps[0].state); steps.slice(1).forEach((step, index) => { elapsed += steps[index].duration; timersRef.current.push(window.setTimeout(() => { setState(step.state); if (index === steps.length - 2) { transientRef.current = false; timersRef.current = []; } }, elapsed)); }); };
     if (threadChanged) clearTimers();
-    if (activeRun?.status === "running") { clearTimers(); setState(snapshot.messages.some((message) => message.status === "streaming") ? "working" : "thinking"); }
+    if (snapshot.toolApproval || snapshot.workbench.status === "waiting") { clearTimers(); setState("waiting"); }
+    else if (activeRun?.status === "running") { clearTimers(); setState(snapshot.messages.some((message) => message.status === "streaming") ? "working" : "thinking"); }
     else if (!threadChanged && previous?.runStatus === "running" && previous.runId) {
       if (snapshot.error?.code === "aborted" || activeRun?.status === "aborted") sequence([{ state: "interrupted", duration: 1400 }, { state: "recovery", duration: 1300 }, { state: "idle", duration: 0 }]);
       else if (!snapshot.error) { setPulseVersion((value) => value + 1); sequence([{ state: "done", duration: 1400 }, { state: "idle", duration: 0 }]); }
       else { clearTimers(); setState("recovery"); }
-    } else if (!transientRef.current) setState(snapshot.error?.code === "aborted" || snapshot.workbench.status === "waiting" ? "idle" : snapshot.error ? "recovery" : "idle");
+    } else if (!transientRef.current) setState(snapshot.error ? "recovery" : "idle");
     previousRef.current = { threadId: snapshot.activeThreadId, runId: activeRun?.runId ?? null, runStatus: activeRun?.status ?? null };
   }, [snapshot]);
   useEffect(() => () => timersRef.current.forEach((timer) => window.clearTimeout(timer)), []);
@@ -304,7 +281,7 @@ function Workbench({ snapshot, open, onClose, onQueueUpdate, onQueueRemove, onQu
   return <><button type="button" className="workbench-scrim" onClick={onClose} aria-label="Close Workbench" /><aside className="workbench" aria-label="Conversation Workbench"><div className="workbench-live"><div className="wb-head"><div className="wb-head-main"><span className="caption-uppercase">Current work</span><h2>{wb.goal || goalFromMessages(snapshot.messages)}</h2></div><div className="wb-head-actions"><span className={`badge-pill wb-status ${wb.status}`}>{statusLabel}</span><button className="icon-btn wb-close" type="button" onClick={onClose} aria-label="Close Workbench"><Icon name="close" size={16} /></button></div></div><div className="wb-groups">{attentionItems.length > 0 && <section className="wb-group wb-attention"><div className="wb-group-title"><span>Attention required</span><b>{attentionItems.length}</b></div>{attentionItems.map((item) => <button type="button" className="wb-link" key={item.id} onClick={() => onJump(item.id)}>{item.kind === "submit_plan" ? "Plan approval" : item.title}<Icon name="arrow-right" size={13} /></button>)}</section>}{wb.tasks.length > 0 && <section className="wb-group"><div className="wb-group-title"><span>Plan & tasks</span><span>{wb.tasks.filter((task) => task.status === "completed").length}/{wb.tasks.length}</span></div><ul className="wb-steps">{wb.tasks.map((task: WorkbenchTask) => <li key={task.id} className={task.status}><span className="task-check">{task.status === "completed" ? <Icon name="check" size={11} /> : task.status === "in_progress" ? "•" : ""}</span><span>{task.status === "in_progress" ? task.activeForm : task.content}</span></li>)}</ul></section>}{(snapshot.activeRun || wb.activeTools.length > 0) && <section className="wb-group"><div className="wb-group-title"><span>Current activity</span><span className={`wb-status ${wb.status}`}>{wb.status}</span></div>{wb.activeTools.length > 0 ? <ul className="wb-tools">{wb.activeTools.map((tool) => <li key={tool.id}><span className="tool-pulse" />{tool.name}<small>{tool.status}</small></li>)}</ul> : <p className="wb-muted">{wb.status === "waiting" ? "Waiting for your response." : "PROTEUS is working through this turn."}</p>}</section>}{wb.queuedFollowUps.length > 0 && <section className="wb-group"><div className="wb-group-title"><span>Queued follow-ups</span><b>{wb.queuedFollowUps.length}</b></div><ol className="wb-queue">{wb.queuedFollowUps.map((item) => <li key={item.id}>{editingId === item.id ? <input autoFocus defaultValue={item.content} onBlur={(event) => { onQueueUpdate({ ...item, content: event.target.value }); setEditingId(null); }} onKeyDown={(event) => { if (event.key === "Enter") { onQueueUpdate({ ...item, content: event.currentTarget.value }); setEditingId(null); } if (event.key === "Escape") setEditingId(null); }} /> : <><span>{item.content}</span><span className="wb-row-actions"><button type="button" onClick={() => setEditingId(item.id)}>Edit</button><button type="button" onClick={() => onQueueRemove(item.id)}>Remove</button></span></>}</li>)}</ol></section>}{wb.clearedFollowUps.length > 0 && <section className="wb-group"><div className="wb-group-title"><span>Cleared by steering</span><span>{wb.clearedFollowUps.length}</span></div><ul className="wb-cleared">{wb.clearedFollowUps.slice(-4).map((item) => <li key={item.id}><span>{item.content}</span><button type="button" onClick={() => onQueueRestore(item.id)}>Restore</button></li>)}</ul></section>}{totalTokens > 0 && <details className="wb-session"><summary><span>Session details</span><ChevronDown size={14} strokeWidth={1.75} /></summary><dl><div><dt>Prompt tokens</dt><dd>{wb.tokenUsage.promptTokens.toLocaleString()}</dd></div><div><dt>Completion</dt><dd>{wb.tokenUsage.completionTokens.toLocaleString()}</dd></div><div><dt>Total</dt><dd>{totalTokens.toLocaleString()}</dd></div></dl></details>}</div></div></aside></>;
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onQueueUpdate, onQueueRemove, onQueueRestore }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteer: () => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => void; onQueueUpdate: (item: QueuedFollowUp) => void; onQueueRemove: (id: string) => void; onQueueRestore: (id: string) => void }) {
+function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onToolApproval, onQueueUpdate, onQueueRemove, onQueueRestore }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteer: () => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => void; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean>; onQueueUpdate: (item: QueuedFollowUp) => void; onQueueRemove: (id: string) => void; onQueueRestore: (id: string) => void }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -321,7 +298,7 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
-  const liveWorkbenchSignal = snapshot.workbench.pendingInteractions.length > 0 || snapshot.workbench.activeTools.length > 0 || snapshot.workbench.tasks.some((task) => task.status !== "completed") || snapshot.workbench.queuedFollowUps.length > 0 || snapshot.workbench.status === "waiting";
+  const liveWorkbenchSignal = !!snapshot.toolApproval || snapshot.workbench.pendingInteractions.length > 0 || snapshot.workbench.activeTools.length > 0 || snapshot.workbench.tasks.some((task) => task.status !== "completed") || snapshot.workbench.queuedFollowUps.length > 0 || snapshot.workbench.status === "waiting";
   const titleTriggerClose = () => { setSessionsOpen(false); setRenameRequest(null); };
   useEffect(() => { onOrbState(state); }, [onOrbState, state]);
   useEffect(() => { if (!snapshot.activeThreadId || (!snapshot.messages.length && !snapshot.activeRun)) return; setDockedThreads((current) => current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)); }, [snapshot.activeRun, snapshot.messages.length, snapshot.activeThreadId]);
@@ -336,11 +313,20 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   useEffect(() => {
     if (!sessionsOpen) titleRef.current?.focus();
   }, [sessionsOpen]);
+  useEffect(() => {
+    if (!workbenchOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setWorkbenchOpen(false); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [workbenchOpen]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
+  const retryTarget = snapshot.retryMessageId ?? lastErrorMessage?.id;
   const jumpToInteraction = (id: string) => { document.getElementById(`interaction-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); };
-  return <section className="view active"><div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag"><div className="chat-title-copy"><p className="caption-uppercase">Active conversation</p><button ref={titleRef} className="chat-title-trigger electrobun-webkit-app-region-no-drag" type="button" onClick={() => { setRenameRequest(null); setSessionsOpen((value) => !value); }} onDoubleClick={() => { if (!snapshot.activeThreadId || snapshot.activeRun) return; setRenameRequest(snapshot.activeThreadId); setSessionsOpen(true); }} aria-expanded={sessionsOpen} aria-haspopup="dialog"><h1 className="chat-title">{activeTitle}</h1><Icon name="down" size={18} /></button></div><div className="chat-title-actions electrobun-webkit-app-region-no-drag">{workbenchHasContent && <button type="button" className={`title-icon-button${workbenchOpen ? " active" : ""}`} onClick={() => setWorkbenchOpen((value) => !value)} aria-expanded={workbenchOpen} aria-label={workbenchOpen ? "Close Workbench" : "Open Workbench"} title={workbenchOpen ? "Close Workbench" : "Open Workbench"}><Icon name="panel" size={17} />{snapshot.workbench.pendingInteractions.length > 0 && <span className="title-attention-badge">{snapshot.workbench.pendingInteractions.length}</span>}</button>}</div><ConversationPopover snapshot={snapshot} open={sessionsOpen} disabled={snapshot.activeRun !== null} initialEditingId={renameRequest} onClose={titleTriggerClose} onCreate={onCreate} onSwitch={onSwitch} onRename={onRename} onDelete={onDeleteRequest} /></div><div className={`text-chat-layout ${workbenchOpen ? "workbench-visible" : ""}`}><div className={`companion-grid ${workbenchOpen ? "workbench-open" : "workbench-closed"}`}><div className="stage">{runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}<OrbPresence state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} /><div className="thread" ref={threadRef} aria-live="polite">{snapshot.messages.map((message) => <MessageView key={message.id} message={message} onRetry={message.status === "error" ? () => onRetry(message.id) : undefined} onContinue={message.status === "interrupted" ? () => onContinue(message.id) : undefined} />)}{snapshot.events.map((event: ChatEvent) => <div className="chat-event" key={event.id}>{event.text}</div>)}{snapshot.interactions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} />)}{snapshot.resolvedInteractions.length > 0 && <details className="resolved-interactions"><summary>Previous decisions ({snapshot.resolvedInteractions.length})</summary>{snapshot.resolvedInteractions.slice(-8).map((item) => <ResolvedInteraction key={`${item.id}-${item.status}`} interaction={item} />)}</details>}{snapshot.error && snapshot.error.code !== "aborted" && <div className="run-error-card"><div><strong>That turn did not finish.</strong><p>{snapshot.error.message}</p></div>{snapshot.error.retryable && lastErrorMessage && <button type="button" className="btn-outline sm" onClick={() => onRetry(lastErrorMessage.id)}><Icon name="retry" size={14} /> Retry</button>}</div>}{snapshot.error?.code === "aborted" && <div className="run-stopped-note">Response stopped. You can continue from the partial answer above.</div>}</div>{showLatest && <button type="button" className="latest-btn" onClick={jumpLatest}><Icon name="latest" size={14} /> Latest</button>}<div className="chat-context-row"><span>{selectedModel?.name ?? snapshot.selectedModelId}</span><span>via OpenRouter</span><span className={`runtime-dot ${snapshot.credential.verified ? "ok" : "off"}`} />{snapshot.credential.verified ? "Connected" : <button className="btn-tertiary" type="button" onClick={onSettings}>Connect a key</button>}</div><form className={`composer${canChat ? "" : " disabled"}`} onSubmit={onSend} autoComplete="off"><input className="composer-input" value={input} onChange={(event) => { setInput(event.target.value); orbRef.current?.nudge(); }} placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message PROTEUS…" : "Connect OpenRouter in Settings to chat"} aria-label="Message PROTEUS" disabled={!canChat} maxLength={32_000} />{runningForSelected && <button type="button" className="stop-btn composer-stop" onClick={onAbort}><Icon name="stop" size={14} /> Stop</button>}{runningForSelected && <button type="button" className="steer-btn" onClick={onSteer} disabled={!input.trim()}><Icon name="steer" size={14} /> Steer</button>}<button className="send-btn" type="submit" aria-label="Send" disabled={!canChat || !input.trim()}><Icon name="send" size={18} /></button></form></div><Workbench snapshot={snapshot} open={workbenchOpen} onClose={() => setWorkbenchOpen(false)} onQueueUpdate={onQueueUpdate} onQueueRemove={onQueueRemove} onQueueRestore={onQueueRestore} onJump={jumpToInteraction} /></div></div></section>;
+  return <section className="view active companion-view"><div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag"><div className="chat-title-copy"><p className="caption-uppercase">Active conversation</p><button ref={titleRef} className="chat-title-trigger electrobun-webkit-app-region-no-drag" type="button" onClick={() => { setRenameRequest(null); setSessionsOpen((value) => !value); }} onDoubleClick={() => { if (!snapshot.activeThreadId || snapshot.activeRun) return; setRenameRequest(snapshot.activeThreadId); setSessionsOpen(true); }} aria-expanded={sessionsOpen} aria-haspopup="dialog"><h1 className="chat-title">{activeTitle}</h1><Icon name="down" size={18} /></button></div><div className="chat-title-actions electrobun-webkit-app-region-no-drag">{workbenchHasContent && <button type="button" className={`title-icon-button${workbenchOpen ? " active" : ""}`} onClick={() => setWorkbenchOpen((value) => !value)} aria-expanded={workbenchOpen} aria-label={workbenchOpen ? "Close Workbench" : "Open Workbench"} title={workbenchOpen ? "Close Workbench" : "Open Workbench"}><Icon name="panel" size={17} />{(snapshot.workbench.pendingInteractions.length > 0 || snapshot.toolApproval) && <span className="title-attention-badge">{snapshot.workbench.pendingInteractions.length + (snapshot.toolApproval ? 1 : 0)}</span>}</button>}</div><ConversationPopover snapshot={snapshot} open={sessionsOpen} disabled={snapshot.activeRun !== null} initialEditingId={renameRequest} onClose={titleTriggerClose} onCreate={onCreate} onSwitch={onSwitch} onRename={onRename} onDelete={onDeleteRequest} /></div><div className={`text-chat-layout ${workbenchOpen ? "workbench-visible" : ""}`}><div className={`companion-grid ${workbenchOpen ? "workbench-open" : "workbench-closed"}`}><div className="stage">{runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}<OrbPresence state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} /><div className="thread" ref={threadRef} aria-live="polite">{snapshot.messages.map((message) => <MessageView key={message.id} message={message} onRetry={message.status === "error" ? () => onRetry(message.id) : undefined} onContinue={message.status === "interrupted" ? () => onContinue(message.id) : undefined} />)}{snapshot.events.map((event: ChatEvent) => <div className="chat-event" key={event.id}>{event.text}</div>)}{snapshot.interactions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} />)}{snapshot.toolApproval && <ToolApprovalCard approval={snapshot.toolApproval} onRespond={onToolApproval} />}{snapshot.resolvedInteractions.length > 0 && <details className="resolved-interactions"><summary>Previous decisions ({snapshot.resolvedInteractions.length})</summary>{snapshot.resolvedInteractions.slice(-8).map((item) => <ResolvedInteraction key={`${item.id}-${item.status}`} interaction={item} />)}</details>}{snapshot.error && snapshot.error.code !== "aborted" && <div className="run-error-card"><div><strong>That turn did not finish.</strong><p>{snapshot.error.message}</p></div>{snapshot.error.retryable && retryTarget && <button type="button" className="btn-outline sm" onClick={() => onRetry(retryTarget)}><Icon name="retry" size={14} /> Retry</button>}</div>}{snapshot.error?.code === "aborted" && <div className="run-stopped-note">Response stopped. You can continue from the partial answer above.</div>}</div>{showLatest && <button type="button" className="latest-btn" onClick={jumpLatest}><Icon name="latest" size={14} /> Latest</button>}<div className="chat-context-row"><span>{selectedModel?.name ?? snapshot.selectedModelId}</span><span>via OpenRouter</span><span className={`runtime-dot ${snapshot.credential.verified ? "ok" : "off"}`} />{snapshot.credential.verified ? "Connected" : <button className="btn-tertiary" type="button" onClick={onSettings}>Connect a key</button>}</div><form className={`composer${canChat ? "" : " disabled"}`} onSubmit={onSend} autoComplete="off"><input className="composer-input" value={input} onChange={(event) => { setInput(event.target.value); orbRef.current?.nudge(); }} placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message PROTEUS…" : "Connect OpenRouter in Settings to chat"} aria-label="Message PROTEUS" disabled={!canChat} maxLength={32_000} />{runningForSelected && <button type="button" className="stop-btn composer-stop" onClick={onAbort}><Icon name="stop" size={14} /> Stop</button>}{runningForSelected && <button type="button" className="steer-btn" onClick={onSteer} disabled={!input.trim()}><Icon name="steer" size={14} /> Steer</button>}<button className="send-btn" type="submit" aria-label="Send" disabled={!canChat || !input.trim()}><Icon name="send" size={18} /></button></form></div><Workbench snapshot={snapshot} open={workbenchOpen} onClose={() => setWorkbenchOpen(false)} onQueueUpdate={onQueueUpdate} onQueueRemove={onQueueRemove} onQueueRestore={onQueueRestore} onJump={jumpToInteraction} /></div></div></section>;
 }
 
 function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onRefresh, onSelectModel }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: () => void; onRefresh: () => void; onSelectModel: (modelId: OpenRouterModel["id"]) => void }) {
@@ -359,11 +345,16 @@ export default function App() {
   const [apiKey, setApiKey] = useState("");
   const [, setOrbState] = useState<OrbState>("idle");
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(DEFAULT_SNAPSHOT);
+  const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
+  const latestRevisionRef = useRef(0);
   useEffect(() => {
     const applyEnvelope = (envelope: RuntimeSnapshotEnvelope) => {
       try {
-        setSnapshot(decodeRuntimeSnapshot(envelope));
+        const next = decodeRuntimeSnapshot(envelope);
+        if (next.revision <= latestRevisionRef.current) return;
+        latestRevisionRef.current = next.revision;
+        setSnapshot(next);
       } catch {
         setSnapshot((current) => ({
           ...current,
@@ -377,14 +368,53 @@ export default function App() {
     void rpc.request["runtime.bootstrap"]().then(applyEnvelope).catch(() => setSnapshot((current) => ({ ...current, status: "offline", error: { code: "offline", message: "The desktop runtime is not reachable.", retryable: true } })));
     return () => rpc.removeMessageListener("runtime.changed", onChanged);
   }, []);
+  useEffect(() => {
+    if (localMessages.size === 0) return;
+    setLocalMessages((current) => {
+      const next = new Map(current);
+      for (const id of next.keys()) if (snapshot.messages.some((message) => message.id === id) || snapshot.activeThreadId === null) next.delete(id);
+      return next.size === current.size ? current : next;
+    });
+  }, [localMessages.size, snapshot.activeThreadId, snapshot.messages]);
   useEffect(() => { const onKeyDown = (event: KeyboardEvent) => { if (event.defaultPrevented) return; if (event.key === "Escape" && snapshot.activeRun) ignoreRpc(rpc.request["chat.abort"]()); }; window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown); }, [snapshot.activeRun]);
   const activeTitle = useMemo(() => snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId)?.title ?? "New chat", [snapshot.threads, snapshot.activeThreadId]);
   const handleNavigate = (next: View) => { setView(next); setSidebarOpen(false); };
-  const handleSend = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const text = input.trim(); if (!text) return; ignoreRpc(rpc.request["chat.send"]({ text }).then((result) => { if (result.accepted) setInput(""); })); };
+  const handleSend = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || !snapshot.activeThreadId) return;
+    const clientMessageId = crypto.randomUUID();
+    setLocalMessages((current) => new Map(current).set(clientMessageId, { id: clientMessageId, role: "user", text, status: "complete", createdAt: new Date().toISOString() }));
+    setInput("");
+    void rpc.request["chat.send"]({ text, clientMessageId }).then((result) => {
+      if (result.accepted) return;
+      setLocalMessages((current) => { const next = new Map(current); next.delete(clientMessageId); return next; });
+      setInput(text);
+    }).catch(() => {
+      setLocalMessages((current) => { const next = new Map(current); next.delete(clientMessageId); return next; });
+      setInput(text);
+    });
+  };
   const handleSteer = () => { const text = input.trim(); if (!text) return; ignoreRpc(rpc.request["chat.steer"]({ text }).then((result) => { if (result.accepted) setInput(""); })); };
   const handleConnect = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const candidate = apiKey; setApiKey(""); ignoreRpc(rpc.request["credentials.connect"]({ apiKey: candidate })); };
   const handleCreate = () => { if (snapshot.activeRun) return; setSidebarOpen(false); ignoreRpc(rpc.request["threads.create"]({ title: "New chat" })); };
   const handleRename = (threadId: string, title: string) => { ignoreRpc(rpc.request["threads.rename"]({ threadId, title })); };
   const handleDeleteConfirm = () => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); ignoreRpc(rpc.request["threads.delete"]({ threadId: target.id })); };
-  return <><div className="ambient" aria-hidden="true"><div className="ambient-orb amb-mint" /><div className="ambient-orb amb-lavender" /><div className="ambient-orb amb-sky" /></div><div className="app-shell"><Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} />{sidebarOpen && <button type="button" className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" /> }<main>{view === "companion" && <Companion snapshot={snapshot} activeTitle={activeTitle} input={input} setInput={setInput} onSend={handleSend} onSteer={handleSteer} onAbort={() => ignoreRpc(rpc.request["chat.abort"]())} onSettings={() => handleNavigate("settings")} onCreate={handleCreate} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onDeleteRequest={setDeleteTarget} onOrbState={setOrbState} onRetry={(messageId) => ignoreRpc(rpc.request["chat.retry"]({ messageId }))} onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))} onInteraction={(toolCallId, response) => ignoreRpc(rpc.request["chat.interaction.respond"]({ toolCallId, response }))} onQueueUpdate={(item) => ignoreRpc(rpc.request["chat.queue.update"]({ id: item.id, content: item.content }))} onQueueRemove={(id) => ignoreRpc(rpc.request["chat.queue.remove"]({ id }))} onQueueRestore={(id) => ignoreRpc(rpc.request["chat.queue.restore"]({ id }))} />}{view === "projects" && <Projects />}{view === "memory" && <Memory />}{view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={() => ignoreRpc(rpc.request["credentials.disconnect"]())} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} />}</main></div>{deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}</>;
+  const renderedSnapshot = useMemo<RuntimeSnapshot>(() => {
+    if (localMessages.size === 0) return snapshot;
+    const messages = [...snapshot.messages];
+    for (const message of localMessages.values()) if (!messages.some((item) => item.id === message.id)) messages.push(message);
+    messages.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return { ...snapshot, messages };
+  }, [localMessages, snapshot]);
+  return <><div className="ambient" aria-hidden="true"><div className="ambient-orb amb-mint" /><div className="ambient-orb amb-lavender" /><div className="ambient-orb amb-sky" /></div><div className="app-shell"><Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} />{sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" /> }<main>{view === "companion" && <Companion snapshot={renderedSnapshot} activeTitle={activeTitle} input={input} setInput={setInput} onSend={handleSend} onSteer={handleSteer} onAbort={() => ignoreRpc(rpc.request["chat.abort"]())} onSettings={() => handleNavigate("settings")} onCreate={handleCreate} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onDeleteRequest={setDeleteTarget} onOrbState={setOrbState} onRetry={(messageId) => ignoreRpc(rpc.request["chat.retry"]({ messageId }))} onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))} onInteraction={(toolCallId, response) => ignoreRpc(rpc.request["chat.interaction.respond"]({ toolCallId, response }))} onToolApproval={(toolCallId, approved) => rpc.request["chat.tool-approval.respond"]({ toolCallId, approved }).then((result) => result.accepted).catch(() => false)} onQueueUpdate={(item) => ignoreRpc(rpc.request["chat.queue.update"]({ id: item.id, content: item.content }))} onQueueRemove={(id) => ignoreRpc(rpc.request["chat.queue.remove"]({ id }))} onQueueRestore={(id) => ignoreRpc(rpc.request["chat.queue.restore"]({ id }))} />}{view === "projects" && <Projects />}{view === "memory" && <Memory />}{view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={() => ignoreRpc(rpc.request["credentials.disconnect"]())} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} />}</main></div>{deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}</>;
+}
+
+function ToolApprovalCard({ approval, onRespond }: { approval: ToolApproval; onRespond: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
+  const [resolving, setResolving] = useState(false);
+  const args = useMemo(() => {
+    try { return JSON.stringify(approval.args, null, 2); } catch { return "Unable to display tool arguments."; }
+  }, [approval.args]);
+  const respond = (approved: boolean) => { if (resolving) return; setResolving(true); void onRespond(approval.toolCallId, approved).then((accepted) => { if (!accepted) setResolving(false); }).catch(() => setResolving(false)); };
+  return <article className={`interaction-card tool-approval-card${resolving ? " resolving" : ""}`} id={`tool-approval-${approval.toolCallId}`}><div className="interaction-kicker">{resolving ? "Sending response…" : "Approval required"}</div><h3>Allow {approval.toolName}?</h3><p>PROTEUS is ready to use this tool. Review the request before it continues.</p><pre className="tool-approval-args">{args}</pre><div className="interaction-actions"><button disabled={resolving} type="button" className="btn-outline sm" onClick={() => respond(false)}>Decline</button><button disabled={resolving} type="button" className="btn-primary sm" onClick={() => respond(true)}>Approve</button></div></article>;
 }

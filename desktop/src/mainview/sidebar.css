@@ -1,0 +1,278 @@
+/* The production navigation is intentionally independent from the prototype
+   sidebar. It reuses PROTEUS tokens, but owns its geometry and interaction. */
+.app-nav {
+  position: relative;
+  width: 72px;
+  flex: 0 0 72px;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+  z-index: 50;
+}
+
+.app-nav__surface {
+  position: absolute;
+  inset: 8px auto 8px 8px;
+  width: 56px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+  overflow: visible;
+  border: 1px solid rgba(231, 229, 228, .86);
+  border-radius: 20px;
+  background: rgba(250, 250, 250, .96);
+  box-shadow: 0 8px 28px rgba(41, 37, 36, .06);
+  transition: width .28s cubic-bezier(.4, 0, .2, 1), box-shadow .28s ease, background .28s ease;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .app-nav__surface {
+    background: rgba(255, 255, 255, .72);
+    -webkit-backdrop-filter: blur(18px) saturate(1.08);
+    backdrop-filter: blur(18px) saturate(1.08);
+  }
+}
+
+.app-nav--open .app-nav__surface {
+  width: min(264px, calc(100vw - 16px));
+  box-shadow: 0 18px 54px rgba(41, 37, 36, .14);
+}
+
+.app-nav__header {
+  flex: 0 0 44px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.app-nav__orb {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  margin: 0 0 0 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  color: var(--body-strong);
+  transition: background .18s ease, transform .18s ease;
+}
+
+.app-nav__orb:hover,
+.app-nav__orb:focus-visible {
+  background: rgba(255, 255, 255, .52);
+}
+
+.app-nav__orb:hover .app-nav__orb-mark,
+.app-nav__orb:focus-visible .app-nav__orb-mark {
+  transform: scale(1.06);
+  filter: saturate(1.08);
+}
+
+.app-nav__orb-mark {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: block;
+  overflow: hidden;
+  border-radius: 48% 52% 56% 44% / 52% 44% 56% 48%;
+  background: radial-gradient(circle at 34% 28%, var(--g-mint), var(--g-sky) 44%, var(--g-lavender) 92%);
+  box-shadow: 0 3px 10px rgba(200, 184, 224, .45);
+  transition: transform .18s ease, filter .18s ease;
+}
+
+.app-nav__orb-mark::after {
+  content: "";
+  position: absolute;
+  inset: 3px 7px 5px 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .56), rgba(255, 255, 255, 0) 72%);
+  opacity: .7;
+}
+
+.app-nav__orb-core {
+  position: absolute;
+  inset: 0;
+}
+
+.app-nav__item {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  color: var(--body);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  transition: color .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.app-nav--open .app-nav__item {
+  width: calc(100% - 10px);
+  margin-inline: 5px;
+}
+
+.app-nav__icon-track {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+
+.app-nav__glyph {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.app-nav__label {
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: max-width .22s ease, opacity .16s ease, transform .22s ease;
+}
+
+.app-nav--open .app-nav__label {
+  max-width: 180px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.app-nav__action {
+  margin-bottom: 12px;
+  color: var(--body-strong);
+  background: rgba(255, 255, 255, .54);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.app-nav__action:hover:not(:disabled),
+.app-nav__action:focus-visible {
+  background: rgba(255, 255, 255, .78);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+}
+
+.app-nav:not(.app-nav--open) .app-nav__action {
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-nav:not(.app-nav--open) .app-nav__action:hover:not(:disabled),
+.app-nav:not(.app-nav--open) .app-nav__action:focus-visible {
+  background: rgba(255, 255, 255, .54);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.app-nav__action:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.app-nav__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-nav__link:hover,
+.app-nav__link:focus-visible {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .56);
+}
+
+.app-nav__link--active {
+  color: var(--ink);
+  background: linear-gradient(135deg, rgba(167, 229, 211, .24), rgba(200, 184, 224, .24));
+  box-shadow: inset 0 0 0 1px rgba(214, 211, 209, .8);
+}
+
+.app-nav__footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+.app-nav__item:focus-visible,
+.app-nav__orb:focus-visible {
+  outline: 2px solid rgba(41, 37, 36, .42);
+  outline-offset: 2px;
+}
+
+.app-nav:not(.app-nav--open) [data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  z-index: 2;
+  max-width: 240px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--body-strong);
+  background: rgba(255, 255, 255, .96);
+  box-shadow: var(--shadow-soft);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-4px, -50%);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.app-nav:not(.app-nav--open) [data-tooltip]:hover::after,
+.app-nav:not(.app-nav--open) [data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.app-nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: rgba(41, 37, 36, .06);
+  cursor: default;
+}
+
+@media (max-width: 760px) {
+  .app-nav--open .app-nav__surface {
+    width: min(264px, calc(100vw - 16px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-nav__surface,
+  .app-nav__orb,
+  .app-nav__orb-mark,
+  .app-nav__item,
+  .app-nav__label,
+  .app-nav:not(.app-nav--open) [data-tooltip]::after {
+    transition: none;
+  }
+
+  .app-nav__orb:hover .app-nav__orb-mark,
+  .app-nav__orb:focus-visible .app-nav__orb-mark,
+  .app-nav:not(.app-nav--open) [data-tooltip]:hover::after,
+  .app-nav:not(.app-nav--open) [data-tooltip]:focus-visible::after {
+    transform: none;
+  }
+}

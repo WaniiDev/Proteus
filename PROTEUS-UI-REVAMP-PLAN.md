@@ -19,10 +19,12 @@ The finished desktop UI must provide:
 
 ## Visual source of truth
 
-`app/index.html` and `app/styles.css` are the single visual source of truth.
-Production-only controls may extend the prototype, but must use its typography,
-spacing, radii, borders, surfaces, colors, shadows, and quiet interaction tone.
-Do not create a parallel visual language in `desktop/src/mainview/index.css`.
+`app/index.html` and `app/styles.css` remain the visual source of truth for the
+Companion content, Orb, and Workbench. The sidebar is now an intentional
+production-owned exception: it reuses the PROTEUS typography, colors, borders,
+surfaces, and quiet interaction tone, but owns a new soft-glass rail/overlay
+composition in `desktop/src/mainview/sidebar.css` rather than copying the
+prototype sidebar geometry.
 
 Human-in-the-loop approvals remain in the main chat. The Workbench may summarize
 that attention is required and link to the approval card, but must not move the

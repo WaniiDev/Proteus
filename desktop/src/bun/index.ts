@@ -136,9 +136,9 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { accepted: false };
         }
       },
-      "chat.send": async ({ text }) => {
+      "chat.send": async ({ text, clientMessageId }) => {
         try {
-          const { runId } = await runtime.send(text);
+          const { runId } = await runtime.send(text, clientMessageId);
           return { accepted: true, runId };
         } catch (error) {
           runtime.reportError(error);
@@ -175,6 +175,15 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       "chat.interaction.respond": async ({ toolCallId, response }) => {
         try {
           await runtime.respondToInteraction(toolCallId, response);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "chat.tool-approval.respond": async ({ toolCallId, approved }) => {
+        try {
+          await runtime.respondToToolApproval(toolCallId, approved);
           return { accepted: true };
         } catch (error) {
           runtime.reportError(error);

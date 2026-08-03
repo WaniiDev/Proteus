@@ -20,6 +20,7 @@ import type {
   QueuedFollowUp,
   RuntimeError,
   RuntimeSnapshot,
+  ToolApproval,
   TokenUsage,
   ThreadSummary,
   WorkbenchState,
@@ -27,6 +28,14 @@ import type {
 } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
+import {
+  projectPendingInteractions,
+  projectTasks,
+  upsertChatMessage,
+  parseSuspendedInteraction,
+  reconcileLiveAssistantTurn,
+  type LiveAssistantProjection,
+} from "./runtime-projection";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -36,6 +45,7 @@ const SESSION_STATE_FILE = "proteus-session.json";
 const THREAD_METADATA_KEY = "proteus.workbench.v1";
 const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
 const MAX_INPUT_LENGTH = 32_000;
+const INTERNAL_TOOL_GRANTS = ["ask_user", "submit_plan", "task_write", "task_update", "task_complete", "task_check"] as const;
 
 const OPENROUTER_PROVIDER_CONFIG: ProviderConfig = {
   url: "https://openrouter.ai/api/v1",
@@ -95,8 +105,6 @@ type PersistedThreadState = {
   tokenUsage?: TokenUsage;
 };
 
-type TaskLike = { id?: unknown; content?: unknown; activeForm?: unknown; status?: unknown };
-
 type InteractionResolution = {
   interaction: PendingInteraction;
   status: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">;
@@ -141,6 +149,35 @@ function extractPartText(part: unknown): string {
   const record = part as { type?: unknown; text?: unknown; content?: unknown };
   if (record.type !== undefined && record.type !== "text") return "";
   return typeof record.text === "string" ? record.text : typeof record.content === "string" ? record.content : "";
+}
+
+function pendingApprovalToolName(message: MastraMessage): string | null {
+  if (message.role !== "assistant" || !message.content || typeof message.content !== "object" || Array.isArray(message.content)) return null;
+  const metadata = (message.content as { metadata?: unknown }).metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const pending = (metadata as { pendingToolApprovals?: unknown }).pendingToolApprovals;
+  if (Array.isArray(pending)) {
+    const item = pending.find((value) => value && typeof value === "object" && typeof (value as { toolName?: unknown }).toolName === "string");
+    return item ? (item as { toolName: string }).toolName : null;
+  }
+  if (pending && typeof pending === "object") {
+    const values = Object.values(pending as Record<string, unknown>);
+    const item = values.find((value) => value && typeof value === "object" && typeof (value as { toolName?: unknown }).toolName === "string");
+    return item ? (item as { toolName: string }).toolName : null;
+  }
+  return null;
+}
+
+function sanitizeApprovalArgs(value: unknown, depth = 0): unknown {
+  if (depth > 3) return "[truncated]";
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return `${value}n`;
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeApprovalArgs(item, depth + 1));
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(record).slice(0, 40).map(([key, item]) => [key, sanitizeApprovalArgs(item, depth + 1)]));
+  }
+  return String(value);
 }
 
 function chatRole(message: MastraMessage): ChatMessage["role"] | null {
@@ -235,63 +272,6 @@ function emptyWorkbench(): WorkbenchState {
   };
 }
 
-function taskFromMastra(task: TaskLike): WorkbenchTask | null {
-  if (typeof task.id !== "string" || typeof task.content !== "string" || typeof task.activeForm !== "string") return null;
-  if (task.status !== "pending" && task.status !== "in_progress" && task.status !== "completed") return null;
-  return { id: task.id, content: task.content, activeForm: task.activeForm, status: task.status };
-}
-
-function parsePlanText(value: string | undefined): { title: string; summary: string; steps: string[]; raw?: string } {
-  const text = value?.trim() ?? "";
-  if (!text) return { title: "Plan review", summary: "PROTEUS submitted a plan for review.", steps: [] };
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const title = lines[0]?.replace(/^#+\s*/, "").trim() || "Plan review";
-  const steps = lines.filter((line) => /^([-*]|\d+[.)])\s+/.test(line)).map((line) => line.replace(/^([-*]|\d+[.)])\s+/, "").trim());
-  const summary = lines.find((line) => !line.startsWith("#") && !/^([-*]|\d+[.)])\s+/.test(line)) ?? title;
-  return { title, summary, steps, raw: text };
-}
-
-function parseSuspension(event: Extract<AgentControllerEvent, { type: "tool_suspended" }>, previousVersion: number): PendingInteraction | null {
-  const payload = event.suspendPayload && typeof event.suspendPayload === "object" ? event.suspendPayload as Record<string, unknown> : {};
-  if (event.toolName === "ask_user") {
-    const options = Array.isArray(payload.options)
-      ? payload.options.map((option) => {
-        if (!option || typeof option !== "object" || typeof (option as { label?: unknown }).label !== "string") return null;
-        const record = option as { label: string; description?: unknown };
-        return {
-          label: record.label,
-          ...(typeof record.description === "string" ? { description: record.description } : {}),
-        };
-      }).filter((value): value is { label: string; description?: string } => value !== null)
-      : [];
-    return {
-      id: event.toolCallId,
-      toolCallId: event.toolCallId,
-      kind: "ask_user",
-      title: "PROTEUS has a question",
-      question: typeof payload.question === "string" ? payload.question : "What would you like PROTEUS to do next?",
-      options,
-      selectionMode: payload.selectionMode === "multi_select" ? "multi_select" : options.length > 0 ? "single_select" : undefined,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    };
-  }
-  if (event.toolName === "submit_plan") {
-    const parsed = parsePlanText(typeof payload.plan === "string" ? payload.plan : undefined);
-    return {
-      id: event.toolCallId,
-      toolCallId: event.toolCallId,
-      kind: "submit_plan",
-      title: typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : parsed.title,
-      options: [],
-      plan: { version: previousVersion + 1, ...parsed, status: "draft" },
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    };
-  }
-  return null;
-}
-
 /**
  * The native Mastra submit_plan tool expects the agent to create a file first.
  * PROTEUS intentionally has no workspace writer, so its controller exposes the
@@ -356,6 +336,7 @@ export class TextRuntime {
   private readonly threadWriteQueues = new Map<string, Promise<void>>();
   private readonly threadActivity = new Map<string, { activity: ThreadSummary["activity"]; attention: number }>();
   private readonly resolvingInteractions = new Map<string, InteractionResolution>();
+  private threadSwitchQueue: Promise<void> = Promise.resolve();
   private snapshot: RuntimeSnapshot = {
     status: "booting",
     credential: { configured: false, verified: false },
@@ -372,24 +353,41 @@ export class TextRuntime {
     selectedModelId: DEFAULT_MODEL_ID,
     threads: [],
     activeThreadId: null,
+    retryMessageId: null,
     messages: [],
     events: [],
     interactions: [],
     resolvedInteractions: [],
+    toolApproval: null,
     workbench: emptyWorkbench(),
     activeRun: null,
     error: null,
+    revision: 0,
   };
   private runId: string | null = null;
   private runOutcome: "streaming" | "complete" | "interrupted" | "error" = "complete";
   private runError: RuntimeError | null = null;
   private sendGeneration = 0;
-  private steerAbortPending = false;
+  private readonly steerAbortTokens = new Set<string>();
+  private steerInFlight = false;
   private lastAssistantId: string | null = null;
+  private readonly assistantProjections = new Map<string, LiveAssistantProjection>();
+  private readonly persistedAssistantIds = new Map<string, Set<string>>();
+  private readonly retiredAssistantIds = new Set<string>();
+  private readonly optimisticUserMessages = new Map<string, { threadId: string; message: ChatMessage }>();
+  private runStartedAt: string | null = null;
   private retryingText: string | null = null;
   private hideSingleRetry = false;
-  private messageSyncTimer: ReturnType<typeof setTimeout> | undefined;
   private initializePromise: Promise<RuntimeSnapshot> | undefined;
+  private runTerminalHandled = false;
+  private danglingApprovalThreadId: string | null = null;
+  private runClientMessageId: string | null = null;
+  private startingRun = false;
+  private startingRunId: string | null = null;
+  private startingRunAbortRequested = false;
+  private threadSelectionGeneration = 0;
+  private threadStateSyncGeneration = 0;
+  private pendingThreadSelectionId: string | null = null;
 
   constructor(vault: CredentialVault = createCredentialVault()) {
     this.vault = vault;
@@ -464,7 +462,7 @@ export class TextRuntime {
   }
 
   private publish(next: Partial<RuntimeSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...next };
+    this.snapshot = { ...this.snapshot, ...next, revision: this.snapshot.revision + 1 };
     const snapshot = this.getSnapshot();
     for (const listener of this.listeners) listener(snapshot);
   }
@@ -536,12 +534,92 @@ export class TextRuntime {
     return threadId === this.controllerThreadId ? this.displayState : null;
   }
 
-  private workbenchFromState(state: PersistedThreadState, displayState: AgentControllerDisplayState | null, runStatus: RuntimeSnapshot["activeRun"] = this.snapshot.activeRun): WorkbenchState {
-    const projectedTasks = displayState?.tasks?.map(taskFromMastra).filter((task): task is WorkbenchTask => task !== null) ?? [];
-    const tasks = projectedTasks.length > 0 ? projectedTasks : state.tasks ?? [];
+  private recordPersistedAssistantIds(threadId: string, rawMessages: MastraMessage[]): void {
+    this.persistedAssistantIds.set(threadId, new Set(
+      rawMessages.filter((message) => message.role === "assistant").map((message) => message.id),
+    ));
+  }
+
+  private assistantBaselineForThread(threadId: string): Set<string> {
+    return new Set([
+      ...(this.persistedAssistantIds.get(threadId) ?? []),
+      ...this.snapshot.messages.filter((message) => message.role === "assistant").map((message) => message.id),
+    ]);
+  }
+
+  private startAssistantProjection(threadId: string, runId: string, turnId: string, runStartedAt: string): void {
+    this.assistantProjections.set(runId, {
+      runId,
+      threadId,
+      turnId,
+      runStartedAt,
+      baselineAssistantIds: this.assistantBaselineForThread(threadId),
+      messages: new Map(),
+      messageOrder: [],
+      outcome: null,
+    });
+  }
+
+  private updateAssistantProjection(threadId: string, message: ChatMessage): void {
+    const runId = this.runId;
+    if (!runId || threadId !== this.controllerThreadId) return;
+    const projection = this.assistantProjections.get(runId);
+    if (!projection) return;
+    if (!projection.messages.has(message.id)) projection.messageOrder.push(message.id);
+    projection.messages.set(message.id, message);
+  }
+
+  private updateProjectionTurnFromUserSignal(message: MastraMessage): void {
+    if (chatRole(message) !== "user") return;
+    const runId = this.runId;
+    const threadId = this.controllerThreadId;
+    if (!runId || !threadId || !this.assistantProjections.has(runId)) return;
+    const projection = this.assistantProjections.get(runId);
+    if (projection) projection.turnId = message.id;
+  }
+
+  private markAssistantProjectionOutcome(runId: string, status: ChatMessage["status"]): void {
+    const projection = this.assistantProjections.get(runId);
+    if (!projection) return;
+    projection.outcome = status;
+    const lastId = projection.messageOrder.at(-1);
+    const last = lastId ? projection.messages.get(lastId) : undefined;
+    if (last && lastId) projection.messages.set(lastId, { ...last, status });
+  }
+
+  private resetAssistantProjectionForSteer(threadId: string, runId: string, runStartedAt: string): string[] {
+    const projection = this.assistantProjections.get(runId);
+    const previousMessageIds = projection?.messageOrder ?? [];
+    for (const messageId of previousMessageIds) this.retiredAssistantIds.add(messageId);
+    this.assistantProjections.set(runId, {
+      runId,
+      threadId,
+      turnId: projection?.turnId ?? this.runClientMessageId ?? runId,
+      runStartedAt,
+      baselineAssistantIds: this.assistantBaselineForThread(threadId),
+      messages: new Map(),
+      messageOrder: [],
+      outcome: null,
+    });
+    return [...previousMessageIds];
+  }
+
+  private discardEmptyAssistantProjection(runId: string): void {
+    const projection = this.assistantProjections.get(runId);
+    if (projection && projection.messages.size === 0) this.assistantProjections.delete(runId);
+  }
+
+  private assistantProjectionsForThread(threadId: string): LiveAssistantProjection[] {
+    return [...this.assistantProjections.values()]
+      .filter((projection) => projection.threadId === threadId && projection.messages.size > 0)
+      .sort((left, right) => left.runStartedAt.localeCompare(right.runStartedAt));
+  }
+
+  private workbenchFromState(state: PersistedThreadState, displayState: AgentControllerDisplayState | null, runStatus: RuntimeSnapshot["activeRun"] = this.snapshot.activeRun, toolApproval: ToolApproval | null = this.snapshot.toolApproval): WorkbenchState {
+    const tasks = displayState ? projectTasks(displayState, state.tasks ?? []) : state.tasks ?? [];
     const pendingInteractions = state.pendingInteractions ?? [];
     const activeTools = displayState ? Array.from(displayState.activeTools.entries()).map(([id, tool]) => ({ id, name: tool.name, status: tool.status })) : [];
-    const pending = pendingInteractions.length > 0;
+    const pending = pendingInteractions.length > 0 || toolApproval !== null;
     const status: WorkbenchState["status"] = pending ? "waiting" : runStatus?.threadId === this.selectedThreadId && runStatus.status === "running" ? "active" : runStatus?.threadId === this.selectedThreadId && runStatus.status === "aborted" ? "interrupted" : this.snapshot.error && runStatus?.threadId === this.selectedThreadId ? "error" : tasks.some((task) => task.status !== "completed") ? "active" : tasks.length > 0 ? "complete" : "idle";
     const usage = displayState?.tokenUsage ?? state.tokenUsage ?? emptyTokenUsage();
     return {
@@ -561,23 +639,27 @@ export class TextRuntime {
     };
   }
 
-  private async publishSelectedThread(threadId: string, options: { clearError?: boolean } = {}): Promise<void> {
+  private async publishSelectedThread(threadId: string, options: { clearError?: boolean } = {}, generation = this.threadSelectionGeneration): Promise<void> {
     const session = this.requireSession();
+    if (generation !== this.threadSelectionGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== threadId)) return;
     const [rawMessages, state] = await Promise.all([
       session.thread.listMessages({ threadId }),
       this.loadThreadState(threadId),
     ]);
+    if (generation !== this.threadSelectionGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== threadId)) return;
     this.selectedThreadId = threadId;
     this.threadState = state;
-    const messages = this.mapMessages(rawMessages);
+    this.recordPersistedAssistantIds(threadId, rawMessages as MastraMessage[]);
+    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
     const displayState = this.displayStateForThread(threadId);
-    const workbench = this.workbenchFromState(state, displayState);
+    const workbench = this.workbenchFromState(state, displayState, this.snapshot.activeRun, this.approvalFrom(displayState?.pendingApproval));
     const next: Partial<RuntimeSnapshot> = {
       activeThreadId: threadId,
       messages,
       events: state.events ?? [],
       interactions: state.pendingInteractions ?? [],
       resolvedInteractions: state.resolvedInteractions ?? [],
+      toolApproval: this.approvalFrom(displayState?.pendingApproval),
       workbench,
     };
     if (options.clearError !== false) next.error = null;
@@ -602,11 +684,14 @@ export class TextRuntime {
     return rawMessages
       .map((message) => ({ message, role: chatRole(message) }))
       .filter((entry, index): entry is { message: MastraMessage; role: ChatMessage["role"] } => entry.role !== null && index !== hiddenRetryIndex)
-      .map(({ message, role }) => ({
+      .map(({ message, role }) => {
+        const approvalToolName = pendingApprovalToolName(message);
+        const text = extractText(message) || (approvalToolName ? `The ${approvalToolName} request was interrupted before approval. Retry this turn to continue.` : "");
+        return {
         id: message.id,
         role,
-        text: extractText(message),
-        status: (role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "streaming"
+        text,
+        status: approvalToolName ? "error" : (role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "streaming"
           ? "streaming"
           : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "interrupted"
             ? "interrupted"
@@ -614,9 +699,31 @@ export class TextRuntime {
               ? "error"
               : "complete") as ChatMessage["status"],
         createdAt: isoDate(message.createdAt),
-        retryable: role === "assistant" && message.id === this.lastAssistantId ? this.runError?.retryable : undefined,
-      }))
+        retryable: approvalToolName ? true : role === "assistant" && message.id === this.lastAssistantId ? this.runError?.retryable : undefined,
+      };
+      })
       .filter((message) => message.text.length > 0);
+  }
+
+  private mergeTransientMessages(threadId: string, messages: ChatMessage[], reconcilePersisted = false): ChatMessage[] {
+    let next = messages;
+    for (const [id, optimistic] of this.optimisticUserMessages) {
+      if (optimistic.threadId !== threadId) continue;
+      const persisted = reconcilePersisted && next.some((message) => message.id === id);
+      if (persisted) this.optimisticUserMessages.delete(id);
+      else next = upsertChatMessage(next, optimistic.message);
+    }
+
+    const projections = this.assistantProjectionsForThread(threadId);
+    for (const projection of projections) {
+      const result = reconcileLiveAssistantTurn(next, projection, reconcilePersisted);
+      next = result.messages;
+      if (reconcilePersisted && result.settled) {
+        this.assistantProjections.delete(projection.runId);
+        if (result.persistedId) this.lastAssistantId = result.persistedId;
+      }
+    }
+    return next;
   }
 
   private async ensureInitialized() {
@@ -644,8 +751,7 @@ export class TextRuntime {
     }
   }
 
-  private async persistActiveThread(): Promise<void> {
-    const threadId = this.session?.thread.getId();
+  private async persistActiveThread(threadId = this.session?.thread.getId()): Promise<void> {
     if (!threadId) return;
     try {
       await writeFile(join(Utils.paths.userData, SESSION_STATE_FILE), `${JSON.stringify({ activeThreadId: threadId })}\n`, "utf8");
@@ -659,31 +765,76 @@ export class TextRuntime {
     session.subscribe((event) => this.handleControllerEvent(event));
   }
 
+  private approvalFrom(value: { toolCallId: string; toolName: string; args: unknown } | null | undefined): ToolApproval | null {
+    if (!value || typeof value.toolCallId !== "string" || typeof value.toolName !== "string") return null;
+    return { toolCallId: value.toolCallId, toolName: value.toolName.slice(0, 120), args: sanitizeApprovalArgs(value.args) };
+  }
+
+  private publishLiveMessage(message: MastraMessage): void {
+    if (message.role !== "assistant") return;
+    if (this.retiredAssistantIds.has(message.id)) return;
+    const runId = this.runId;
+    const threadId = this.controllerThreadId;
+    if (!runId || !threadId || this.selectedThreadId !== threadId || !this.assistantProjections.has(runId)) return;
+    const messageCreatedAt = message.createdAt ? isoDate(message.createdAt) : null;
+    const isCurrentRunMessage = !this.runStartedAt
+      || !messageCreatedAt
+      || messageCreatedAt >= this.runStartedAt
+      || message.id === this.lastAssistantId;
+    if (!isCurrentRunMessage) return;
+    this.lastAssistantId = message.id;
+    const live = this.mapMessages([message])[0];
+    if (!live) return;
+    this.updateAssistantProjection(threadId, live);
+    this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages) });
+  }
+
   private handleControllerEvent(event: AgentControllerEvent): void {
     if (event.type === "display_state_changed") {
       this.displayState = event.displayState;
+      const toolApproval = this.approvalFrom(event.displayState.pendingApproval);
       const threadId = this.controllerThreadId;
       if (threadId) {
-        const tasks = event.displayState.tasks.map(taskFromMastra).filter((task): task is WorkbenchTask => task !== null);
-        this.controllerThreadState = { ...this.controllerThreadState, tasks, tokenUsage: event.displayState.tokenUsage };
+        const tasks = projectTasks(event.displayState, this.controllerThreadState.tasks ?? []);
+        const pendingInteractions = projectPendingInteractions(
+          event.displayState,
+          this.controllerThreadState.pendingInteractions ?? [],
+          this.nextPlanVersion(),
+        );
+        this.controllerThreadState = { ...this.controllerThreadState, tasks, pendingInteractions, tokenUsage: event.displayState.tokenUsage };
         void this.persistThreadState(threadId, this.controllerThreadState);
         if (this.selectedThreadId === threadId) {
           this.threadState = this.controllerThreadState;
-          const workbench = this.workbenchFromState(this.threadState, event.displayState);
+          const workbench = this.workbenchFromState(this.threadState, event.displayState, this.snapshot.activeRun, toolApproval);
           this.publish({
-            interactions: this.controllerThreadState.pendingInteractions ?? [],
+            messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
+            interactions: pendingInteractions,
             resolvedInteractions: this.controllerThreadState.resolvedInteractions ?? [],
             events: this.controllerThreadState.events ?? [],
+            toolApproval,
             workbench,
           });
         }
+      } else {
+        this.publish({ toolApproval });
       }
       return;
     }
 
+    if (event.type === "tool_approval_required") {
+      this.runOutcome = "streaming";
+      const toolApproval = this.approvalFrom(event);
+      this.publish({
+        toolApproval,
+        status: "running",
+        ...(this.runId ? { activeRun: { runId: this.runId, threadId: this.controllerThreadId ?? this.selectedThreadId ?? "unknown", status: "running" } } : {}),
+      });
+      if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "waiting", 1);
+      return;
+    }
+
     if (event.type === "tool_suspended") {
-      const previousVersion = this.nextPlanVersion() - 1;
-      const interaction = parseSuspension(event, previousVersion);
+      const interaction = parseSuspendedInteraction(event, this.nextPlanVersion());
       if (interaction) {
         this.controllerThreadState = {
           ...this.controllerThreadState,
@@ -735,10 +886,12 @@ export class TextRuntime {
 
     if (event.type === "agent_start") {
       // Mastra emits an aborted terminal event for the stream that steer()
-      // replaces. The replacement agent_start marks the handoff complete.
-      if (this.steerAbortPending) this.steerAbortPending = false;
+      // replaces. Keep the handoff marker until that old terminal event is
+      // observed; the replacement can start before the old stream reports its
+      // abort, and clearing here would let the stale event terminate the new run.
       this.runOutcome = "streaming";
       this.runError = null;
+      this.runTerminalHandled = false;
       this.publish({ status: "running" });
       if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "running");
       return;
@@ -759,14 +912,17 @@ export class TextRuntime {
     }
 
     if (event.type === "agent_end") {
-      if (event.reason === "aborted" && this.steerAbortPending) {
-        this.steerAbortPending = false;
+      if (event.reason === "aborted" && this.steerAbortTokens.size > 0) {
+        const staleToken = this.steerAbortTokens.values().next().value as string | undefined;
+        if (staleToken) this.steerAbortTokens.delete(staleToken);
         return;
       }
       if (event.reason === "suspended") {
         if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "waiting", 1);
         return;
       }
+      if (this.runTerminalHandled) return;
+      this.runTerminalHandled = true;
       if (this.runOutcome !== "error" && this.runOutcome !== "interrupted") {
         this.runOutcome = event.reason === "aborted" ? "interrupted" : event.reason === "error" ? "error" : "complete";
       }
@@ -781,15 +937,14 @@ export class TextRuntime {
         });
       }
       if (endedRunId && endedThreadId && this.runOutcome === "complete") {
+        this.markAssistantProjectionOutcome(endedRunId, "complete");
+        this.discardEmptyAssistantProjection(endedRunId);
         this.runId = null;
         this.runError = null;
-        this.publish({ status: "ready", activeRun: null, error: null });
+        this.publish({ status: "ready", activeRun: null, error: null, toolApproval: null });
         this.updateThreadActivity(endedThreadId, "complete", 0);
-        void this.syncMessagesSafely(endedThreadId).then(async () => {
-          await this.refreshThreadSummaries();
-          if (this.selectedThreadId === endedThreadId) await this.publishSelectedThread(endedThreadId, { clearError: false });
-          await this.drainQueuedFollowUp(endedThreadId);
-        });
+        const selectionGeneration = this.threadSelectionGeneration;
+        void this.settleAssistantProjectionAfterRun(endedThreadId, endedRunId, selectionGeneration);
       } else {
         void this.syncMessages().catch((error) => this.reportError(error));
         if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, this.runOutcome === "interrupted" ? "interrupted" : this.runOutcome === "error" ? "error" : "complete");
@@ -799,8 +954,8 @@ export class TextRuntime {
     }
 
     if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
-      if (event.message.role === "assistant") this.lastAssistantId = event.message.id;
-      this.scheduleMessageSync();
+      this.updateProjectionTurnFromUserSignal(event.message);
+      this.publishLiveMessage(event.message);
       return;
     }
 
@@ -824,19 +979,29 @@ export class TextRuntime {
     }
   }
 
-  private scheduleMessageSync(): void {
-    if (this.messageSyncTimer) return;
-    this.messageSyncTimer = setTimeout(() => {
-      this.messageSyncTimer = undefined;
-      void this.syncMessages().catch((error) => this.reportError(error));
-    }, 35);
-  }
-
-  private async syncMessagesSafely(threadId?: string): Promise<void> {
+  private async syncMessagesSafely(threadId?: string, guard?: { selectionGeneration?: number; syncGeneration?: number }, assistantRunId?: string): Promise<boolean> {
     try {
-      await this.syncMessages(threadId);
+      return await this.syncMessages(threadId, guard, assistantRunId);
     } catch (error) {
       this.reportError(error);
+      return false;
+    }
+  }
+
+  private async settleAssistantProjectionAfterRun(threadId: string, runId: string, selectionGeneration: number): Promise<void> {
+    await this.retryAssistantProjectionPersistence(threadId, runId, selectionGeneration);
+    await this.refreshThreadSummaries();
+    if (this.selectedThreadId === threadId) await this.publishSelectedThread(threadId, { clearError: false }, selectionGeneration);
+    await this.drainQueuedFollowUp(threadId);
+  }
+
+  private async retryAssistantProjectionPersistence(threadId: string, runId: string, selectionGeneration: number): Promise<void> {
+    const retryDelays = [0, 50, 150, 400, 1_000];
+    for (const delay of retryDelays) {
+      if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      if (!this.assistantProjections.has(runId)) break;
+      await this.syncMessagesSafely(threadId, { selectionGeneration }, runId);
+      if (!this.assistantProjections.has(runId)) break;
     }
   }
 
@@ -849,17 +1014,39 @@ export class TextRuntime {
     this.publish({ threads });
   }
 
-  private async syncMessages(threadId = this.selectedThreadId ?? this.controllerThreadId ?? undefined): Promise<void> {
+  private async syncMessages(
+    threadId = this.selectedThreadId ?? this.controllerThreadId ?? undefined,
+    guard?: { selectionGeneration?: number; syncGeneration?: number },
+    assistantRunId?: string,
+  ): Promise<boolean> {
     if (!threadId) {
+      if (guard && (guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration || guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration)) return false;
       this.publish({ messages: [] });
-      return;
+      return true;
     }
     const rawMessages = (await this.requireSession().thread.listMessages({ threadId })) as MastraMessage[];
-    const messages = this.mapMessages(rawMessages);
-    if (threadId === this.selectedThreadId) this.publish({ messages });
+    if (guard && (guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration || guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration)) return false;
+    this.recordPersistedAssistantIds(threadId, rawMessages);
+    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
+    if (threadId === this.selectedThreadId) {
+      this.publish({ messages });
+      if (!this.runId && rawMessages.some((message) => pendingApprovalToolName(message))) {
+        if (this.danglingApprovalThreadId !== threadId) {
+          this.danglingApprovalThreadId = threadId;
+          this.publish({ error: { code: "unknown", message: "A previous tool approval was interrupted. Retry the last turn to continue.", retryable: true } });
+        }
+      } else if (this.danglingApprovalThreadId === threadId) {
+        this.danglingApprovalThreadId = null;
+      }
+    }
+    return assistantRunId ? !this.assistantProjections.has(assistantRunId) : true;
   }
 
-  private async syncThreadState(options: { clearError?: boolean } = {}): Promise<void> {
+  private async syncThreadState(
+    options: { clearError?: boolean } = {},
+    selectionGeneration = this.threadSelectionGeneration,
+  ): Promise<void> {
+    const syncGeneration = ++this.threadStateSyncGeneration;
     const session = this.requireSession();
     const threads = (await session.thread.list()).map((thread) => {
       const summary = mapThread(thread);
@@ -867,26 +1054,49 @@ export class TextRuntime {
       return activity ? { ...summary, ...activity } : summary;
     }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     const activeThreadId = session.thread.getId();
-    if (activeThreadId !== this.controllerThreadId) this.displayState = null;
+    if (
+      selectionGeneration !== this.threadSelectionGeneration
+      || syncGeneration !== this.threadStateSyncGeneration
+      || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)
+    ) return;
     const selectedModelId = modelFromSession(session.model.get());
+    const nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
+    if (
+      selectionGeneration !== this.threadSelectionGeneration
+      || syncGeneration !== this.threadStateSyncGeneration
+      || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)
+    ) return;
+    const previousControllerThreadId = this.controllerThreadId;
+    if (activeThreadId !== previousControllerThreadId) this.displayState = null;
+    for (const [id, optimistic] of this.optimisticUserMessages) {
+      if (optimistic.threadId !== activeThreadId) this.optimisticUserMessages.delete(id);
+    }
+    if (activeThreadId !== previousControllerThreadId) this.runStartedAt = null;
     this.controllerThreadId = activeThreadId;
     this.selectedThreadId = activeThreadId;
-    this.threadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
-    this.controllerThreadState = this.threadState;
-    await this.persistActiveThread();
+    this.threadState = nextThreadState;
+    this.controllerThreadState = nextThreadState;
     const nextSnapshot: Partial<RuntimeSnapshot> = {
       threads,
       activeThreadId,
       selectedModelId,
       messages: [],
-      events: this.threadState.events ?? [],
-      interactions: this.threadState.pendingInteractions ?? [],
-      resolvedInteractions: this.threadState.resolvedInteractions ?? [],
-      workbench: this.workbenchFromState(this.threadState, this.displayState),
+      events: nextThreadState.events ?? [],
+      interactions: nextThreadState.pendingInteractions ?? [],
+      resolvedInteractions: nextThreadState.resolvedInteractions ?? [],
+      toolApproval: null,
+      workbench: this.workbenchFromState(nextThreadState, this.displayState),
     };
     if (options.clearError !== false) nextSnapshot.error = null;
     this.publish(nextSnapshot);
-    await this.syncMessages(activeThreadId ?? undefined);
+    void this.persistActiveThread(activeThreadId);
+    await this.syncMessages(activeThreadId ?? undefined, { selectionGeneration, syncGeneration });
+  }
+
+  private enqueueThreadSwitch(operation: () => Promise<void>): Promise<void> {
+    const next = this.threadSwitchQueue.catch(() => undefined).then(operation);
+    this.threadSwitchQueue = next.catch(() => undefined);
+    return next;
   }
 
   private nextPlanVersion(): number {
@@ -980,6 +1190,7 @@ export class TextRuntime {
         const persistedThreadId = await this.readPersistedThreadId();
         const activeThreadId = await this.restoreableThreadId(persistedThreadId);
         this.session = await this.controller.createSession({ id: SESSION_ID, ownerId: RESOURCE_ID, resourceId: RESOURCE_ID, threadId: activeThreadId });
+        for (const toolName of INTERNAL_TOOL_GRANTS) this.session.grantTool(toolName);
         this.subscribeToController();
         await this.syncThreadState();
         await this.validateStoredCredential();
@@ -997,6 +1208,7 @@ export class TextRuntime {
     await this.ensureInitialized();
     const candidate = apiKey.trim();
     if (!candidate) throw new Error("OpenRouter API key cannot be empty");
+    if (this.startingRun) throw makeRuntimeError("busy");
     if (this.runId) this.abort();
     const previousCredential = this.snapshot.credential;
     this.publish({ status: "validating-key", error: null });
@@ -1027,6 +1239,7 @@ export class TextRuntime {
 
   async disconnect(): Promise<void> {
     await this.ensureInitialized();
+    if (this.startingRun) throw makeRuntimeError("busy");
     if (this.runId) this.abort();
     await this.vault.delete();
     this.publish({
@@ -1038,6 +1251,7 @@ export class TextRuntime {
 
   async refreshModels(): Promise<void> {
     await this.ensureInitialized();
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     const apiKey = await this.vault.get();
     if (!apiKey || !this.snapshot.credential.verified) {
       this.publish({ error: makeRuntimeError("invalid-credential") });
@@ -1059,7 +1273,7 @@ export class TextRuntime {
   async selectModel(modelId: OpenRouterModelId): Promise<void> {
     const session = await this.ensureInitialized();
     if (!isOpenRouterModelId(modelId)) throw makeRuntimeError("model-unavailable");
-    if (this.runId) throw makeRuntimeError("busy");
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     if (modelId !== DEFAULT_MODEL_ID && !this.snapshot.models.some((model) => model.id === modelId)) throw makeRuntimeError("model-unavailable");
     await session.model.switch({ modelId, scope: "thread" });
     await this.syncThreadState();
@@ -1067,30 +1281,56 @@ export class TextRuntime {
 
   async createThread(title?: string): Promise<string> {
     const session = await this.ensureInitialized();
-    if (this.runId) throw makeRuntimeError("busy");
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     const thread = await session.thread.create({ title: title?.trim() || "New chat" });
     await this.syncThreadState();
     return thread.id;
   }
 
   async selectThread(threadId: string): Promise<void> {
-    const session = await this.ensureInitialized();
-    const thread = await session.thread.getById({ threadId });
-    if (!thread) throw new Error("Conversation not found");
+    if (this.startingRun) throw makeRuntimeError("busy");
+    const generation = ++this.threadSelectionGeneration;
+    this.pendingThreadSelectionId = threadId;
+    try {
+      const session = await this.ensureInitialized();
+      if (this.startingRun) throw makeRuntimeError("busy");
+      const thread = await session.thread.getById({ threadId });
+      if (!thread) throw new Error("Conversation not found");
+      if (generation !== this.threadSelectionGeneration) return;
+      if (this.startingRun) throw makeRuntimeError("busy");
 
-    if (this.runId && threadId !== this.controllerThreadId) {
-      await this.publishSelectedThread(threadId);
-      this.updateThreadActivity(this.controllerThreadId ?? "", "running", 0);
-      return;
+      if (this.runId && threadId !== this.controllerThreadId) {
+        await this.publishSelectedThread(threadId, {}, generation);
+        if (generation !== this.threadSelectionGeneration) return;
+        this.pendingThreadSelectionId = null;
+        this.updateThreadActivity(this.controllerThreadId ?? "", "running", 0);
+        return;
+      }
+
+      if (threadId === this.controllerThreadId) {
+        await this.publishSelectedThread(threadId, {}, generation);
+        if (generation === this.threadSelectionGeneration) this.pendingThreadSelectionId = null;
+        return;
+      }
+
+      await this.enqueueThreadSwitch(async () => {
+        if (generation !== this.threadSelectionGeneration) return;
+        if (this.startingRun) throw makeRuntimeError("busy");
+        if (this.runId) {
+          await this.publishSelectedThread(threadId, {}, generation);
+          if (generation !== this.threadSelectionGeneration) return;
+          this.pendingThreadSelectionId = null;
+          this.updateThreadActivity(this.controllerThreadId ?? "", "running", 0);
+          return;
+        }
+        await session.thread.switch({ threadId });
+        if (generation !== this.threadSelectionGeneration) return;
+        await this.syncThreadState({}, generation);
+        if (generation === this.threadSelectionGeneration) this.pendingThreadSelectionId = null;
+      });
+    } finally {
+      if (generation === this.threadSelectionGeneration && this.pendingThreadSelectionId === threadId) this.pendingThreadSelectionId = null;
     }
-
-    if (threadId === this.controllerThreadId) {
-      await this.publishSelectedThread(threadId);
-      return;
-    }
-
-    await session.thread.switch({ threadId });
-    await this.syncThreadState();
   }
 
   async switchThread(threadId: string): Promise<void> {
@@ -1099,7 +1339,7 @@ export class TextRuntime {
 
   async renameThread(threadId: string, title: string): Promise<void> {
     const session = await this.ensureInitialized();
-    if (this.runId) throw makeRuntimeError("busy");
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     const nextTitle = title.trim().slice(0, 80);
     if (!nextTitle) throw new Error("Conversation title cannot be empty");
     const thread = await session.thread.getById({ threadId });
@@ -1116,7 +1356,7 @@ export class TextRuntime {
 
   async deleteThread(threadId: string): Promise<void> {
     const session = await this.ensureInitialized();
-    if (this.runId) throw makeRuntimeError("busy");
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     await session.thread.delete({ threadId });
     const remaining = (await session.thread.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     if (!session.thread.getId()) {
@@ -1126,11 +1366,32 @@ export class TextRuntime {
     await this.syncThreadState();
   }
 
-  async send(text: string): Promise<{ runId: string }> {
-    await this.ensureInitialized();
+  async send(text: string, clientMessageId?: string): Promise<{ runId: string }> {
     const candidate = text.trim();
     if (!candidate) throw new Error("Message cannot be empty");
     if (candidate.length > MAX_INPUT_LENGTH) throw new Error(`Message must be ${MAX_INPUT_LENGTH} characters or fewer`);
+    const messageId = clientMessageId?.trim() || randomUUID();
+    if (this.startingRun || this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
+    this.startingRun = true;
+    this.startingRunAbortRequested = false;
+    const targetThreadId = this.selectedThreadId ?? this.controllerThreadId ?? this.snapshot.activeThreadId;
+    const reservationId = !this.runId && targetThreadId ? `starting:${messageId}` : null;
+    this.startingRunId = reservationId;
+    if (reservationId && targetThreadId) this.publish({ status: "running", activeRun: { runId: reservationId, threadId: targetThreadId, status: "running" }, error: null, retryMessageId: null });
+    return this.sendReserved(candidate, messageId, targetThreadId).finally(() => {
+      const abortedBeforeStart = this.startingRunAbortRequested;
+      this.startingRun = false;
+      this.startingRunAbortRequested = false;
+      if (this.startingRunId !== reservationId) return;
+      this.startingRunId = null;
+      if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
+        this.publish({ status: this.snapshot.credential.verified ? "ready" : "needs-key", activeRun: null, ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}) });
+      }
+    });
+  }
+
+  private async sendReserved(candidate: string, messageId: string, reservedThreadId: string | null): Promise<{ runId: string }> {
+    await this.ensureInitialized();
     if (!this.snapshot.credential.configured || !this.snapshot.credential.verified) throw makeRuntimeError("invalid-credential");
     if (this.snapshot.status === "error" && this.snapshot.error?.code === "model-unavailable") throw makeRuntimeError("model-unavailable");
     this.retryingText = null;
@@ -1139,16 +1400,22 @@ export class TextRuntime {
     const session = this.requireSession();
     if (this.runId) {
       if (this.selectedThreadId !== this.controllerThreadId) throw makeRuntimeError("busy");
-      const queued: QueuedFollowUp = { id: randomUUID(), content: candidate, createdAt: new Date().toISOString() };
+      const threadId = this.controllerThreadId;
+      if (!threadId) throw makeRuntimeError("busy");
+      const queued: QueuedFollowUp = { id: messageId, content: candidate, createdAt: new Date().toISOString() };
       this.controllerThreadState = { ...this.controllerThreadState, queuedFollowUps: [...(this.controllerThreadState.queuedFollowUps ?? []), queued] };
-      if (this.controllerThreadId) await this.persistThreadState(this.controllerThreadId, this.controllerThreadState);
+      this.optimisticUserMessages.set(messageId, {
+        threadId,
+        message: { id: messageId, role: "user", text: candidate, status: "complete", createdAt: queued.createdAt },
+      });
+      await this.persistThreadState(threadId, this.controllerThreadState);
       this.threadState = this.controllerThreadState;
-      this.publish({ workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
+      this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
       return { runId: this.runId };
     }
 
-    if (this.selectedThreadId && this.selectedThreadId !== this.controllerThreadId) {
-      await session.thread.switch({ threadId: this.selectedThreadId });
+    if (reservedThreadId && session.thread.getId() !== reservedThreadId) {
+      await session.thread.switch({ threadId: reservedThreadId });
       await this.syncThreadState();
     }
     const activeThreadId = session.thread.getId();
@@ -1159,10 +1426,11 @@ export class TextRuntime {
         await session.thread.rename({ title });
       }
     }
-    return this.startRun(candidate);
+    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
+    return this.startRun(candidate, { optimistic: true, clientMessageId: messageId });
   }
 
-  private startRun(candidate: string): { runId: string } {
+  private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {
     const session = this.requireSession();
     const threadId = this.controllerThreadId ?? session.thread.getId();
     if (!threadId) throw new Error("No active conversation");
@@ -1170,36 +1438,44 @@ export class TextRuntime {
     const sendGeneration = ++this.sendGeneration;
     this.runId = runId;
     this.lastAssistantId = null;
+    this.runStartedAt = new Date().toISOString();
     this.runOutcome = "streaming";
     this.runError = null;
-    this.publish({ status: "running", activeRun: { runId, threadId, status: "running" }, error: null });
+    this.runTerminalHandled = false;
+    this.danglingApprovalThreadId = null;
+    const messageId = options.clientMessageId ?? randomUUID();
+    this.startAssistantProjection(threadId, runId, messageId, this.runStartedAt);
+    this.runClientMessageId = options.optimistic ? messageId : null;
+    if (options.optimistic) {
+      const createdAt = this.runStartedAt;
+      this.optimisticUserMessages.set(messageId, {
+        threadId,
+        message: { id: messageId, role: "user", text: candidate, status: "complete", createdAt },
+      });
+    }
+    this.publish({
+      status: "running",
+      activeRun: { runId, threadId, status: "running" },
+      error: null,
+      retryMessageId: null,
+      messages: this.mergeTransientMessages(threadId, this.snapshot.messages, true),
+    });
     this.updateThreadActivity(threadId, "running");
 
-    void session.sendMessage({ content: candidate })
-      .then(async () => {
-        if (this.runId !== runId || this.sendGeneration !== sendGeneration) return;
-        if ((this.controllerThreadState.pendingInteractions?.length ?? 0) > 0 || session.suspensions.hasPending()) {
-          this.updateThreadActivity(threadId, "waiting", 1);
-          return;
-        }
-        if (this.runOutcome === "error" || this.runOutcome === "interrupted") {
-          await this.finishFailedRun(runId, this.runError ?? makeRuntimeError(this.runOutcome === "interrupted" ? "aborted" : "unknown"));
-          return;
-        }
-        this.runOutcome = "complete";
-        this.runId = null;
-        this.runError = null;
-        this.publish({ status: "ready", activeRun: null });
-        this.updateThreadActivity(threadId, "complete");
-        await this.syncMessagesSafely(threadId);
-        await this.refreshThreadSummaries();
-        if (this.selectedThreadId === threadId) await this.publishSelectedThread(threadId, { clearError: false });
-        await this.drainQueuedFollowUp(threadId);
-      })
-      .catch(async (error) => {
+    try {
+      const signal = session.sendSignal({
+        id: messageId,
+        createdAt: this.runStartedAt,
+        type: "user",
+        contents: candidate,
+      }, { requireDelivery: true });
+      void signal.accepted.catch(async (error) => {
         if (this.runId !== runId || this.sendGeneration !== sendGeneration) return;
         await this.finishFailedRun(runId, normalizeError(error));
       });
+    } catch (error) {
+      void this.finishFailedRun(runId, normalizeError(error));
+    }
 
     return { runId };
   }
@@ -1208,7 +1484,7 @@ export class TextRuntime {
     if (this.runId || threadId !== this.controllerThreadId) return;
     const next = this.controllerThreadState.queuedFollowUps?.[0];
     if (!next) return;
-    this.startRun(next.content);
+    this.startRun(next.content, { optimistic: true, clientMessageId: next.id });
     this.controllerThreadState = {
       ...this.controllerThreadState,
       queuedFollowUps: (this.controllerThreadState.queuedFollowUps ?? []).slice(1),
@@ -1219,6 +1495,17 @@ export class TextRuntime {
   }
 
   async steer(text: string): Promise<{ runId: string }> {
+    if (this.steerInFlight) throw makeRuntimeError("busy");
+    this.steerInFlight = true;
+    try {
+      return await this.steerReserved(text);
+    } catch (error) {
+      this.steerInFlight = false;
+      throw error;
+    }
+  }
+
+  private async steerReserved(text: string): Promise<{ runId: string }> {
     await this.ensureInitialized();
     const candidate = text.trim();
     if (!candidate) throw new Error("Steering message cannot be empty");
@@ -1229,6 +1516,7 @@ export class TextRuntime {
     const cleared = this.controllerThreadState.queuedFollowUps ?? [];
     const pendingInteractions = this.controllerThreadState.pendingInteractions ?? [];
     this.resolvingInteractions.clear();
+    for (const item of cleared) this.optimisticUserMessages.delete(item.id);
     this.controllerThreadState = {
       ...this.controllerThreadState,
       queuedFollowUps: [],
@@ -1240,27 +1528,44 @@ export class TextRuntime {
       ],
       events: [...(this.controllerThreadState.events ?? []), { id: randomUUID(), type: "steer", text: `You redirected PROTEUS: ${candidate}`, createdAt: new Date().toISOString() }],
     };
-    await this.persistThreadState(threadId, this.controllerThreadState);
+    void this.persistThreadState(threadId, this.controllerThreadState);
+    if (this.runId !== runId || this.controllerThreadId !== threadId || this.selectedThreadId !== threadId) {
+      throw makeRuntimeError("busy");
+    }
     this.threadState = this.controllerThreadState;
+    const steerStartedAt = new Date().toISOString();
+    const retiredMessageIds = this.resetAssistantProjectionForSteer(threadId, runId, steerStartedAt);
+    this.runStartedAt = steerStartedAt;
+    this.lastAssistantId = null;
     this.runOutcome = "streaming";
     this.runError = null;
     this.sendGeneration += 1;
-    this.steerAbortPending = true;
+    const messagesAfterSteer = this.snapshot.messages.filter((message) =>
+      !cleared.some((item) => item.id === message.id)
+      && !retiredMessageIds.includes(message.id),
+    );
     this.publish({
       status: "running",
       error: null,
+      messages: this.mergeTransientMessages(threadId, messagesAfterSteer),
       events: this.controllerThreadState.events ?? [],
       interactions: [],
       resolvedInteractions: this.controllerThreadState.resolvedInteractions ?? [],
       workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
     });
+    let expectsAbortedTerminal = false;
+    const steerToken = randomUUID();
     try {
-      void this.requireSession().steer({ content: candidate }).catch(async (error) => {
-        this.steerAbortPending = false;
+      const session = this.requireSession();
+      expectsAbortedTerminal = session.stream.isActive();
+      if (expectsAbortedTerminal) this.steerAbortTokens.add(steerToken);
+      void session.steer({ content: candidate }).catch(async (error) => {
+        if (expectsAbortedTerminal) this.steerAbortTokens.delete(steerToken);
         if (this.runId === runId) await this.finishFailedRun(runId, normalizeError(error));
-      });
+      }).finally(() => { this.steerInFlight = false; });
     } catch (error) {
-      this.steerAbortPending = false;
+      if (expectsAbortedTerminal) this.steerAbortTokens.delete(steerToken);
+      this.steerInFlight = false;
       await this.finishFailedRun(runId, normalizeError(error));
       throw error;
     }
@@ -1322,6 +1627,19 @@ export class TextRuntime {
     }
   }
 
+  async respondToToolApproval(toolCallId: string, approved: boolean): Promise<void> {
+    const session = await this.ensureInitialized();
+    const pending = this.snapshot.toolApproval;
+    if (!pending || pending.toolCallId !== toolCallId) throw new Error("That tool approval is no longer available");
+    try {
+      session.respondToToolApproval({ decision: approved ? "approve" : "decline", toolCallId });
+      this.publish({ toolApproval: null });
+      if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "running", 0);
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
   async updateQueuedFollowUp(id: string, content: string): Promise<void> {
     await this.ensureInitialized();
     const nextContent = content.trim();
@@ -1329,8 +1647,11 @@ export class TextRuntime {
     const queue = this.controllerThreadState.queuedFollowUps ?? [];
     if (!queue.some((item) => item.id === id)) throw new Error("Queued message not found");
     this.controllerThreadState = { ...this.controllerThreadState, queuedFollowUps: queue.map((item) => item.id === id ? { ...item, content: nextContent } : item) };
-    await this.persistThreadState(this.controllerThreadId ?? this.selectedThreadId ?? "", this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId) this.publish({ workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
+    const optimistic = this.optimisticUserMessages.get(id);
+    if (optimistic) this.optimisticUserMessages.set(id, { ...optimistic, message: { ...optimistic.message, text: nextContent } });
+    const threadId = this.controllerThreadId ?? this.selectedThreadId ?? "";
+    await this.persistThreadState(threadId, this.controllerThreadState);
+    if (this.selectedThreadId === this.controllerThreadId && threadId) this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
   }
 
   async removeQueuedFollowUp(id: string): Promise<void> {
@@ -1338,8 +1659,10 @@ export class TextRuntime {
     const queue = this.controllerThreadState.queuedFollowUps ?? [];
     if (!queue.some((item) => item.id === id)) throw new Error("Queued message not found");
     this.controllerThreadState = { ...this.controllerThreadState, queuedFollowUps: queue.filter((item) => item.id !== id) };
-    await this.persistThreadState(this.controllerThreadId ?? this.selectedThreadId ?? "", this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId) this.publish({ workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
+    this.optimisticUserMessages.delete(id);
+    const threadId = this.controllerThreadId ?? this.selectedThreadId ?? "";
+    await this.persistThreadState(threadId, this.controllerThreadState);
+    if (this.selectedThreadId === this.controllerThreadId && threadId) this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages.filter((message) => message.id !== id)), workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
   }
 
   async restoreQueuedFollowUp(id: string): Promise<void> {
@@ -1352,11 +1675,38 @@ export class TextRuntime {
       clearedFollowUps: cleared.filter((entry) => entry.id !== id),
       queuedFollowUps: [...(this.controllerThreadState.queuedFollowUps ?? []), item],
     };
+    const threadId = this.controllerThreadId ?? this.selectedThreadId;
+    if (threadId) this.optimisticUserMessages.set(item.id, { threadId, message: { id: item.id, role: "user", text: item.content, status: "complete", createdAt: item.createdAt } });
     await this.persistThreadState(this.controllerThreadId ?? this.selectedThreadId ?? "", this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId) this.publish({ workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
+    if (this.selectedThreadId === this.controllerThreadId && threadId) this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
   }
 
   async retry(messageId: string): Promise<{ runId: string }> {
+    if (this.startingRun || this.runId || this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
+    this.startingRun = true;
+    this.startingRunAbortRequested = false;
+    const reservationThreadId = this.selectedThreadId ?? this.controllerThreadId ?? this.snapshot.activeThreadId;
+    const reservationId = reservationThreadId ? `starting:retry:${randomUUID()}` : null;
+    this.startingRunId = reservationId;
+    if (reservationId && reservationThreadId) {
+      this.publish({ status: "running", activeRun: { runId: reservationId, threadId: reservationThreadId, status: "running" }, error: null, retryMessageId: null });
+    }
+    try {
+      return await this.retryReserved(messageId);
+    } finally {
+      const abortedBeforeStart = this.startingRunAbortRequested;
+      this.startingRun = false;
+      this.startingRunAbortRequested = false;
+      if (this.startingRunId === reservationId) {
+        this.startingRunId = null;
+        if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
+          this.publish({ status: this.snapshot.credential.verified ? "ready" : "needs-key", activeRun: null, ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}) });
+        }
+      }
+    }
+  }
+
+  private async retryReserved(messageId: string): Promise<{ runId: string }> {
     await this.ensureInitialized();
     if (this.runId) throw makeRuntimeError("busy");
     const session = this.requireSession();
@@ -1366,15 +1716,22 @@ export class TextRuntime {
     let sourceIndex = -1;
     if (index >= 0) {
       for (let candidate = index; candidate >= 0; candidate -= 1) {
-        if (messages[candidate].role === "user") {
+        if (chatRole(messages[candidate]) === "user") {
           sourceIndex = candidate;
           break;
         }
       }
     }
     const source = sourceIndex >= 0 ? messages[sourceIndex] : undefined;
-    const content = source ? extractText(source) : undefined;
-    if (!source || !content) throw new Error("The original user message could not be recovered");
+    const optimistic = !source ? this.optimisticUserMessages.get(messageId) : undefined;
+    const content = source ? extractText(source) : optimistic?.message.text;
+    if (!content) throw new Error("The original user message could not be recovered");
+    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
+    if (!source) {
+      this.retryingText = null;
+      this.hideSingleRetry = false;
+      return this.startRun(content, { optimistic: true, clientMessageId: messageId });
+    }
     const originalThread = await session.thread.getById({ threadId: sourceThreadId });
     const sourceState = await this.loadThreadState(sourceThreadId);
     const retryThread = await session.thread.clone({
@@ -1393,11 +1750,11 @@ export class TextRuntime {
     };
     await this.persistThreadState(retryThread.id, retryState);
     const retryMessages = (await session.thread.listMessages({ threadId: retryThread.id })) as MastraMessage[];
-    const sourceUserOrdinal = messages.slice(0, sourceIndex + 1).filter((message) => message.role === "user" && extractText(message) === content).length - 1;
+    const sourceUserOrdinal = messages.slice(0, sourceIndex + 1).filter((message) => chatRole(message) === "user" && extractText(message) === content).length - 1;
     let retrySourceIndex = -1;
     let seenMatchingUser = 0;
     for (let candidate = 0; candidate < retryMessages.length; candidate += 1) {
-      if (retryMessages[candidate].role === "user" && extractText(retryMessages[candidate]) === content) {
+      if (chatRole(retryMessages[candidate]) === "user" && extractText(retryMessages[candidate]) === content) {
         if (seenMatchingUser === sourceUserOrdinal) {
           retrySourceIndex = candidate;
           break;
@@ -1408,15 +1765,43 @@ export class TextRuntime {
     if (retrySourceIndex < 0) throw new Error("The retry branch could not recover the original turn");
     const removeIds = retryMessages.slice(retrySourceIndex).map((message) => message.id);
     if (removeIds.length > 0) await this.memory.deleteMessages(removeIds);
+    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     await this.syncThreadState();
+    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     this.retryingText = null;
     this.hideSingleRetry = false;
-    return this.startRun(content);
+    return this.startRun(content, { optimistic: true });
   }
 
   async continueFrom(messageId: string): Promise<{ runId: string }> {
+    if (this.startingRun || this.runId || this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
+    this.startingRun = true;
+    this.startingRunAbortRequested = false;
+    const reservationThreadId = this.selectedThreadId ?? this.controllerThreadId ?? this.snapshot.activeThreadId;
+    const reservationId = reservationThreadId ? `starting:continue:${randomUUID()}` : null;
+    this.startingRunId = reservationId;
+    if (reservationId && reservationThreadId) {
+      this.publish({ status: "running", activeRun: { runId: reservationId, threadId: reservationThreadId, status: "running" }, error: null, retryMessageId: null });
+    }
+    try {
+      return await this.continueReserved(messageId);
+    } finally {
+      const abortedBeforeStart = this.startingRunAbortRequested;
+      this.startingRun = false;
+      this.startingRunAbortRequested = false;
+      if (this.startingRunId === reservationId) {
+        this.startingRunId = null;
+        if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
+          this.publish({ status: this.snapshot.credential.verified ? "ready" : "needs-key", activeRun: null, ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}) });
+        }
+      }
+    }
+  }
+
+  private async continueReserved(messageId: string): Promise<{ runId: string }> {
     await this.ensureInitialized();
     if (this.runId) throw makeRuntimeError("busy");
+    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     const message = this.snapshot.messages.find((item) => item.id === messageId);
     if (!message) throw new Error("Stopped response not found");
     const continuation = "Continue from the stopped response without repeating what is already visible. Finish the answer naturally.";
@@ -1426,7 +1811,13 @@ export class TextRuntime {
   }
 
   abort(): void {
-    if (!this.runId) return;
+    if (!this.runId) {
+      if (this.startingRun && this.startingRunId && this.snapshot.activeRun?.runId === this.startingRunId) {
+        this.startingRunAbortRequested = true;
+        this.publish({ activeRun: { runId: this.startingRunId, threadId: this.snapshot.activeRun.threadId, status: "aborted" }, error: makeRuntimeError("aborted") });
+      }
+      return;
+    }
     this.runOutcome = "interrupted";
     this.runError = makeRuntimeError("aborted");
     const pendingInteractions = this.controllerThreadState.pendingInteractions ?? [];
@@ -1450,26 +1841,40 @@ export class TextRuntime {
 
   private async finishFailedRun(runId: string, normalized: RuntimeError): Promise<void> {
     if (this.runId !== runId) return;
+    const selectionGeneration = this.threadSelectionGeneration;
     this.runOutcome = normalized.code === "aborted" ? "interrupted" : "error";
     this.runError = normalized;
+    this.runTerminalHandled = true;
+    this.markAssistantProjectionOutcome(runId, normalized.code === "aborted" ? "interrupted" : "error");
+    this.discardEmptyAssistantProjection(runId);
     this.runId = null;
+    const retryMessageId = this.runClientMessageId;
+    this.runClientMessageId = null;
     const failedThreadId = this.controllerThreadId ?? this.selectedThreadId ?? "unknown";
     this.publish({
       status: normalized.code === "offline" ? "offline" : normalized.code === "secure-store-unavailable" ? "error" : normalized.code === "invalid-credential" ? "needs-key" : "ready",
       activeRun: null,
       error: normalized,
+      retryMessageId,
       ...(normalized.code === "invalid-credential" ? { credential: { configured: true, verified: false } } : {}),
     });
     this.updateThreadActivity(failedThreadId, normalized.code === "aborted" ? "interrupted" : "error");
-    await this.syncMessagesSafely(failedThreadId);
+    await this.retryAssistantProjectionPersistence(failedThreadId, runId, selectionGeneration);
     await this.refreshThreadSummaries();
-    if (this.selectedThreadId === failedThreadId) await this.publishSelectedThread(failedThreadId, { clearError: false });
+    if (this.selectedThreadId === failedThreadId) await this.publishSelectedThread(failedThreadId, { clearError: false }, selectionGeneration);
     const outcome = normalized.code === "aborted" ? "interrupted" : "error";
-    if (this.runId === null && this.runOutcome === outcome && this.runError?.code === normalized.code) {
+    if (
+      selectionGeneration === this.threadSelectionGeneration
+      && this.selectedThreadId === failedThreadId
+      && this.runId === null
+      && this.runOutcome === outcome
+      && this.runError?.code === normalized.code
+    ) {
       this.publish({
         status: normalized.code === "offline" ? "offline" : normalized.code === "secure-store-unavailable" ? "error" : normalized.code === "invalid-credential" ? "needs-key" : "ready",
         activeRun: null,
         error: normalized,
+        retryMessageId,
         ...(normalized.code === "invalid-credential" ? { credential: { configured: true, verified: false } } : {}),
       });
     }

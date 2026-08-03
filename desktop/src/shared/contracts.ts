@@ -184,17 +184,27 @@ export const activeRunSchema = z.object({
 });
 export type ActiveRun = z.infer<typeof activeRunSchema>;
 
+export const toolApprovalSchema = z.object({
+  toolCallId: z.string().min(1),
+  toolName: z.string().min(1),
+  args: z.unknown(),
+});
+export type ToolApproval = z.infer<typeof toolApprovalSchema>;
+
 export const runtimeSnapshotSchema = z.object({
+  revision: z.number().int().nonnegative().default(0),
   status: runtimeStatusSchema,
   credential: credentialStatusSchema,
   models: z.array(openRouterModelSchema),
   selectedModelId: openRouterModelIdSchema,
   threads: z.array(threadSummarySchema),
   activeThreadId: z.string().nullable(),
+  retryMessageId: z.string().min(1).nullable().default(null),
   messages: z.array(chatMessageSchema),
   events: z.array(chatEventSchema),
   interactions: z.array(pendingInteractionSchema),
   resolvedInteractions: z.array(pendingInteractionSchema),
+  toolApproval: toolApprovalSchema.nullable().default(null),
   workbench: workbenchSchema,
   activeRun: activeRunSchema.nullable(),
   error: runtimeErrorSchema.nullable(),
@@ -230,11 +240,12 @@ export const proteusRpcSchema = {
       "threads.select": { params: {} as { threadId: string }, response: {} as { accepted: boolean } },
       "threads.rename": { params: {} as { threadId: string; title: string }, response: {} as { accepted: boolean } },
       "threads.delete": { params: {} as { threadId: string }, response: {} as { accepted: boolean } },
-      "chat.send": { params: {} as { text: string }, response: {} as { accepted: boolean; runId: string } },
+      "chat.send": { params: {} as { text: string; clientMessageId: string }, response: {} as { accepted: boolean; runId: string } },
       "chat.steer": { params: {} as { text: string }, response: {} as { accepted: boolean; runId: string } },
       "chat.retry": { params: {} as { messageId: string }, response: {} as { accepted: boolean; runId: string } },
       "chat.continue": { params: {} as { messageId: string }, response: {} as { accepted: boolean; runId: string } },
       "chat.interaction.respond": { params: {} as { toolCallId: string; response: unknown }, response: {} as { accepted: boolean } },
+      "chat.tool-approval.respond": { params: {} as { toolCallId: string; approved: boolean }, response: {} as { accepted: boolean } },
       "chat.queue.update": { params: {} as { id: string; content: string }, response: {} as { accepted: boolean } },
       "chat.queue.remove": { params: {} as { id: string }, response: {} as { accepted: boolean } },
       "chat.queue.restore": { params: {} as { id: string }, response: {} as { accepted: boolean } },
