@@ -531,6 +531,9 @@ export class TextRuntime {
       instructions: AGENT_INSTRUCTIONS,
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
+      defaultOptions: {
+        prepareStep: this.taskToolPolicy.prepareStep,
+      },
       transform: {
         targets: ["display", "transcript"],
         transformToolPayload: ({ phase, input, inputTextDelta, output, error, suspendPayload, resumeData }) => {

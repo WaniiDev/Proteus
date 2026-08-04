@@ -11,10 +11,10 @@ describe("TaskToolPolicy", () => {
 
     const repeated = await policy.hooks.beforeToolCall?.({ toolName: "task_update", input: { status: "in_progress", id: "one" }, context });
 
-    expect(repeated).toMatchObject({ proceed: false, output: { isError: true, tasks } });
+    expect(repeated).toMatchObject({ proceed: false, output: { isError: false, tasks } });
   });
 
-  it("blocks alternating task calls after three unchanged native outputs", async () => {
+  it("returns an idempotent native snapshot after repeated no-progress mutations", async () => {
     const policy = new TaskToolPolicy();
     for (const [toolName, input] of [
       ["task_update", { id: "one", status: "in_progress" }],
@@ -26,8 +26,44 @@ describe("TaskToolPolicy", () => {
 
     const blocked = await policy.hooks.beforeToolCall?.({ toolName: "task_check", input: {}, context });
 
-    expect(blocked).toMatchObject({ proceed: false, output: { isError: true } });
-    expect((blocked as { output: { content: string } }).output.content).toContain("no progress");
+    expect(blocked).toBeUndefined();
+    const mutation = await policy.hooks.beforeToolCall?.({ toolName: "task_update", input: { id: "one", status: "in_progress" }, context });
+    expect(mutation).toMatchObject({ proceed: false, output: { isError: false, tasks } });
+  });
+
+  it("never treats task_check as a repeated mutation", async () => {
+    const policy = new TaskToolPolicy();
+    const output = { content: "All complete", tasks, isError: false, summary: { allCompleted: true } };
+    await policy.hooks.afterToolCall?.({ toolName: "task_check", input: {}, output, context });
+
+    expect(await policy.hooks.beforeToolCall?.({ toolName: "task_check", input: {}, context })).toBeUndefined();
+  });
+
+  it("forces the step after a completed task_check to be text-only", () => {
+    const policy = new TaskToolPolicy();
+    const result = policy.prepareStep({
+      steps: [
+        {
+          toolResults: [
+            {
+              toolName: "task_check",
+              output: { content: "All complete", tasks, isError: false, summary: { allCompleted: true } },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({ toolChoice: "none" });
+  });
+
+  it("bounds three unchanged task snapshots with a text-only step", () => {
+    const policy = new TaskToolPolicy();
+    const steps = ["task_update", "task_complete", "task_update"].map((toolName) => ({
+      toolResults: [{ toolName, result: { content: "No change", tasks, isError: false } }],
+    }));
+
+    expect(policy.prepareStep({ steps })).toEqual({ toolChoice: "none" });
   });
 
   it("resets its run-local repetition state", async () => {
