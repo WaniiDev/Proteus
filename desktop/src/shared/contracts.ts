@@ -1,29 +1,10 @@
 import { z } from "zod";
 
-export const orbStates = [
-  "idle",
-  "listening",
-  "thinking",
-  "working",
-  "waiting",
-  "speaking",
-  "done",
-  "interrupted",
-  "recovery",
-] as const;
+export const orbStates = ["idle", "listening", "thinking", "working", "waiting", "speaking", "done", "interrupted", "recovery"] as const;
 export const orbStateSchema = z.enum(orbStates);
 export type OrbState = z.infer<typeof orbStateSchema>;
 
-export const runtimeStatusSchema = z.enum([
-  "booting",
-  "needs-key",
-  "validating-key",
-  "loading-models",
-  "ready",
-  "running",
-  "offline",
-  "error",
-]);
+export const runtimeStatusSchema = z.enum(["booting", "needs-key", "validating-key", "loading-models", "ready", "running", "offline", "error"]);
 export type RuntimeStatus = z.infer<typeof runtimeStatusSchema>;
 
 export const credentialStatusSchema = z.object({
@@ -32,21 +13,7 @@ export const credentialStatusSchema = z.object({
 });
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 
-export const providerErrorCodeSchema = z.enum([
-  "invalid-credential",
-  "insufficient-credits",
-  "forbidden",
-  "model-unavailable",
-  "context-too-large",
-  "rate-limited",
-  "timeout",
-  "offline",
-  "aborted",
-  "busy",
-  "secure-store-unavailable",
-  "catalog-unavailable",
-  "unknown",
-]);
+export const providerErrorCodeSchema = z.enum(["invalid-credential", "insufficient-credits", "forbidden", "model-unavailable", "context-too-large", "rate-limited", "timeout", "offline", "aborted", "busy", "secure-store-unavailable", "catalog-unavailable", "unknown"]);
 export type ProviderErrorCode = z.infer<typeof providerErrorCodeSchema>;
 
 export const runtimeErrorSchema = z.object({
@@ -72,13 +39,38 @@ export const openRouterModelSchema = z.object({
 });
 export type OpenRouterModel = z.infer<typeof openRouterModelSchema>;
 
+export const chatTextPartSchema = z.object({
+  type: z.literal("text"),
+  id: z.string().min(1),
+  text: z.string(),
+});
+
+export const toolActivityStatusSchema = z.enum(["streaming_input", "running", "waiting", "completed", "error", "cancelled", "declined"]);
+export const chatToolPartSchema = z.object({
+  type: z.literal("tool"),
+  id: z.string().min(1),
+  toolCallId: z.string().min(1),
+  name: z.string().min(1),
+  label: z.string().min(1),
+  status: toolActivityStatusSchema,
+  inputSummary: z.string().optional(),
+  outputSummary: z.string().optional(),
+  input: z.unknown().optional(),
+  output: z.unknown().optional(),
+  error: z.string().optional(),
+});
+export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema]);
+export type ChatMessagePart = z.infer<typeof chatMessagePartSchema>;
+export type ChatToolPart = z.infer<typeof chatToolPartSchema>;
+
 export const chatMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["user", "assistant"]),
   text: z.string(),
   status: z.enum(["complete", "streaming", "interrupted", "error"]),
   createdAt: z.string(),
-  turnId: z.string().optional(),
+  turnId: z.string().min(1),
+  parts: z.array(chatMessagePartSchema),
   attempt: z.number().int().positive().optional(),
   retryable: z.boolean().optional(),
 });
@@ -106,8 +98,19 @@ export type WorkbenchTask = z.infer<typeof workbenchTaskSchema>;
 export const interactionKindSchema = z.enum(["ask_user", "submit_plan"]);
 export type InteractionKind = z.infer<typeof interactionKindSchema>;
 
-export const interactionStatusSchema = z.enum(["pending", "resolving", "approved", "rejected", "answered", "cancelled"]);
+export const interactionStatusSchema = z.enum(["pending", "resolving", "approved", "rejected", "answered", "cancelled", "failed"]);
 export type InteractionStatus = z.infer<typeof interactionStatusSchema>;
+
+export const interactionErrorSchema = z.object({
+  code: z.enum(["invalid-response", "stale", "busy", "resume-denied", "resume-failed"]),
+  message: z.string().min(1),
+  retryable: z.boolean(),
+});
+export type InteractionError = z.infer<typeof interactionErrorSchema>;
+
+export type InteractionResponseResult =
+  | { accepted: true }
+  | { accepted: false; code: InteractionError["code"]; message: string; retryable: boolean };
 
 export const planVersionSchema = z.object({
   version: z.number().int().positive(),
@@ -126,13 +129,19 @@ export const pendingInteractionSchema = z.object({
   kind: interactionKindSchema,
   title: z.string(),
   question: z.string().optional(),
-  options: z.array(z.object({
-    label: z.string(),
-    description: z.string().optional(),
-  })).default([]),
+  options: z
+    .array(
+      z.object({
+        label: z.string(),
+        description: z.string().optional(),
+      }),
+    )
+    .default([]),
   selectionMode: z.enum(["single_select", "multi_select"]).optional(),
   plan: planVersionSchema.optional(),
   status: interactionStatusSchema,
+  originMessageId: z.string().min(1).optional(),
+  error: interactionErrorSchema.optional(),
   createdAt: z.string(),
 });
 export type PendingInteraction = z.infer<typeof pendingInteractionSchema>;
@@ -163,7 +172,6 @@ export const workbenchSchema = z.object({
   queuedFollowUps: z.array(queuedFollowUpSchema),
   clearedFollowUps: z.array(queuedFollowUpSchema),
   tokenUsage: tokenUsageSchema,
-  activeTools: z.array(z.object({ id: z.string(), name: z.string(), status: z.string() })),
 });
 export type WorkbenchState = z.infer<typeof workbenchSchema>;
 
@@ -203,7 +211,6 @@ export const runtimeSnapshotSchema = z.object({
   messages: z.array(chatMessageSchema),
   events: z.array(chatEventSchema),
   interactions: z.array(pendingInteractionSchema),
-  resolvedInteractions: z.array(pendingInteractionSchema),
   toolApproval: toolApprovalSchema.nullable().default(null),
   workbench: workbenchSchema,
   activeRun: activeRunSchema.nullable(),
@@ -215,41 +222,105 @@ export type RuntimeSnapshot = z.infer<typeof runtimeSnapshotSchema>;
  * Runtime snapshots cross Electrobun's native JavaScript-evaluation fallback.
  * Keep the outer packet ASCII-only and carry the original UTF-8 JSON in Base64.
  */
-export const runtimeSnapshotEnvelopeSchema = z.object({
-  version: z.literal(1),
-  encoding: z.literal("utf8-base64-json"),
-  data: z.string()
-    .min(1)
-    .regex(
-      /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
-      "Runtime snapshot envelope data must be standard Base64",
-    ),
-}).strict();
+export const runtimeSnapshotEnvelopeSchema = z
+  .object({
+    version: z.literal(1),
+    encoding: z.literal("utf8-base64-json"),
+    data: z
+      .string()
+      .min(1)
+      .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/, "Runtime snapshot envelope data must be standard Base64"),
+  })
+  .strict();
 export type RuntimeSnapshotEnvelope = z.infer<typeof runtimeSnapshotEnvelopeSchema>;
 
 export const proteusRpcSchema = {
   bun: {
     requests: {
-      "runtime.bootstrap": { params: undefined as undefined, response: {} as RuntimeSnapshotEnvelope },
-      "credentials.connect": { params: {} as { apiKey: string }, response: {} as { accepted: boolean } },
-      "credentials.disconnect": { params: undefined as undefined, response: {} as { accepted: boolean } },
-      "models.refresh": { params: undefined as undefined, response: {} as { accepted: boolean } },
-      "models.select": { params: {} as { modelId: OpenRouterModelId }, response: {} as { accepted: boolean } },
-      "threads.create": { params: {} as { title?: string } | undefined, response: {} as { threadId: string } },
-      "threads.switch": { params: {} as { threadId: string }, response: {} as { accepted: boolean } },
-      "threads.select": { params: {} as { threadId: string }, response: {} as { accepted: boolean } },
-      "threads.rename": { params: {} as { threadId: string; title: string }, response: {} as { accepted: boolean } },
-      "threads.delete": { params: {} as { threadId: string }, response: {} as { accepted: boolean } },
-      "chat.send": { params: {} as { text: string; clientMessageId: string }, response: {} as { accepted: boolean; runId: string } },
-      "chat.steer": { params: {} as { text: string }, response: {} as { accepted: boolean; runId: string } },
-      "chat.retry": { params: {} as { messageId: string }, response: {} as { accepted: boolean; runId: string } },
-      "chat.continue": { params: {} as { messageId: string }, response: {} as { accepted: boolean; runId: string } },
-      "chat.interaction.respond": { params: {} as { toolCallId: string; response: unknown }, response: {} as { accepted: boolean } },
-      "chat.tool-approval.respond": { params: {} as { toolCallId: string; approved: boolean }, response: {} as { accepted: boolean } },
-      "chat.queue.update": { params: {} as { id: string; content: string }, response: {} as { accepted: boolean } },
-      "chat.queue.remove": { params: {} as { id: string }, response: {} as { accepted: boolean } },
-      "chat.queue.restore": { params: {} as { id: string }, response: {} as { accepted: boolean } },
-      "chat.abort": { params: undefined as undefined, response: {} as { accepted: boolean } },
+      "runtime.bootstrap": {
+        params: undefined as undefined,
+        response: {} as RuntimeSnapshotEnvelope,
+      },
+      "credentials.connect": {
+        params: {} as { apiKey: string },
+        response: {} as { accepted: boolean },
+      },
+      "credentials.disconnect": {
+        params: undefined as undefined,
+        response: {} as { accepted: boolean },
+      },
+      "models.refresh": {
+        params: undefined as undefined,
+        response: {} as { accepted: boolean },
+      },
+      "models.select": {
+        params: {} as { modelId: OpenRouterModelId },
+        response: {} as { accepted: boolean },
+      },
+      "threads.create": {
+        params: {} as { title?: string } | undefined,
+        response: {} as { threadId: string },
+      },
+      "threads.switch": {
+        params: {} as { threadId: string },
+        response: {} as { accepted: boolean },
+      },
+      "threads.select": {
+        params: {} as { threadId: string },
+        response: {} as { accepted: boolean },
+      },
+      "threads.rename": {
+        params: {} as { threadId: string; title: string },
+        response: {} as { accepted: boolean },
+      },
+      "threads.delete": {
+        params: {} as { threadId: string },
+        response: {} as { accepted: boolean },
+      },
+      "chat.send": {
+        params: {} as { text: string; clientMessageId: string },
+        response: {} as { accepted: boolean; runId: string },
+      },
+      "chat.steer": {
+        params: {} as { text: string },
+        response: {} as { accepted: boolean; runId: string },
+      },
+      "chat.retry": {
+        params: {} as { messageId: string },
+        response: {} as { accepted: boolean; runId: string },
+      },
+      "chat.continue": {
+        params: {} as { messageId: string },
+        response: {} as { accepted: boolean; runId: string },
+      },
+      "chat.interaction.respond": {
+        params: {} as { toolCallId: string; response: unknown },
+        response: {} as InteractionResponseResult,
+      },
+      "chat.interaction.dismiss": {
+        params: {} as { toolCallId: string },
+        response: {} as InteractionResponseResult,
+      },
+      "chat.tool-approval.respond": {
+        params: {} as { toolCallId: string; approved: boolean },
+        response: {} as { accepted: boolean },
+      },
+      "chat.queue.update": {
+        params: {} as { id: string; content: string },
+        response: {} as { accepted: boolean },
+      },
+      "chat.queue.remove": {
+        params: {} as { id: string },
+        response: {} as { accepted: boolean },
+      },
+      "chat.queue.restore": {
+        params: {} as { id: string },
+        response: {} as { accepted: boolean },
+      },
+      "chat.abort": {
+        params: undefined as undefined,
+        response: {} as { accepted: boolean },
+      },
     },
     messages: {},
   },

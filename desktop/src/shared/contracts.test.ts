@@ -18,7 +18,6 @@ describe("OpenRouter contracts", () => {
       messages: [],
       events: [],
       interactions: [],
-      resolvedInteractions: [],
       workbench: {
         status: "idle",
         tasks: [],
@@ -26,7 +25,6 @@ describe("OpenRouter contracts", () => {
         queuedFollowUps: [],
         clearedFollowUps: [],
         tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-        activeTools: [],
       },
       activeRun: null,
       error: null,
@@ -50,10 +48,18 @@ describe("OpenRouter contracts", () => {
         status: "approved",
         feedback: "Looks good",
       },
-      status: "resolving",
+      status: "failed",
+      originMessageId: "user-turn-1",
+      error: {
+        code: "resume-denied",
+        message: "Mastra denied this plan response.",
+        retryable: true,
+      },
       createdAt: new Date().toISOString(),
     });
-    expect(interaction.status).toBe("resolving");
+    expect(interaction.status).toBe("failed");
+    expect(interaction.originMessageId).toBe("user-turn-1");
+    expect(interaction.error?.code).toBe("resume-denied");
     expect(interaction.plan?.raw).toContain("Do the work");
   });
 });

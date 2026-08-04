@@ -174,11 +174,18 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       },
       "chat.interaction.respond": async ({ toolCallId, response }) => {
         try {
-          await runtime.respondToInteraction(toolCallId, response);
-          return { accepted: true };
+          return await runtime.respondToInteraction(toolCallId, response);
         } catch (error) {
           runtime.reportError(error);
-          return { accepted: false };
+          return { accepted: false, code: "resume-failed" as const, message: "The interaction could not be processed.", retryable: true };
+        }
+      },
+      "chat.interaction.dismiss": async ({ toolCallId }) => {
+        try {
+          return await runtime.dismissInteraction(toolCallId);
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false, code: "resume-failed" as const, message: "The interaction could not be dismissed.", retryable: true };
         }
       },
       "chat.tool-approval.respond": async ({ toolCallId, approved }) => {

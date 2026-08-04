@@ -1,5 +1,5 @@
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
-import type { ChatMessage, PendingInteraction, WorkbenchTask } from "../shared/contracts";
+import type { ChatMessage, ChatToolPart, PendingInteraction, WorkbenchTask } from "../shared/contracts";
 
 type TaskLike = { id?: unknown; content?: unknown; activeForm?: unknown; status?: unknown };
 
@@ -8,6 +8,48 @@ type SuspendedToolLike = {
   toolName: string;
   suspendPayload: unknown;
 };
+
+export type InteractionToolOutcome = {
+  status: Extract<ChatToolPart["status"], "completed" | "error" | "cancelled" | "declined">;
+  toolCallId: string;
+  decision?: "approved" | "rejected";
+};
+
+export function submitPlanDecision(value: unknown): "approved" | "rejected" | null {
+  if (!value || typeof value !== "object") return null;
+  const content = (value as { content?: unknown }).content;
+  if (typeof content !== "string") return null;
+  if (content === "The user approved the plan. Continue with the approved work.") return "approved";
+  if (content.startsWith("The user requested plan changes")) return "rejected";
+  return null;
+}
+
+/**
+ * Mastra can persist a resumed submit_plan result under a fresh tool-call ID.
+ * Exact IDs remain authoritative; aliases are accepted only for the trusted
+ * submit_plan result contract within the interaction's originating turn.
+ */
+export function findInteractionToolOutcome(
+  messages: ChatMessage[],
+  interaction: PendingInteraction,
+  expectedDecision?: "approved" | "rejected",
+): InteractionToolOutcome | null {
+  const parts = messages
+    .filter((message) => message.role === "assistant" && (!interaction.originMessageId || message.turnId === interaction.originMessageId))
+    .flatMap((message) => message.parts)
+    .filter((part): part is ChatToolPart => part.type === "tool" && part.name === (interaction.kind === "submit_plan" ? "submit_plan" : "ask_user"));
+  const terminal = (part: ChatToolPart) => part.status === "completed" || part.status === "error" || part.status === "cancelled" || part.status === "declined";
+  const exact = parts.find((part) => part.toolCallId === interaction.toolCallId && terminal(part));
+  if (exact) return { status: exact.status as InteractionToolOutcome["status"], toolCallId: exact.toolCallId, ...(exact.status === "completed" && interaction.kind === "submit_plan" ? { decision: submitPlanDecision(exact.output) ?? undefined } : {}) };
+  if (interaction.kind !== "submit_plan") return null;
+  const aliases = parts.flatMap((part): InteractionToolOutcome[] => {
+    if (!terminal(part)) return [];
+    const decision = part.status === "completed" ? submitPlanDecision(part.output) : null;
+    if (!decision || (expectedDecision && decision !== expectedDecision)) return [];
+    return [{ status: part.status as InteractionToolOutcome["status"], toolCallId: part.toolCallId, decision }];
+  });
+  return aliases.length === 1 ? aliases[0] : null;
+}
 
 function taskFromMastra(task: TaskLike): WorkbenchTask | null {
   if (typeof task.id !== "string" || typeof task.content !== "string" || typeof task.activeForm !== "string") return null;
@@ -30,7 +72,7 @@ function parsePlanText(value: string | undefined): { title: string; summary: str
   return { title, summary, steps, raw: text };
 }
 
-export function parseSuspendedInteraction(input: SuspendedToolLike, version: number): PendingInteraction | null {
+export function parseSuspendedInteraction(input: SuspendedToolLike, version: number, originMessageId?: string): PendingInteraction | null {
   const payload = input.suspendPayload && typeof input.suspendPayload === "object" ? input.suspendPayload as Record<string, unknown> : {};
   if (input.toolName === "ask_user") {
     const options = Array.isArray(payload.options)
@@ -49,6 +91,7 @@ export function parseSuspendedInteraction(input: SuspendedToolLike, version: num
       options,
       selectionMode: payload.selectionMode === "multi_select" ? "multi_select" : options.length > 0 ? "single_select" : undefined,
       status: "pending",
+      ...(originMessageId ? { originMessageId } : {}),
       createdAt: new Date().toISOString(),
     };
   }
@@ -62,6 +105,7 @@ export function parseSuspendedInteraction(input: SuspendedToolLike, version: num
       options: [],
       plan: { version, ...parsed, status: "draft" },
       status: "pending",
+      ...(originMessageId ? { originMessageId } : {}),
       createdAt: new Date().toISOString(),
     };
   }
@@ -83,7 +127,7 @@ export function projectPendingInteractions(
   // interactions until an explicit response/cancel path removes them; a
   // transiently incomplete display-state snapshot must not send the UI back to
   // a generic "Thinking" state.
-  const next = existing.filter((item) => item.status === "pending" || item.status === "resolving" || live.has(item.toolCallId));
+  const next = existing.filter((item) => item.status === "pending" || item.status === "resolving" || item.status === "failed" || live.has(item.toolCallId));
   let version = firstPlanVersion;
   for (const suspension of live.values()) {
     const parsed = parseSuspendedInteraction(suspension, version);
@@ -91,7 +135,7 @@ export function projectPendingInteractions(
     if (parsed.kind === "submit_plan") version += 1;
     const previous = existing.find((item) => item.toolCallId === parsed.toolCallId);
     const index = next.findIndex((item) => item.toolCallId === parsed.toolCallId);
-    const merged = previous ? { ...parsed, status: previous.status, createdAt: previous.createdAt, ...(previous.plan ? { plan: previous.plan } : {}) } : parsed;
+    const merged = previous ? { ...parsed, status: previous.status, createdAt: previous.createdAt, ...(previous.plan ? { plan: previous.plan } : {}), ...(previous.originMessageId ? { originMessageId: previous.originMessageId } : {}), ...(previous.error ? { error: previous.error } : {}) } : parsed;
     if (index >= 0) next[index] = merged;
     else next.push(merged);
   }

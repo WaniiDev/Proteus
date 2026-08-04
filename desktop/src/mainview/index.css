@@ -69,6 +69,8 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .interaction-card { width: min(100%, 720px); border: 1px solid var(--hairline-strong); border-radius: var(--r-xl); padding: var(--s-lg); background: var(--surface-card); box-shadow: var(--shadow-soft); }
 .interaction-card.resolving { opacity: .72; }
 .interaction-card.resolving .interaction-kicker { color: var(--body-strong); }
+.interaction-card.failed { border-color: color-mix(in srgb, var(--danger) 35%, var(--hairline-strong)); }
+.interaction-error { margin: var(--s-sm) 0 0; color: var(--danger); font-size: 13px; line-height: 1.45; }
 .interaction-card h3 { margin: 4px 0 6px; font-size: 16px; font-weight: 500; color: var(--ink); }
 .interaction-card > p { color: var(--body); font-size: 14px; line-height: 1.5; }
 .interaction-kicker { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; }
@@ -90,10 +92,6 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .plan-markdown h1, .plan-markdown h2, .plan-markdown h3 { margin: .7em 0 .3em; font-size: 1.05em; }
 .plan-markdown > :first-child { margin-top: 0; }
 .chat-event { align-self: center; max-width: 90%; color: var(--muted-soft); font-size: 11px; line-height: 1.4; text-align: center; }
-.resolved-interactions { color: var(--muted); font-size: 12px; }
-.resolved-interactions summary { cursor: pointer; padding: 4px 0; }
-.resolved-item { display: flex; align-items: center; gap: 7px; padding: 7px 0; border-bottom: 1px solid var(--hairline-soft); }
-.resolved-item small { margin-left: auto; color: var(--muted-soft); text-transform: capitalize; }
 .resolved-copy { min-width: 0; flex: 1; color: var(--body-strong); }
 .resolved-plan-body { margin-top: 5px; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 .resolved-plan-body p { margin: 0; }
@@ -129,10 +127,6 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .wb-muted { margin-top: 9px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 .wb-link { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 8px 9px; border-radius: var(--r-md); color: var(--body-strong); background: var(--canvas-soft); font-size: 12.5px; text-align: left; }
 .wb-link:hover { background: var(--surface-strong); }
-.wb-tools { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; list-style: none; }
-.wb-tools li { display: flex; align-items: center; gap: 7px; color: var(--body-strong); font-size: 12.5px; }
-.wb-tools small { margin-left: auto; color: var(--muted-soft); font-size: 10px; }
-.tool-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--g-mint); }
 .wb-steps { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; list-style: none; }
 .wb-steps li { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 .wb-steps li.in_progress { color: var(--ink); font-weight: 500; }
@@ -352,8 +346,33 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .runtime-alert.muted { background: var(--canvas-soft); border: 1px solid var(--hairline); color: var(--muted); }
 .composer-running { display: flex; align-items: center; justify-content: space-between; gap: var(--s-base); padding: 6px 8px 6px 18px; border: 1px solid var(--hairline-strong); border-radius: var(--r-pill); background: var(--surface-card); box-shadow: var(--shadow-soft); }
 .composer-running-label { color: var(--muted); font-size: 14px; }
-.stream-caret { display: inline-block; margin-left: 2px; color: var(--g-lavender); animation: caretBlink 1s steps(2,end) infinite; }
-@keyframes caretBlink { 50% { opacity: 0; } }
+.typing-dots { display: flex; gap: 5px; align-items: center; min-height: 24px; padding: 4px 2px; }
+.typing-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--muted-soft); animation: dotPulse 1.2s ease-in-out infinite; }
+.typing-dots span:nth-child(2) { animation-delay: .14s; }
+.typing-dots span:nth-child(3) { animation-delay: .28s; }
+.tool-timeline { margin-top: 10px; border-top: 1px solid var(--hairline); color: var(--muted); font-size: 12px; }
+.tool-timeline > summary { display: flex; align-items: center; gap: 7px; padding: 9px 0; cursor: pointer; list-style: none; font-weight: 600; }
+.tool-timeline > summary::-webkit-details-marker, .tool-row > summary::-webkit-details-marker { display: none; }
+.tool-timeline > summary small { color: var(--muted-soft); font-weight: 500; }
+.tool-list { border-bottom: 1px solid var(--hairline); }
+.tool-row { border-top: 1px solid var(--hairline-soft); }
+.tool-row > summary { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 0; cursor: pointer; list-style: none; }
+.tool-status-dot { width: 18px; height: 18px; border: 1px solid var(--hairline-strong); border-radius: 50%; position: relative; }
+.tool-running .tool-status-dot::after, .tool-streaming_input .tool-status-dot::after, .tool-waiting .tool-status-dot::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--g-mint); animation: dotPulse 1.2s ease-in-out infinite; }
+.tool-completed .tool-status-dot { background: var(--body-strong); border-color: var(--body-strong); }
+.tool-completed .tool-status-dot::after { content: "✓"; display: grid; place-items: center; color: white; font-size: 10px; }
+.tool-error .tool-status-dot, .tool-declined .tool-status-dot, .tool-cancelled .tool-status-dot { border-color: var(--error); }
+.tool-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tool-row-copy b { color: var(--body-strong); font-weight: 550; }
+.tool-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-soft); }
+.tool-state { color: var(--muted-soft); font-size: 10px; text-transform: capitalize; }
+.tool-details { padding: 0 0 12px 29px; }
+.tool-details dl { display: grid; gap: 4px; margin: 0 0 8px; }
+.tool-details dl div { display: grid; grid-template-columns: 64px minmax(0,1fr); }
+.tool-details dt { color: var(--muted-soft); }
+.tool-details dd { margin: 0; overflow-wrap: anywhere; }
+.tool-details h4 { margin: 9px 0 4px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.tool-details pre { max-height: 220px; overflow: auto; margin: 0; padding: 9px; border-radius: var(--r-md); background: var(--canvas-soft); color: var(--body-strong); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message-status { display: block; margin-top: 7px; color: var(--muted-soft); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
 .settings-intro { margin: 5px 0 var(--s-base); color: var(--muted); font-size: 13.5px; line-height: 1.5; }
 .key-form { display: flex; align-items: center; gap: var(--s-xs); padding: 6px; border: 1px solid var(--hairline-strong); border-radius: var(--r-pill); background: var(--canvas-soft); }
@@ -463,10 +482,6 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .wb-muted { margin-top: 9px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 .wb-link { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 8px 9px; border-radius: var(--r-md); color: var(--body-strong); background: var(--surface-card); font-size: 12.5px; text-align: left; }
 .wb-link:hover { background: var(--surface-strong); }
-.wb-tools { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; list-style: none; }
-.wb-tools li { display: flex; align-items: center; gap: 7px; color: var(--body-strong); font-size: 12.5px; }
-.wb-tools small { margin-left: auto; color: var(--muted-soft); font-size: 10px; }
-.tool-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--g-mint); box-shadow: 0 0 0 3px rgba(117,222,190,.14); }
 .wb-steps { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; list-style: none; }
 .wb-steps li { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 .wb-steps li.in_progress { color: var(--ink); font-weight: 500; }
@@ -520,6 +535,7 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 }
 @media (prefers-reduced-motion: reduce) {
   .title-icon-button, .conversation-row-actions { transition: none; }
+  .typing-dots span, .tool-status-dot::after { animation: none !important; }
 }
 
 /* Conversation workspace: keep the reading canvas large and stable while the
