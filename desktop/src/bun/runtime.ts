@@ -15,6 +15,7 @@ import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableE
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { findInteractionToolOutcome, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
+import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -1517,6 +1518,7 @@ export class TextRuntime {
     this.initializePromise ??= (async () => {
       try {
         await ensureUserDataDirectory();
+        await cutOverLegacyRuntimeData(Utils.paths.userData);
         await this.controller.init();
         this.session = await this.controller.createSession({
           id: SESSION_ID,
