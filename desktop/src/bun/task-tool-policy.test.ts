@@ -59,17 +59,37 @@ describe("TaskToolPolicy", () => {
 
     const blocked = await policy.hooks.beforeToolCall?.({ toolName: "task_check", input: {}, context });
 
-    expect(blocked).toBeUndefined();
+    expect(blocked).toMatchObject({ proceed: false, output: { isError: false, tasks } });
     const mutation = await policy.hooks.beforeToolCall?.({ toolName: "task_update", input: { id: "one", status: "in_progress" }, context });
     expect(mutation).toMatchObject({ proceed: false, output: { isError: false, tasks } });
   });
 
-  it("never treats task_check as a repeated mutation", async () => {
+  it("returns a cached result for a repeated incomplete task_check", async () => {
     const policy = new TaskToolPolicy();
-    const output = { content: "All complete", tasks, isError: false, summary: { allCompleted: true } };
+    const output = { content: "Still working", tasks, isError: false, summary: { allCompleted: false } };
     await policy.hooks.afterToolCall?.({ toolName: "task_check", input: {}, output, context });
 
-    expect(await policy.hooks.beforeToolCall?.({ toolName: "task_check", input: {}, context })).toBeUndefined();
+    expect(await policy.hooks.beforeToolCall?.({ toolName: "task_check", input: {}, context })).toMatchObject({
+      proceed: false,
+      output: { isError: false, tasks },
+    });
+  });
+
+  it("uses the native afterToolCall result as the terminal prepareStep latch", async () => {
+    const policy = new TaskToolPolicy();
+    const completedTasks = [{ ...tasks[0], status: "completed" }];
+    await policy.hooks.afterToolCall?.({
+      toolName: "task_check",
+      input: {},
+      output: { content: "All complete", tasks: completedTasks, isError: false, summary: { allCompleted: true } },
+      context,
+    });
+
+    expect(policy.prepareStep({ steps: [], messages: [{ threadId: "thread-1" }] })).toEqual({ toolChoice: "none" });
+    expect(await policy.hooks.beforeToolCall?.({ toolName: "task_check", input: {}, context })).toMatchObject({
+      proceed: false,
+      output: { isError: false, tasks: completedTasks },
+    });
   });
 
   it("forces the step after a completed task_check to be text-only", () => {

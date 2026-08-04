@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, PendingInteraction } from "../shared/contracts";
-import { findInteractionToolOutcome, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, type LiveAssistantProjection } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, type LiveAssistantProjection } from "./runtime-projection";
 
 const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
   isRunning: true,
@@ -75,6 +75,51 @@ describe("runtime display projection", () => {
       taskMessage("check-1", "call-1", "completed", completed),
       taskMessage("check-2", "call-2", "completed", completed),
     ]).map((message) => message.id)).toEqual(["check-1"]);
+  });
+
+  it("projects persisted Mastra task signals onto input-only task calls", () => {
+    const outcomes = historicalTaskToolOutcomes([
+      {
+        role: "assistant",
+        type: "v2",
+        content: {
+          parts: [{ type: "tool-invocation", toolInvocation: { state: "call", toolCallId: "call-1", toolName: "task_check", args: {} } }],
+        },
+      },
+      {
+        role: "signal",
+        type: "task-list-update",
+        content: {
+          metadata: {
+            signal: {
+              tagName: "task-list-update",
+              metadata: {
+                value: {
+                  tasks: [{ id: "task-1", content: "Finish", activeForm: "Finishing", status: "completed" }],
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const projected = applyToolOutcomes([
+      {
+        ...assistant("assistant-1", ""),
+        parts: [{ type: "tool", id: "tool-1", toolCallId: "call-1", name: "task_check", label: "Checked task progress", status: "running", input: {} }],
+      },
+    ], outcomes);
+
+    expect(projected[0].parts[0]).toMatchObject({
+      status: "completed",
+      output: { isError: false, summary: { allCompleted: true } },
+    });
+  });
+
+  it("lets an explicit live tool failure override inferred history", () => {
+    const base = taskMessage("task-1", "call-1", "completed", { isError: false });
+    const projected = applyToolOutcomes([base], new Map([["call-1", { status: "error", output: { isError: true }, error: "Unknown task id" }]]));
+    expect(projected[0].parts[0]).toMatchObject({ status: "error", error: "Unknown task id" });
   });
 
   it("normalizes tool suspension payloads and preserves resolving interactions", () => {

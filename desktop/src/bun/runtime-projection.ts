@@ -73,6 +73,104 @@ export function normalizeLegacyTaskToolArtifacts(messages: ChatMessage[]): ChatM
   });
 }
 
+export type ProjectedToolOutcome = {
+  status: Extract<ChatToolPart["status"], "completed" | "error" | "cancelled" | "declined">;
+  output?: unknown;
+  error?: string;
+};
+
+type HistoricalMessageLike = {
+  role: string;
+  type?: string;
+  content?: unknown;
+};
+
+function messageParts(content: unknown): unknown[] {
+  if (Array.isArray(content)) return content;
+  if (!content || typeof content !== "object") return [];
+  const parts = (content as { parts?: unknown }).parts;
+  return Array.isArray(parts) ? parts : [];
+}
+
+function taskSignalTasks(message: HistoricalMessageLike): WorkbenchTask[] | null {
+  if (message.role !== "signal" || !message.content || typeof message.content !== "object") return null;
+  const signal = (message.content as { metadata?: { signal?: { tagName?: unknown; metadata?: { value?: { tasks?: unknown } } } } }).metadata?.signal;
+  const tagName = typeof signal?.tagName === "string" ? signal.tagName : message.type;
+  if (tagName !== "current-task-list" && tagName !== "task-list-update") return null;
+  const tasks = signal?.metadata?.value?.tasks;
+  if (!Array.isArray(tasks)) return null;
+  const projected = tasks.map(taskFromMastra).filter((task): task is WorkbenchTask => task !== null);
+  return projected.length === tasks.length ? projected : null;
+}
+
+function pendingTaskCalls(message: HistoricalMessageLike): Array<{ toolCallId: string; toolName: string }> {
+  if (message.role !== "assistant") return [];
+  return messageParts(message.content).flatMap((part): Array<{ toolCallId: string; toolName: string }> => {
+    if (!part || typeof part !== "object") return [];
+    const record = part as Record<string, unknown>;
+    if (record.type === "tool-invocation" && record.toolInvocation && typeof record.toolInvocation === "object") {
+      const invocation = record.toolInvocation as Record<string, unknown>;
+      return typeof invocation.toolCallId === "string" && typeof invocation.toolName === "string" && invocation.toolName.startsWith("task_") && invocation.result === undefined
+        ? [{ toolCallId: invocation.toolCallId, toolName: invocation.toolName }]
+        : [];
+    }
+    if (typeof record.type !== "string" || !record.type.startsWith("tool-")) return [];
+    const toolName = typeof record.toolName === "string" ? record.toolName : record.type.slice(5);
+    const state = String(record.state ?? record.status ?? "").toLowerCase();
+    return typeof record.toolCallId === "string" && toolName.startsWith("task_") && !/output|result|complete|error/.test(state)
+      ? [{ toolCallId: record.toolCallId, toolName }]
+      : [];
+  });
+}
+
+/** Project successful native task signals back onto their originating calls. */
+export function historicalTaskToolOutcomes(messages: HistoricalMessageLike[]): Map<string, ProjectedToolOutcome> {
+  const outcomes = new Map<string, ProjectedToolOutcome>();
+  let pending: Array<{ toolCallId: string; toolName: string }> = [];
+  for (const message of messages) {
+    if (message.role === "user") pending = [];
+    pending.push(...pendingTaskCalls(message));
+    const tasks = taskSignalTasks(message);
+    if (!tasks || pending.length === 0) continue;
+    const completed = tasks.filter((task) => task.status === "completed").length;
+    const inProgress = tasks.filter((task) => task.status === "in_progress").length;
+    const summary = {
+      total: tasks.length,
+      completed,
+      inProgress,
+      pending: tasks.length - completed - inProgress,
+      incomplete: tasks.length - completed,
+      hasTasks: tasks.length > 0,
+      allCompleted: tasks.length > 0 && completed === tasks.length,
+    };
+    for (const call of pending) {
+      outcomes.set(call.toolCallId, {
+        status: "completed",
+        output: {
+          content: "Task state recorded by Mastra.",
+          tasks,
+          isError: false,
+          ...(call.toolName === "task_check" ? { summary } : {}),
+        },
+      });
+    }
+    pending = [];
+  }
+  return outcomes;
+}
+
+export function applyToolOutcomes(messages: ChatMessage[], outcomes: ReadonlyMap<string, ProjectedToolOutcome>): ChatMessage[] {
+  if (outcomes.size === 0) return messages;
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type !== "tool") return part;
+      const outcome = outcomes.get(part.toolCallId);
+      return outcome ? { ...part, ...outcome } : part;
+    }),
+  }));
+}
+
 export type InteractionToolOutcome = {
   status: Extract<ChatToolPart["status"], "completed" | "error" | "cancelled" | "declined">;
   toolCallId: string;

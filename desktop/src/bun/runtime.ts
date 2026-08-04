@@ -13,7 +13,7 @@ import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
-import { findInteractionToolOutcome, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 
@@ -102,6 +102,7 @@ type SnapshotListener = (snapshot: RuntimeSnapshot) => void;
 type MastraMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "signal";
+  type?: string;
   createdAt: Date;
   content?: unknown;
   metadata?: { signal?: { type?: string } };
@@ -463,6 +464,7 @@ export class TextRuntime {
   private readonly persistedAssistantIds = new Map<string, Set<string>>();
   private readonly retiredAssistantIds = new Set<string>();
   private readonly optimisticUserMessages = new Map<string, { threadId: string; message: ChatMessage }>();
+  private readonly runToolOutcomes = new Map<string, ProjectedToolOutcome>();
   private runStartedAt: string | null = null;
   private retryingText: string | null = null;
   private hideSingleRetry = false;
@@ -896,7 +898,9 @@ export class TextRuntime {
         };
       })
       .filter((message) => message.parts.length > 0);
-    return normalizeLegacyTaskToolArtifacts(projected);
+    const outcomes = historicalTaskToolOutcomes(rawMessages);
+    for (const [toolCallId, outcome] of this.runToolOutcomes) outcomes.set(toolCallId, outcome);
+    return normalizeLegacyTaskToolArtifacts(applyToolOutcomes(projected, outcomes));
   }
 
   private mergeTransientMessages(threadId: string, messages: ChatMessage[], reconcilePersisted = false): ChatMessage[] {
@@ -955,6 +959,22 @@ export class TextRuntime {
     this.publish({
       messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
     });
+  }
+
+  private recordToolOutcome(toolCallId: string, result: unknown, isError: boolean): void {
+    const safeOutput = result === undefined ? undefined : sanitizeToolDetail(result);
+    const content = safeOutput && typeof safeOutput === "object" ? (safeOutput as { content?: unknown }).content : undefined;
+    const outcome: ProjectedToolOutcome = {
+      status: isError ? "error" : "completed",
+      ...(safeOutput !== undefined ? { output: safeOutput } : {}),
+      ...(isError ? { error: typeof content === "string" ? content.slice(0, 2_000) : "Tool failed." } : {}),
+    };
+    this.runToolOutcomes.set(toolCallId, outcome);
+    const single = new Map([[toolCallId, outcome]]);
+    for (const projection of this.assistantProjections.values()) {
+      for (const [messageId, message] of projection.messages) projection.messages.set(messageId, applyToolOutcomes([message], single)[0]);
+    }
+    this.publish({ messages: applyToolOutcomes(this.snapshot.messages, single) });
   }
 
   private async hydratePlanSuspension(toolCallId: string, pathValue: unknown, originMessageId?: string): Promise<void> {
@@ -1029,6 +1049,23 @@ export class TextRuntime {
         }
       } else {
         this.publish({ toolApproval });
+      }
+      return;
+    }
+
+    if (event.type === "tool_end") {
+      this.recordToolOutcome(event.toolCallId, event.result, event.isError);
+      if (this.resolvingInteractions.size > 0) {
+        const exact = this.resolvingInteractions.get(event.toolCallId);
+        if (exact) {
+          exact.terminalEvidence = { status: event.isError ? "error" : "completed", toolCallId: event.toolCallId };
+          return;
+        }
+        const decision = event.isError ? null : submitPlanDecision(event.result);
+        if (decision) {
+          const candidates = [...this.resolvingInteractions.values()].filter((entry) => entry.interaction.kind === "submit_plan" && entry.status === decision);
+          if (candidates.length === 1) candidates[0].terminalEvidence = { status: "completed", toolCallId: event.toolCallId, decision };
+        }
       }
       return;
     }
@@ -1111,20 +1148,6 @@ export class TextRuntime {
             interactions: this.controllerThreadState.pendingInteractions ?? [],
             workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
           });
-      }
-      return;
-    }
-
-    if (event.type === "tool_end" && this.resolvingInteractions.size > 0) {
-      const exact = this.resolvingInteractions.get(event.toolCallId);
-      if (exact) {
-        exact.terminalEvidence = { status: event.isError ? "error" : "completed", toolCallId: event.toolCallId };
-        return;
-      }
-      const decision = event.isError ? null : submitPlanDecision(event.result);
-      if (decision) {
-        const candidates = [...this.resolvingInteractions.values()].filter((entry) => entry.interaction.kind === "submit_plan" && entry.status === decision);
-        if (candidates.length === 1) candidates[0].terminalEvidence = { status: "completed", toolCallId: event.toolCallId, decision };
       }
       return;
     }
@@ -1758,6 +1781,7 @@ export class TextRuntime {
     const threadId = this.controllerThreadId ?? session.thread.getId();
     if (!threadId) throw new Error("No active conversation");
     this.taskToolPolicy.reset(threadId);
+    this.runToolOutcomes.clear();
     const runId = randomUUID();
     const sendGeneration = ++this.sendGeneration;
     this.runId = runId;

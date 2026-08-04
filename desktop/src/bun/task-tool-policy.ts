@@ -15,6 +15,7 @@ type ThreadPolicyState = {
   lastTasksKey?: string;
   lastOutput?: NativeTaskOutput;
   noProgressCount: number;
+  forceTextOnly: boolean;
 };
 
 function stableValue(value: unknown): string {
@@ -77,11 +78,30 @@ export class TaskToolPolicy {
 
   readonly hooks: ToolHooks = {
     beforeToolCall: ({ toolName, input, context }) => {
-      if (!TASK_MUTATION_TOOLS.has(toolName)) return;
+      if (!TASK_TOOLS.has(toolName)) return;
       const threadId = threadIdFromContext(context);
       const state = this.states.get(threadId);
       const signature = `${toolName}:${stableValue(input)}`;
       if (!state?.lastOutput) return;
+      if (state.forceTextOnly)
+        return {
+          proceed: false,
+          output: {
+            ...state.lastOutput,
+            content: "Task tracking is already settled. Answer the user from the current task state.",
+            isError: false,
+          },
+        };
+      if (toolName === "task_check" && state.lastSignature === signature)
+        return {
+          proceed: false,
+          output: {
+            ...state.lastOutput,
+            content: "Task progress was already checked. Continue from the current task state.",
+            isError: false,
+          },
+        };
+      if (!TASK_MUTATION_TOOLS.has(toolName)) return;
       if (state.lastSignature === signature)
         return {
           proceed: false,
@@ -108,11 +128,16 @@ export class TaskToolPolicy {
       const threadId = threadIdFromContext(context);
       const previous = this.states.get(threadId);
       const tasksKey = stableValue(parsed.tasks);
+      const noProgressCount = previous?.lastTasksKey === tasksKey ? previous.noProgressCount + 1 : 0;
       this.states.set(threadId, {
         lastSignature: `${toolName}:${stableValue(input)}`,
         lastTasksKey: tasksKey,
         lastOutput: parsed,
-        noProgressCount: previous?.lastTasksKey === tasksKey ? previous.noProgressCount + 1 : 0,
+        noProgressCount,
+        forceTextOnly:
+          previous?.forceTextOnly === true ||
+          (toolName === "task_check" && parsed.summary?.allCompleted === true && !parsed.isError) ||
+          noProgressCount >= 3,
       });
     },
   };
@@ -122,7 +147,14 @@ export class TaskToolPolicy {
    * check succeeds, give the model one final text-only step instead of another
    * chance to call task_check. The unchanged-state fallback bounds other loops.
    */
-  readonly prepareStep = ({ steps }: { steps: unknown[] }): { toolChoice: "none" } | undefined => {
+  readonly prepareStep = ({ steps, messages }: { steps: unknown[]; messages?: unknown[] }): { toolChoice: "none" } | undefined => {
+    const messageThreadId = [...(messages ?? [])].reverse().find((message) => message && typeof message === "object" && typeof (message as { threadId?: unknown }).threadId === "string") as { threadId?: string } | undefined;
+    const runState = messageThreadId?.threadId
+      ? this.states.get(messageThreadId.threadId)
+      : [...this.states.values()].filter((state) => state.forceTextOnly).length === 1
+        ? [...this.states.values()].find((state) => state.forceTextOnly)
+        : undefined;
+    if (runState?.forceTextOnly) return { toolChoice: "none" };
     const results = taskResultsFromSteps(steps);
     if (results.some(({ toolName, output }) => toolName === "task_check" && output.summary?.allCompleted === true && !output.isError)) return { toolChoice: "none" };
     const latest = results.slice(-3);
