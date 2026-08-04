@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import { Agent } from "@mastra/core/agent";
-import { AgentController, type AgentControllerDisplayState, type AgentControllerEvent, type AgentControllerThread } from "@mastra/core/agent-controller";
+import { AgentController, type AgentControllerDisplayState, type AgentControllerEvent, type AgentControllerThread, type MastraDBMessage } from "@mastra/core/agent-controller";
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { Mastra } from "@mastra/core/mastra";
 import { TaskSignalProvider } from "@mastra/core/signals";
@@ -555,6 +556,18 @@ export class TextRuntime {
       inputProcessors: [taskLoopGuard],
       outputProcessors: [taskLoopGuard],
       maxProcessorRetries: 2,
+      transform: {
+        targets: ["display", "transcript"],
+        transformToolPayload: ({ phase, input, inputTextDelta, output, error, suspendPayload, resumeData }) => {
+          if (phase === "input-delta") return inputTextDelta ? { delta: inputTextDelta.slice(0, 2_000) } : undefined;
+          if (phase === "input-available" || phase === "approval") return sanitizeToolDetail(input);
+          if (phase === "output-available") return sanitizeToolDetail(output);
+          if (phase === "error") return { message: error instanceof Error ? error.message : String(error ?? "Tool failed").slice(0, 2_000) };
+          if (phase === "suspend") return sanitizeToolDetail(suspendPayload);
+          if (phase === "resume") return sanitizeToolDetail(resumeData);
+          return undefined;
+        },
+      },
       model: async ({ requestContext }) => {
         const controllerContext = requestContext.get("controller") as ControllerContext | undefined;
         const modelId = modelFromSession(controllerContext?.session?.modelId ?? this.snapshot.selectedModelId);
@@ -884,26 +897,32 @@ export class TextRuntime {
   private mapMessages(rawMessages: MastraMessage[]): ChatMessage[] {
     const retryMatches = this.retryingText ? rawMessages.map((message, index) => (chatRole(message) === "user" && extractText(message) === this.retryingText ? index : -1)).filter((index) => index >= 0) : [];
     const hiddenRetryIndex = retryMatches.length >= 2 || (this.hideSingleRetry && retryMatches.length >= 1) ? retryMatches[retryMatches.length - 1] : -1;
+    const hiddenRetryId = hiddenRetryIndex >= 0 ? rawMessages[hiddenRetryIndex]?.id : undefined;
+    const sourceById = new Map(rawMessages.map((message) => [message.id, message]));
+    const converted = toAISdkV5Messages(rawMessages as MastraDBMessage[]);
     let currentTurnId = "conversation-start";
-    return rawMessages
+    return converted
       .map((message) => {
-        const role = chatRole(message);
+        const role = message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : null;
         if (role === "user") currentTurnId = message.id;
-        return { message, role, turnId: currentTurnId };
+        return { message, source: sourceById.get(message.id), role, turnId: currentTurnId };
       })
       .filter(
-        (
-          entry,
-          index,
-        ): entry is {
-          message: MastraMessage;
+        (entry): entry is {
+          message: (typeof converted)[number];
+          source: MastraMessage | undefined;
           role: ChatMessage["role"];
           turnId: string;
-        } => entry.role !== null && index !== hiddenRetryIndex,
+        } => entry.role !== null && entry.message.id !== hiddenRetryId,
       )
-      .map(({ message, role, turnId }) => {
-        const approvalToolName = pendingApprovalToolName(message);
-        let parts = projectMessageParts(message);
+      .map(({ message, source, role, turnId }) => {
+        const approvalToolName = source ? pendingApprovalToolName(source) : null;
+        let parts = projectMessageParts({
+          id: message.id,
+          role,
+          createdAt: source?.createdAt ?? new Date(),
+          content: { format: 2, parts: message.parts },
+        } as MastraMessage);
         if (approvalToolName && !parts.some((part) => part.type === "text"))
           parts = [
             {
@@ -924,7 +943,7 @@ export class TextRuntime {
           turnId,
           parts,
           status: approvalToolName ? "error" : ((role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "streaming" ? "streaming" : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "interrupted" ? "interrupted" : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "error" ? "error" : "complete") as ChatMessage["status"]),
-          createdAt: isoDate(message.createdAt),
+          createdAt: isoDate(source?.createdAt ?? new Date()),
           retryable: approvalToolName ? true : role === "assistant" && message.id === this.lastAssistantId ? this.runError?.retryable : undefined,
         };
       })
