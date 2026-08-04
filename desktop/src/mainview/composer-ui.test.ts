@@ -23,6 +23,7 @@ describe("composer UI policy", () => {
     expect(composerInputHeight(180, 800)).toBe(180);
     expect(composerInputHeight(620, 800)).toBe(400);
     expect(composerInputHeight(80, 0)).toBe(24);
+    expect(composerInputHeight(24, 800, 4, 22)).toBe(92);
   });
 
   it("keeps the composer metadata minimal and centers its action at the right edge", async () => {

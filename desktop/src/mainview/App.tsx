@@ -737,8 +737,10 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
     const stage = textarea.closest<HTMLElement>(".stage");
     const resize = () => {
       textarea.style.height = "0px";
-      const stageHeight = stage?.clientHeight ?? window.innerHeight;
-      const nextHeight = composerInputHeight(textarea.scrollHeight, stageHeight);
+      const measuredStageHeight = stage?.getBoundingClientRect().height || stage?.clientHeight || window.innerHeight;
+      const computedLineHeight = Number.parseFloat(window.getComputedStyle(textarea).lineHeight) || 22;
+      const lineCount = Math.max(1, input.split(/\r\n|\r|\n/).length);
+      const nextHeight = composerInputHeight(textarea.scrollHeight, measuredStageHeight, lineCount, computedLineHeight);
       textarea.style.height = `${nextHeight}px`;
       textarea.style.overflowY = textarea.scrollHeight > nextHeight ? "auto" : "hidden";
     };
