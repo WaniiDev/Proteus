@@ -19,11 +19,8 @@ export function shouldSubmitComposerKey(input: { key: string; shiftKey: boolean;
   return input.key === "Enter" && !input.shiftKey && !input.isComposing;
 }
 
-export function composerInputHeight(scrollHeight: number, stageHeight: number, lineCount = 1, lineHeight = 22): number {
-  const minimumHeight = 24;
-  const maximumHeight = Math.max(minimumHeight, Math.floor(stageHeight * 0.5));
-  const explicitLineHeight = lineCount <= 1 ? minimumHeight : Math.max(minimumHeight, lineCount * lineHeight + 4);
-  return Math.min(Math.max(scrollHeight, explicitLineHeight), maximumHeight);
+export function composerLineCount(value: string): number {
+  return Math.max(1, value.split(/\r\n|\r|\n/).length);
 }
 
 export function reconcileQueuedDrafts(drafts: QueuedDraft[], messages: ChatMessage[], activeThreadId: string | null, queuedCount: number): QueuedDraft[] {

@@ -12,7 +12,7 @@ import { interactionSubmissionUi, type InteractionSubmissionAction } from "./int
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { Workbench } from "./Workbench";
-import { composerAction, composerInputHeight, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { composerAction, composerLineCount, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -705,7 +705,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const orbRef = useRef<OrbHandle>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
   const workbenchToggleRef = useRef<HTMLButtonElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [renameRequest, setRenameRequest] = useState<string | null>(null);
   const [workbenchOpenByThread, setWorkbenchOpenByThread] = useState<Map<string, boolean>>(() => new Map());
@@ -717,6 +716,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length + (snapshot.toolApproval ? 1 : 0);
   const draftPresent = input.trim().length > 0;
   const primaryComposerAction = composerAction(runningForSelected, draftPresent);
+  const inputLineCount = composerLineCount(input);
   const titleTriggerClose = () => {
     setSessionsOpen(false);
     setRenameRequest(null);
@@ -731,25 +731,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   useEffect(() => {
     if (!sessionsOpen) titleRef.current?.focus();
   }, [sessionsOpen]);
-  useLayoutEffect(() => {
-    const textarea = composerRef.current;
-    if (!textarea) return;
-    const stage = textarea.closest<HTMLElement>(".stage");
-    const resize = () => {
-      textarea.style.height = "0px";
-      const measuredStageHeight = stage?.getBoundingClientRect().height || stage?.clientHeight || window.innerHeight;
-      const computedLineHeight = Number.parseFloat(window.getComputedStyle(textarea).lineHeight) || 22;
-      const lineCount = Math.max(1, input.split(/\r\n|\r|\n/).length);
-      const nextHeight = composerInputHeight(textarea.scrollHeight, measuredStageHeight, lineCount, computedLineHeight);
-      textarea.style.height = `${nextHeight}px`;
-      textarea.style.overflowY = textarea.scrollHeight > nextHeight ? "auto" : "hidden";
-    };
-    resize();
-    if (!stage || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(resize);
-    observer.observe(stage);
-    return () => observer.disconnect();
-  }, [input]);
   useEffect(() => {
     if (!workbenchOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -864,7 +845,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
             </div>
             <form className={`composer${canChat ? "" : " disabled"}`} onSubmit={onSend} autoComplete="off">
               <textarea
-                ref={composerRef}
                 className="composer-input"
                 value={input}
                 onChange={(event) => {
@@ -875,7 +855,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                 aria-label="Message PROTEUS"
                 disabled={!canChat}
                 maxLength={32_000}
-                rows={1}
+                rows={inputLineCount}
                 onKeyDown={(event) => {
                   if (!shouldSubmitComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return;
                   event.preventDefault();
