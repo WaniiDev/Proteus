@@ -569,3 +569,26 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .queued-badge { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .65px; text-transform: uppercase; }
 .queued-steer { padding: 3px 7px; border-radius: 7px; color: var(--body-strong); background: var(--canvas-soft); font-size: 10.5px; }
 .queued-steer:hover { background: var(--surface-strong); color: var(--ink); }
+
+/* Compact conversation frame + manually controlled Workbench */
+.companion-view .chat-titlebar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px max(var(--s-xl), 24px) 6px; }
+.companion-view .chat-title-copy { display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.companion-view .chat-title-copy .caption-uppercase { font-size: 9px; letter-spacing: 1.05px; }
+.companion-view .chat-title-trigger { margin-top: 0; max-width: min(62vw, 680px); gap: 6px; }
+.companion-view .chat-title { margin: 0; font-size: 23px; line-height: 1.05; }
+.companion-view .conversation-popover { top: 54px; }
+.workbench-toggle { position: relative; min-height: 34px; display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: 10px; background: rgba(255,255,255,.7); color: var(--muted); font-size: 11.5px; }
+.workbench-toggle:hover, .workbench-toggle.active { border-color: var(--hairline-strong); background: var(--surface-card); color: var(--ink); }
+.workbench-toggle b { min-width: 17px; height: 17px; display: inline-grid; place-items: center; padding: 0 4px; border-radius: 8px; background: var(--primary); color: var(--on-primary); font-size: 9px; }
+.companion-view .text-chat-layout { padding: 8px max(var(--s-xl), 24px) 14px; }
+.companion-view .stage > .thread { padding-bottom: 9px; }
+.latest-btn { position: sticky; right: auto; bottom: 8px; width: fit-content; margin: 12px 4px 0 auto; }
+.companion-view .workbench-live { padding: 12px; border-radius: 18px; background: rgba(255,255,255,.84); box-shadow: 0 12px 40px rgba(41,37,36,.09); }
+.companion-view .wb-head { padding: 4px 3px 12px; }
+.companion-view .wb-head h2 { font-size: 21px; line-height: 1.16; }
+.companion-view .wb-head-actions { align-items: center; }
+.wb-close { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--muted); }
+.wb-close:hover { background: var(--surface-strong); color: var(--ink); }
+.companion-view .wb-group, .companion-view .wb-session { border-radius: 13px; background: rgba(255,255,255,.66); }
+.companion-view .wb-group { padding: 12px; }
+.companion-view .wb-groups { gap: 8px; }

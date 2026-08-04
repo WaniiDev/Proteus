@@ -1,15 +1,15 @@
-import { ArrowRight, Check, ChevronDown } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, X } from "lucide-react";
 import type { RuntimeSnapshot, WorkbenchTask } from "../shared/contracts";
 import { goalFromMessages } from "./ui-helpers";
 
-export function Workbench({ snapshot, onJump }: { snapshot: RuntimeSnapshot; onJump: (id: string) => void }) {
+export function Workbench({ snapshot, onJump, onClose }: { snapshot: RuntimeSnapshot; onJump: (id: string) => void; onClose: () => void }) {
   const wb = snapshot.workbench;
   const attentionItems = wb.pendingInteractions.filter((item) => item.status === "pending");
   const totalTokens = wb.tokenUsage.totalTokens;
   const statusLabel = attentionItems.length > 0 ? "Needs you" : wb.status === "complete" ? "Done" : wb.status === "active" ? "Active" : wb.status === "waiting" ? "Waiting" : wb.status === "interrupted" ? "Interrupted" : wb.status === "error" ? "Error" : "Current";
 
   return (
-    <aside className="workbench" aria-label="Conversation Workbench">
+    <aside className="workbench" id="conversation-workbench" aria-label="Conversation Workbench">
       <div className="workbench-live">
         <div className="wb-head">
           <div className="wb-head-main">
@@ -18,6 +18,7 @@ export function Workbench({ snapshot, onJump }: { snapshot: RuntimeSnapshot; onJ
           </div>
           <div className="wb-head-actions">
             <span className={`badge-pill wb-status ${wb.status}`}>{statusLabel}</span>
+            <button type="button" className="wb-close" onClick={onClose} aria-label="Close Workbench"><X size={16} strokeWidth={1.75} aria-hidden="true" /></button>
           </div>
         </div>
         <div className="wb-groups">

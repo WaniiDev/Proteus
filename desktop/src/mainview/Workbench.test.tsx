@@ -36,8 +36,8 @@ function snapshot(): RuntimeSnapshot {
 }
 
 describe("Workbench", () => {
-  it("renders relevant work as a persistent panel without overlay controls", () => {
-    const html = renderToStaticMarkup(<Workbench snapshot={snapshot()} onJump={() => undefined} />);
+  it("renders relevant work with a manual close control", () => {
+    const html = renderToStaticMarkup(<Workbench snapshot={snapshot()} onJump={() => undefined} onClose={() => undefined} />);
 
     expect(html).toContain('<aside class="workbench"');
     expect(html).toContain("Ship the side panel");
@@ -46,7 +46,7 @@ describe("Workbench", () => {
     expect(html).toContain("Needs you");
     expect(html).toContain("Session details");
     expect(html).not.toContain("workbench-scrim");
-    expect(html).not.toContain("Close Workbench");
+    expect(html).toContain("Close Workbench");
   });
 
   it("keeps the Workbench in a 70/30 normal-flow layout with a narrow stack", async () => {
@@ -58,7 +58,8 @@ describe("Workbench", () => {
     expect(css).toContain("grid-template-columns: minmax(0, 1fr); grid-template-rows:");
     expect(css).not.toContain(".companion-view .workbench-scrim");
     expect(css).not.toContain(".companion-view .workbench { position: fixed");
-    expect(app).not.toContain("workbenchOpen");
-    expect(app).not.toContain("Close Workbench");
+    expect(app).toContain("workbenchOpenByThread");
+    expect(app).toContain("Open Workbench");
+    expect(app).toContain("Close Workbench");
   });
 });

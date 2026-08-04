@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode } from "react";
-import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, OpenRouterModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
@@ -46,7 +46,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   error: null,
 };
 
-type IconName = "send" | "stop" | "down" | "plus" | "trash" | "refresh" | "key" | "edit" | "copy" | "retry" | "play" | "close" | "latest" | "steer" | "search" | "check";
+type IconName = "send" | "stop" | "down" | "plus" | "trash" | "refresh" | "key" | "edit" | "copy" | "retry" | "play" | "close" | "latest" | "steer" | "search" | "check" | "panel";
 
 const ICONS = {
   send: Send,
@@ -65,6 +65,7 @@ const ICONS = {
   steer: ArrowRight,
   search: Search,
   check: Check,
+  panel: PanelRight,
 } satisfies Record<IconName, typeof Send>;
 
 function Icon({ name, size = 18, className }: { name: IconName; size?: number; className?: string }) {
@@ -703,13 +704,17 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
+  const workbenchToggleRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [renameRequest, setRenameRequest] = useState<string | null>(null);
+  const [workbenchOpenByThread, setWorkbenchOpenByThread] = useState<Map<string, boolean>>(() => new Map());
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
+  const workbenchOpen = !!snapshot.activeThreadId && workbenchHasContent && workbenchOpenByThread.get(snapshot.activeThreadId) === true;
+  const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length + (snapshot.toolApproval ? 1 : 0);
   const draftPresent = input.trim().length > 0;
   const primaryComposerAction = composerAction(runningForSelected, draftPresent);
   const titleTriggerClose = () => {
@@ -732,6 +737,17 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
   }, [input]);
+  useEffect(() => {
+    if (!workbenchOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (snapshot.activeThreadId) setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
+      requestAnimationFrame(() => workbenchToggleRef.current?.focus());
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [snapshot.activeThreadId, workbenchOpen]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
@@ -766,10 +782,28 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
             <Icon name="down" size={18} />
           </button>
         </div>
+        {workbenchHasContent && (
+          <button
+            ref={workbenchToggleRef}
+            type="button"
+            className={`workbench-toggle electrobun-webkit-app-region-no-drag${workbenchOpen ? " active" : ""}`}
+            aria-label={workbenchOpen ? "Close Workbench" : "Open Workbench"}
+            aria-expanded={workbenchOpen}
+            aria-controls="conversation-workbench"
+            onClick={() => {
+              if (!snapshot.activeThreadId) return;
+              setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, !workbenchOpen));
+            }}
+          >
+            <Icon name="panel" size={16} />
+            <span>Workbench</span>
+            {workbenchAttention > 0 && <b>{workbenchAttention}</b>}
+          </button>
+        )}
         <ConversationPopover snapshot={snapshot} open={sessionsOpen} disabled={snapshot.activeRun !== null} initialEditingId={renameRequest} onClose={titleTriggerClose} onCreate={onCreate} onSwitch={onSwitch} onRename={onRename} onDelete={onDeleteRequest} />
       </div>
       <div className="text-chat-layout">
-        <div className={`companion-grid ${workbenchHasContent ? "workbench-present" : "workbench-absent"}`}>
+        <div className={`companion-grid ${workbenchOpen ? "workbench-present" : "workbench-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             <OrbPresence state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} />
@@ -810,12 +844,12 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                 </div>
               )}
               {snapshot.error?.code === "aborted" && <div className="run-stopped-note">Response stopped. You can continue from the partial answer above.</div>}
+              {showLatest && (
+                <button type="button" className="latest-btn" onClick={jumpLatest}>
+                  <Icon name="latest" size={14} /> Latest
+                </button>
+              )}
             </div>
-            {showLatest && (
-              <button type="button" className="latest-btn" onClick={jumpLatest}>
-                <Icon name="latest" size={14} /> Latest
-              </button>
-            )}
             <form className={`composer${canChat ? "" : " disabled"}`} onSubmit={onSend} autoComplete="off">
               <textarea
                 ref={composerRef}
@@ -852,7 +886,11 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
               </div>
             </form>
           </div>
-          {workbenchHasContent && <Workbench snapshot={snapshot} onJump={jumpToInteraction} />}
+          {workbenchOpen && <Workbench snapshot={snapshot} onJump={jumpToInteraction} onClose={() => {
+            if (!snapshot.activeThreadId) return;
+            setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
+            requestAnimationFrame(() => workbenchToggleRef.current?.focus());
+          }} />}
         </div>
       </div>
     </section>
