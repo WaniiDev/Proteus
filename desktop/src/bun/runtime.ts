@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Agent } from "@mastra/core/agent";
 import { AgentController, type AgentControllerDisplayState, type AgentControllerEvent, type AgentControllerThread } from "@mastra/core/agent-controller";
@@ -22,7 +21,6 @@ const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
 const SESSION_ID = "proteus-desktop-session";
-const SESSION_STATE_FILE = "proteus-session.json";
 const THREAD_METADATA_KEY = "proteus.workbench.v1";
 const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
 const MAX_INPUT_LENGTH = 32_000;
@@ -526,8 +524,8 @@ export class TextRuntime {
   constructor(vault: CredentialVault = createCredentialVault()) {
     this.vault = vault;
     this.storage = new LibSQLStore({
-      id: "proteus-storage",
-      url: `file:${join(Utils.paths.userData, "proteus.db")}`,
+      id: "proteus-storage-v2",
+      url: `file:${join(Utils.paths.userData, "proteus-v2.db")}`,
     });
     this.workspace = new Workspace({
       id: "proteus-text-workspace",
@@ -959,38 +957,6 @@ export class TextRuntime {
     return this.requireSession();
   }
 
-  private async readPersistedThreadId(): Promise<string | undefined> {
-    try {
-      const value = JSON.parse(await readFile(join(Utils.paths.userData, SESSION_STATE_FILE), "utf8")) as { activeThreadId?: unknown };
-      return typeof value.activeThreadId === "string" && value.activeThreadId.length > 0 ? value.activeThreadId : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async restoreableThreadId(candidate: string | undefined): Promise<string | undefined> {
-    if (!candidate) return undefined;
-    try {
-      const memoryStore = await this.storage.getStore("memory");
-      const thread = await memoryStore?.getThreadById({
-        threadId: candidate,
-        resourceId: RESOURCE_ID,
-      });
-      return thread?.id === candidate ? candidate : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async persistActiveThread(threadId = this.session?.thread.getId()): Promise<void> {
-    if (!threadId) return;
-    try {
-      await writeFile(join(Utils.paths.userData, SESSION_STATE_FILE), `${JSON.stringify({ activeThreadId: threadId })}\n`, "utf8");
-    } catch {
-      // Thread restoration is best effort and must never block chat.
-    }
-  }
-
   private subscribeToController(): void {
     const session = this.requireSession();
     session.subscribe((event) => this.handleControllerEvent(event));
@@ -1374,7 +1340,6 @@ export class TextRuntime {
     };
     if (options.clearError !== false) nextSnapshot.error = null;
     this.publish(nextSnapshot);
-    void this.persistActiveThread(activeThreadId);
     await this.syncMessages(activeThreadId ?? undefined, {
       selectionGeneration,
       syncGeneration,
@@ -1526,13 +1491,10 @@ export class TextRuntime {
       try {
         await ensureUserDataDirectory();
         await this.controller.init();
-        const persistedThreadId = await this.readPersistedThreadId();
-        const activeThreadId = await this.restoreableThreadId(persistedThreadId);
         this.session = await this.controller.createSession({
           id: SESSION_ID,
           ownerId: RESOURCE_ID,
           resourceId: RESOURCE_ID,
-          threadId: activeThreadId,
         });
         for (const toolName of INTERNAL_TOOL_GRANTS) this.session.grantTool(toolName);
         this.subscribeToController();
