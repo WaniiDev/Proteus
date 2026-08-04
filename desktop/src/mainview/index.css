@@ -539,27 +539,29 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 
 /* Multiline conversation composer */
 .companion-view .composer {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 72px;
-  padding: 10px;
+  justify-content: center;
+  gap: 6px;
+  min-height: 70px;
+  padding: 10px 60px 9px 12px;
   border: 1px solid var(--hairline-strong);
   border-radius: 16px;
   background: rgba(255,255,255,.9);
   box-shadow: 0 8px 28px rgba(41,37,36,.08);
   transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
 }
-.companion-view .composer:focus-within { padding: 10px; border: 1px solid var(--ink); background: var(--surface-card); box-shadow: 0 12px 34px rgba(41,37,36,.11); }
-.companion-view .composer-input { width: 100%; min-height: 24px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 4px; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14.5px; line-height: 1.5; }
+.companion-view .composer:focus-within { padding: 10px 60px 9px 12px; border: 1px solid var(--ink); background: var(--surface-card); box-shadow: 0 12px 34px rgba(41,37,36,.11); }
+.companion-view .composer-input { width: 100%; min-height: 24px; resize: none; overflow-y: hidden; padding: 2px 4px; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14.5px; line-height: 1.5; }
 .composer-footer { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .composer-context { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--muted-soft); font-size: 10.5px; white-space: nowrap; }
 .composer-context > span:first-child { max-width: 180px; overflow: hidden; text-overflow: ellipsis; color: var(--body-strong); font-weight: 550; }
 .composer-context .btn-tertiary { padding: 0; font-size: 10.5px; }
 .composer-hint { flex: 1; color: var(--muted-soft); font-size: 10.5px; text-align: right; }
-.composer-primary { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 11px; background: var(--primary); color: var(--on-primary); transition: transform .12s ease, background .16s ease; }
+.composer-primary { position: absolute; top: 50%; right: 11px; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--primary); color: var(--on-primary); transform: translateY(-50%); transition: transform .12s ease, background .16s ease; }
 .composer-primary:hover { background: var(--primary-active); }
-.composer-primary:active { transform: scale(.95); }
+.composer-primary:active { transform: translateY(-50%) scale(.95); }
 .composer-primary:disabled { opacity: .35; cursor: not-allowed; }
 .composer-primary-stop { background: var(--body-strong); }
 .composer-primary-stop:hover { background: var(--error); }
@@ -571,9 +573,8 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .queued-steer:hover { background: var(--surface-strong); color: var(--ink); }
 
 /* Compact conversation frame + manually controlled Workbench */
-.companion-view .chat-titlebar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px max(var(--s-xl), 24px) 6px; }
+.companion-view .chat-titlebar { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px max(var(--s-xl), 24px) 5px; }
 .companion-view .chat-title-copy { display: flex; flex-direction: column; justify-content: center; gap: 1px; }
-.companion-view .chat-title-copy .caption-uppercase { font-size: 9px; letter-spacing: 1.05px; }
 .companion-view .chat-title-trigger { margin-top: 0; max-width: min(62vw, 680px); gap: 6px; }
 .companion-view .chat-title { margin: 0; font-size: 23px; line-height: 1.05; }
 .companion-view .conversation-popover { top: 54px; }

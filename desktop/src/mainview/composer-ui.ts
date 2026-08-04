@@ -19,6 +19,12 @@ export function shouldSubmitComposerKey(input: { key: string; shiftKey: boolean;
   return input.key === "Enter" && !input.shiftKey && !input.isComposing;
 }
 
+export function composerInputHeight(scrollHeight: number, stageHeight: number): number {
+  const minimumHeight = 24;
+  const maximumHeight = Math.max(minimumHeight, Math.floor(stageHeight * 0.5));
+  return Math.min(Math.max(scrollHeight, minimumHeight), maximumHeight);
+}
+
 export function reconcileQueuedDrafts(drafts: QueuedDraft[], messages: ChatMessage[], activeThreadId: string | null, queuedCount: number): QueuedDraft[] {
   if (!activeThreadId) return [];
   const active = drafts.filter((draft) => draft.threadId === activeThreadId).sort((left, right) => left.createdAt.localeCompare(right.createdAt));

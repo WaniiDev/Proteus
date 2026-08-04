@@ -12,7 +12,7 @@ import { interactionSubmissionUi, type InteractionSubmissionAction } from "./int
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { Workbench } from "./Workbench";
-import { composerAction, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { composerAction, composerInputHeight, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -734,8 +734,19 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   useLayoutEffect(() => {
     const textarea = composerRef.current;
     if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    const stage = textarea.closest<HTMLElement>(".stage");
+    const resize = () => {
+      textarea.style.height = "0px";
+      const stageHeight = stage?.clientHeight ?? window.innerHeight;
+      const nextHeight = composerInputHeight(textarea.scrollHeight, stageHeight);
+      textarea.style.height = `${nextHeight}px`;
+      textarea.style.overflowY = textarea.scrollHeight > nextHeight ? "auto" : "hidden";
+    };
+    resize();
+    if (!stage || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(resize);
+    observer.observe(stage);
+    return () => observer.disconnect();
   }, [input]);
   useEffect(() => {
     if (!workbenchOpen) return undefined;
@@ -761,7 +772,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
     <section className="view active companion-view">
       <div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag">
         <div className="chat-title-copy">
-          <p className="caption-uppercase">Active conversation</p>
           <button
             ref={titleRef}
             className="chat-title-trigger electrobun-webkit-app-region-no-drag"
@@ -873,9 +883,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
               <div className="composer-footer">
                 <div className="composer-context">
                   <span>{selectedModel?.name ?? snapshot.selectedModelId}</span>
-                  <span>via OpenRouter</span>
-                  <span className={`runtime-dot ${snapshot.credential.verified ? "ok" : "off"}`} />
-                  {snapshot.credential.verified ? <span>Connected</span> : <button className="btn-tertiary" type="button" onClick={onSettings}>Connect a key</button>}
+                  {!snapshot.credential.verified && <button className="btn-tertiary" type="button" onClick={onSettings}>Connect a key</button>}
                 </div>
                 <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
                 {primaryComposerAction === "stop" ? (
