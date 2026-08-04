@@ -1,15 +1,17 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode } from "react";
-import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, OpenRouterModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary, WorkbenchTask } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, OpenRouterModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
 import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
-import { goalFromMessages, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
+import { groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
 import { Sidebar, type View } from "./Sidebar";
+import { ToolTimeline } from "./ToolTimeline";
+import { Workbench } from "./Workbench";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -43,7 +45,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   error: null,
 };
 
-type IconName = "send" | "stop" | "down" | "plus" | "trash" | "refresh" | "key" | "edit" | "copy" | "retry" | "play" | "close" | "latest" | "steer" | "panel" | "search" | "check" | "arrow-right";
+type IconName = "send" | "stop" | "down" | "plus" | "trash" | "refresh" | "key" | "edit" | "copy" | "retry" | "play" | "close" | "latest" | "steer" | "search" | "check";
 
 const ICONS = {
   send: Send,
@@ -60,10 +62,8 @@ const ICONS = {
   close: X,
   latest: ArrowDown,
   steer: ArrowRight,
-  panel: PanelRight,
   search: Search,
   check: Check,
-  "arrow-right": ArrowRight,
 } satisfies Record<IconName, typeof Send>;
 
 function Icon({ name, size = 18, className }: { name: IconName; size?: number; className?: string }) {
@@ -565,61 +565,6 @@ const markdownComponents = {
   },
 };
 
-function ToolTimeline({ tools, live, pendingIds }: { tools: ChatToolPart[]; live: boolean; pendingIds: Set<string> }) {
-  const visible = tools.filter((tool) => !pendingIds.has(tool.toolCallId));
-  if (!visible.length) return null;
-  return (
-    <details className="tool-timeline">
-      <summary>
-        <span>{live ? "Using tools" : "Tools used"}</span>
-        <small>{visible.length}</small>
-      </summary>
-      <div className="tool-list">
-        {visible.map((tool) => (
-          <details className={`tool-row tool-${tool.status}`} key={tool.toolCallId}>
-            <summary>
-              <span className="tool-status-dot" />
-              <span className="tool-row-copy">
-                <b>{tool.label}</b>
-                <small>{tool.error || tool.outputSummary || tool.inputSummary || tool.status.replace("_", " ")}</small>
-              </span>
-              <span className="tool-state">{tool.status.replace("_", " ")}</span>
-            </summary>
-            <div className="tool-details">
-              <dl>
-                <div>
-                  <dt>Tool</dt>
-                  <dd>
-                    <code>{tool.name}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Call ID</dt>
-                  <dd>
-                    <code>{tool.toolCallId}</code>
-                  </dd>
-                </div>
-              </dl>
-              {tool.input !== undefined && (
-                <>
-                  <h4>Input</h4>
-                  <pre>{JSON.stringify(tool.input, null, 2)}</pre>
-                </>
-              )}
-              {tool.output !== undefined && (
-                <>
-                  <h4>Output</h4>
-                  <pre>{JSON.stringify(tool.output, null, 2)}</pre>
-                </>
-              )}
-            </div>
-          </details>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function AssistantTurn({ messages, textParts, tools, pendingIds, onRetry, onContinue }: { messages: ChatMessage[]; textParts: Extract<ChatMessage["parts"][number], { type: "text" }>[]; tools: ChatToolPart[]; pendingIds: Set<string>; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
   const terminal = messages.at(-1)!;
   const actionMessage = {
@@ -737,100 +682,6 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
   );
 }
 
-function Workbench({ snapshot, open, onClose, onJump }: { snapshot: RuntimeSnapshot; open: boolean; onClose: () => void; onJump: (id: string) => void }) {
-  const wb = snapshot.workbench;
-  const attentionItems = wb.pendingInteractions.filter((item) => item.status === "pending");
-  const totalTokens = wb.tokenUsage.totalTokens;
-  const statusLabel = attentionItems.length > 0 ? "Needs you" : wb.status === "complete" ? "Done" : wb.status === "active" ? "Active" : wb.status === "waiting" ? "Waiting" : wb.status === "interrupted" ? "Interrupted" : wb.status === "error" ? "Error" : "Current";
-  if (!open) return null;
-  return (
-    <>
-      <button type="button" className="workbench-scrim" onClick={onClose} aria-label="Close Workbench" />
-      <aside className="workbench" aria-label="Conversation Workbench">
-        <div className="workbench-live">
-          <div className="wb-head">
-            <div className="wb-head-main">
-              <span className="caption-uppercase">Current work</span>
-              <h2>{wb.goal || goalFromMessages(snapshot.messages)}</h2>
-            </div>
-            <div className="wb-head-actions">
-              <span className={`badge-pill wb-status ${wb.status}`}>{statusLabel}</span>
-              <button className="icon-btn wb-close" type="button" onClick={onClose} aria-label="Close Workbench">
-                <Icon name="close" size={16} />
-              </button>
-            </div>
-          </div>
-          <div className="wb-groups">
-            {attentionItems.length > 0 && (
-              <section className="wb-group wb-attention">
-                <div className="wb-group-title">
-                  <span>Attention required</span>
-                  <b>{attentionItems.length}</b>
-                </div>
-                {attentionItems.map((item) => (
-                  <button type="button" className="wb-link" key={item.id} onClick={() => onJump(item.id)}>
-                    {item.kind === "submit_plan" ? "Plan approval" : item.title}
-                    <Icon name="arrow-right" size={13} />
-                  </button>
-                ))}
-              </section>
-            )}
-            {wb.tasks.length > 0 && (
-              <section className="wb-group">
-                <div className="wb-group-title">
-                  <span>Plan & tasks</span>
-                  <span>
-                    {wb.tasks.filter((task) => task.status === "completed").length}/{wb.tasks.length}
-                  </span>
-                </div>
-                <ul className="wb-steps">
-                  {wb.tasks.map((task: WorkbenchTask) => (
-                    <li key={task.id} className={task.status}>
-                      <span className="task-check">{task.status === "completed" ? <Icon name="check" size={11} /> : task.status === "in_progress" ? "•" : ""}</span>
-                      <span>{task.status === "in_progress" ? task.activeForm : task.content}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-            {wb.queuedFollowUpCount > 0 && (
-              <section className="wb-group" aria-label="Queued follow-ups">
-                <div className="wb-group-title">
-                  <span>Queued follow-ups</span>
-                  <b>{wb.queuedFollowUpCount}</b>
-                </div>
-                <p className="wb-note">Mastra will send {wb.queuedFollowUpCount === 1 ? "this message" : "these messages"} after the current response.</p>
-              </section>
-            )}
-            {totalTokens > 0 && (
-              <details className="wb-session">
-                <summary>
-                  <span>Session details</span>
-                  <ChevronDown size={14} strokeWidth={1.75} />
-                </summary>
-                <dl>
-                  <div>
-                    <dt>Prompt tokens</dt>
-                    <dd>{wb.tokenUsage.promptTokens.toLocaleString()}</dd>
-                  </div>
-                  <div>
-                    <dt>Completion</dt>
-                    <dd>{wb.tokenUsage.completionTokens.toLocaleString()}</dd>
-                  </div>
-                  <div>
-                    <dt>Total</dt>
-                    <dd>{totalTokens.toLocaleString()}</dd>
-                  </div>
-                </dl>
-              </details>
-            )}
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-}
-
 function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteer: () => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
@@ -841,15 +692,10 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   const titleRef = useRef<HTMLButtonElement>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [renameRequest, setRenameRequest] = useState<string | null>(null);
-  const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
-  const previousThreadRef = useRef(snapshot.activeThreadId);
-  const structuredRunRef = useRef(false);
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
-  const actionableInteractionCount = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
-  const liveWorkbenchSignal = !!snapshot.toolApproval || snapshot.workbench.pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving") || snapshot.workbench.tasks.some((task) => task.status !== "completed") || snapshot.workbench.queuedFollowUpCount > 0 || snapshot.workbench.status === "waiting";
   const titleTriggerClose = () => {
     setSessionsOpen(false);
     setRenameRequest(null);
@@ -862,32 +708,8 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
     setDockedThreads((current) => (current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)));
   }, [snapshot.activeRun, snapshot.messages.length, snapshot.activeThreadId]);
   useEffect(() => {
-    const threadChanged = previousThreadRef.current !== snapshot.activeThreadId;
-    if (threadChanged) {
-      setWorkbenchOpen(false);
-      structuredRunRef.current = false;
-    }
-    if (liveWorkbenchSignal) {
-      structuredRunRef.current = true;
-      setWorkbenchOpen(true);
-    } else if (snapshot.activeRun && !liveWorkbenchSignal) setWorkbenchOpen(false);
-    else if (!snapshot.activeRun && structuredRunRef.current && workbenchHasContent) setWorkbenchOpen(true);
-    previousThreadRef.current = snapshot.activeThreadId;
-  }, [liveWorkbenchSignal, snapshot.activeRun, snapshot.activeThreadId, workbenchHasContent]);
-  useEffect(() => {
     if (!sessionsOpen) titleRef.current?.focus();
   }, [sessionsOpen]);
-  useEffect(() => {
-    if (!workbenchOpen) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setWorkbenchOpen(false);
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [workbenchOpen]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
@@ -922,18 +744,10 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
             <Icon name="down" size={18} />
           </button>
         </div>
-        <div className="chat-title-actions electrobun-webkit-app-region-no-drag">
-          {workbenchHasContent && (
-            <button type="button" className={`title-icon-button${workbenchOpen ? " active" : ""}`} onClick={() => setWorkbenchOpen((value) => !value)} aria-expanded={workbenchOpen} aria-label={workbenchOpen ? "Close Workbench" : "Open Workbench"} title={workbenchOpen ? "Close Workbench" : "Open Workbench"}>
-              <Icon name="panel" size={17} />
-              {(actionableInteractionCount > 0 || snapshot.toolApproval) && <span className="title-attention-badge">{actionableInteractionCount + (snapshot.toolApproval ? 1 : 0)}</span>}
-            </button>
-          )}
-        </div>
         <ConversationPopover snapshot={snapshot} open={sessionsOpen} disabled={snapshot.activeRun !== null} initialEditingId={renameRequest} onClose={titleTriggerClose} onCreate={onCreate} onSwitch={onSwitch} onRename={onRename} onDelete={onDeleteRequest} />
       </div>
-      <div className={`text-chat-layout ${workbenchOpen ? "workbench-visible" : ""}`}>
-        <div className={`companion-grid ${workbenchOpen ? "workbench-open" : "workbench-closed"}`}>
+      <div className="text-chat-layout">
+        <div className={`companion-grid ${workbenchHasContent ? "workbench-present" : "workbench-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             <OrbPresence state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} />
@@ -943,8 +757,8 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
                   <div className="msg user" key={item.message.id}>
                     <div className="bubble">
                       <span>{item.message.text}</span>
-                      <MessageActions message={item.message} />
                     </div>
+                    <MessageActions message={item.message} />
                   </div>
                 ) : (
                   <AssistantTurn key={item.id} messages={item.messages} textParts={item.textParts} tools={item.tools} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
@@ -1019,7 +833,7 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
               </button>
             </form>
           </div>
-          <Workbench snapshot={snapshot} open={workbenchOpen} onClose={() => setWorkbenchOpen(false)} onJump={jumpToInteraction} />
+          {workbenchHasContent && <Workbench snapshot={snapshot} onJump={jumpToInteraction} />}
         </div>
       </div>
     </section>

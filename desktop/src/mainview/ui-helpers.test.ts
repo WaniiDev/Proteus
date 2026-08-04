@@ -128,4 +128,11 @@ describe("Workbench visibility policy", () => {
     ).toBe(true);
     expect(shouldShowWorkbench(emptyWorkbench({ status: "complete", goal: "Review the result" }))).toBe(true);
   });
+
+  it("stays relevant for waiting and terminal review states", () => {
+    for (const status of ["waiting", "interrupted", "error"] as const) {
+      expect(shouldShowWorkbench(emptyWorkbench({ status }))).toBe(true);
+    }
+    expect(shouldShowWorkbench(emptyWorkbench({ tokenUsage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 } }))).toBe(true);
+  });
 });
