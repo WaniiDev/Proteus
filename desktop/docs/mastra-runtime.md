@@ -28,6 +28,10 @@ Approval recovery is derived only from the current `Session.approval`, `displayS
 
 The default conversation mode transitions to an approved-plan mode on approval. That mode excludes `write_plan` and `submit_plan`; rejection stays in the conversation mode so the model can revise and resubmit. Mastra 1.55 can carry the prior mode's tools into the resumed step, so the same approved-mode allowlist is re-applied through the documented `prepareStep.activeTools` boundary. A later top-level user message restores the conversation mode while preserving the selected model.
 
+PROTEUS exposes one model selection even though Mastra stores models per mode. A user selection is persisted to both internal modes with the documented `session.model.switch({ modelId, modeId, scope: "thread" })` API, and approval backfills the target mode before Mastra performs its native transition. Restoring conversation mode relies on Mastra's saved per-mode model and never copies the outgoing execution-mode model over it.
+
+The contained plan filesystem is an available internal capability, not an external action. An explicit request to create, write, show, test, or demonstrate a plan—including placeholder plans—must write one Markdown draft with `write_plan` and submit that path once with `submit_plan`; the assistant must not claim plan-file writing is unavailable after a successful write.
+
 `Session.displayState.pendingSuspensions` and `Session.suspensions` are authoritative for live plan cards. Plan Markdown is hydrated once per unique tool-call ID, and repeated display snapshots preserve the existing version and `resolving` status. A response is accepted only after the native resume boundary completes without an emitted error; terminal tool events and canonical history are used as stronger evidence when the installed runtime provides them.
 
 Mastra 1.55 does not emit `tool_end` for a resumed `submit_plan` call. After the successful native resume boundary removes that suspension, PROTEUS projects the original visible tool-call ID to `completed`; it never settles the row before Mastra confirms the resume.
