@@ -5,6 +5,39 @@ const context = { agent: { threadId: "thread-1" } };
 const tasks = [{ id: "one", content: "One", activeForm: "Doing one", status: "in_progress" }];
 
 describe("TaskToolPolicy", () => {
+  it("terminates the reported task-only workflow after one successful final check", async () => {
+    const prompt = "Create task using task tools and finish one by one without creating any plan using only task tools";
+    expect(prompt).toContain("only task tools");
+    const policy = new TaskToolPolicy();
+    const task = (id: string, status: "pending" | "in_progress" | "completed") => ({
+      id,
+      content: id,
+      activeForm: `Working on ${id}`,
+      status,
+    });
+    const calls = [
+      { toolName: "task_write", input: { tasks: ["setup", "review", "finalize"] }, tasks: [task("setup", "in_progress"), task("review", "pending"), task("finalize", "pending")] },
+      { toolName: "task_complete", input: { id: "setup" }, tasks: [task("setup", "completed"), task("review", "pending"), task("finalize", "pending")] },
+      { toolName: "task_update", input: { id: "review", status: "in_progress" }, tasks: [task("setup", "completed"), task("review", "in_progress"), task("finalize", "pending")] },
+      { toolName: "task_complete", input: { id: "review" }, tasks: [task("setup", "completed"), task("review", "completed"), task("finalize", "pending")] },
+      { toolName: "task_update", input: { id: "finalize", status: "in_progress" }, tasks: [task("setup", "completed"), task("review", "completed"), task("finalize", "in_progress")] },
+      { toolName: "task_complete", input: { id: "finalize" }, tasks: [task("setup", "completed"), task("review", "completed"), task("finalize", "completed")] },
+      { toolName: "task_check", input: {}, tasks: [task("setup", "completed"), task("review", "completed"), task("finalize", "completed")], summary: { allCompleted: true } },
+    ] as const;
+
+    const steps = [] as Array<{ toolResults: Array<{ toolName: string; output: unknown }> }>;
+    for (const call of calls) {
+      const output = { content: `${call.toolName} completed`, tasks: call.tasks, isError: false, ...(call.toolName === "task_check" ? { summary: call.summary } : {}) };
+      await policy.hooks.afterToolCall?.({ toolName: call.toolName, input: call.input, output, context });
+      steps.push({ toolResults: [{ toolName: call.toolName, output }] });
+    }
+
+    expect(calls.map(({ toolName }) => toolName)).toEqual([
+      "task_write", "task_complete", "task_update", "task_complete", "task_update", "task_complete", "task_check",
+    ]);
+    expect(policy.prepareStep({ steps })).toEqual({ toolChoice: "none" });
+  });
+
   it("short-circuits an exact repeated native task mutation", async () => {
     const policy = new TaskToolPolicy();
     await policy.hooks.afterToolCall?.({ toolName: "task_update", input: { id: "one", status: "in_progress" }, output: { content: "Updated", tasks, isError: false }, context });
