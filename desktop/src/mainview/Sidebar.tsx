@@ -1,5 +1,12 @@
 import { useEffect, useRef } from "react";
-import { Box, Circle, Folder, MessageSquarePlus, Settings, type LucideIcon } from "lucide-react";
+import {
+  BookOpenText,
+  MessagesSquare,
+  PanelsTopLeft,
+  SlidersHorizontal,
+  SquarePen,
+  type LucideIcon,
+} from "lucide-react";
 
 export type View = "companion" | "projects" | "memory" | "settings";
 
@@ -15,13 +22,13 @@ type SidebarProps = {
 type PrimaryView = Exclude<View, "settings">;
 
 const PRIMARY_LINKS: ReadonlyArray<{ view: PrimaryView; label: string; icon: LucideIcon }> = [
-  { view: "companion", label: "Companion", icon: Circle },
-  { view: "projects", label: "Projects", icon: Folder },
-  { view: "memory", label: "Memory", icon: Box },
+  { view: "companion", label: "Companion", icon: MessagesSquare },
+  { view: "projects", label: "Projects", icon: PanelsTopLeft },
+  { view: "memory", label: "Memory", icon: BookOpenText },
 ];
 
 function NavIcon({ icon: Glyph }: { icon: LucideIcon }) {
-  return <Glyph className="app-nav__glyph" size={20} strokeWidth={1.75} aria-hidden="true" />;
+  return <Glyph className="app-nav__glyph" size={19} strokeWidth={1.6} aria-hidden="true" />;
 }
 
 function BrandMark() {
@@ -80,7 +87,7 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: Si
         title={newChatLabel}
         data-tooltip={newChatLabel}
       >
-        <span className="app-nav__icon-track"><NavIcon icon={MessageSquarePlus} /></span>
+        <span className="app-nav__icon-track"><NavIcon icon={SquarePen} /></span>
         <span className="app-nav__label">New chat</span>
       </button>
 
@@ -110,7 +117,7 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: Si
           title="Settings"
           data-tooltip="Settings"
         >
-          <span className="app-nav__icon-track"><NavIcon icon={Settings} /></span>
+          <span className="app-nav__icon-track"><NavIcon icon={SlidersHorizontal} /></span>
           <span className="app-nav__label">Settings</span>
         </button>
       </div>
