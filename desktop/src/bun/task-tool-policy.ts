@@ -30,8 +30,14 @@ function stableValue(value: unknown): string {
 
 function threadIdFromContext(context: unknown): string {
   if (!context || typeof context !== "object") return "unknown";
-  const agent = (context as { agent?: { threadId?: unknown } }).agent;
-  return typeof agent?.threadId === "string" && agent.threadId ? agent.threadId : "unknown";
+  const record = context as {
+    agent?: { threadId?: unknown };
+    requestContext?: { get?: (key: string) => unknown };
+  };
+  const controller = record.requestContext?.get?.("controller");
+  const controllerThreadId = controller && typeof controller === "object" ? (controller as { threadId?: unknown }).threadId : undefined;
+  if (typeof controllerThreadId === "string" && controllerThreadId) return controllerThreadId;
+  return typeof record.agent?.threadId === "string" && record.agent.threadId ? record.agent.threadId : "unknown";
 }
 
 function nativeTaskOutput(value: unknown): NativeTaskOutput | undefined {
@@ -149,11 +155,9 @@ export class TaskToolPolicy {
    */
   readonly prepareStep = ({ steps, messages }: { steps: unknown[]; messages?: unknown[] }): { toolChoice: "none" } | undefined => {
     const messageThreadId = [...(messages ?? [])].reverse().find((message) => message && typeof message === "object" && typeof (message as { threadId?: unknown }).threadId === "string") as { threadId?: string } | undefined;
-    const runState = messageThreadId?.threadId
-      ? this.states.get(messageThreadId.threadId)
-      : [...this.states.values()].filter((state) => state.forceTextOnly).length === 1
-        ? [...this.states.values()].find((state) => state.forceTextOnly)
-        : undefined;
+    let runState = messageThreadId?.threadId ? this.states.get(messageThreadId.threadId) : undefined;
+    const forcedStates = [...this.states.values()].filter((state) => state.forceTextOnly);
+    if (!runState && forcedStates.length === 1) runState = forcedStates[0];
     if (runState?.forceTextOnly) return { toolChoice: "none" };
     const results = taskResultsFromSteps(steps);
     if (results.some(({ toolName, output }) => toolName === "task_check" && output.summary?.allCompleted === true && !output.isError)) return { toolChoice: "none" };

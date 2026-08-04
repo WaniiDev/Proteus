@@ -10,7 +10,9 @@ PROTEUS treats the installed Mastra APIs as the runtime source of truth:
 
 ## Task completion boundary
 
-Mastra's `Agent.defaultOptions.prepareStep` is the run-loop boundary. After the native `task_check` result reports `summary.allCompleted: true`, Proteus returns `toolChoice: "none"` for the next step. This gives the model one final text-only response and prevents another task check. Three unchanged native task snapshots use the same bounded fallback.
+Mastra's `Agent.defaultOptions.prepareStep` is the run-loop boundary. The agent-level `afterToolCall` hook latches the real native `task_check` output by the controller thread id from `RequestContext`; after it reports `summary.allCompleted: true`, `prepareStep` returns `toolChoice: "none"` for the next step. This gives the model one final text-only response and prevents another task check. Three unchanged native task snapshots use the same bounded fallback, and repeated task calls return the latest successful native snapshot without mutating task state.
+
+Live tool rows settle from `AgentController`'s `tool_end` event. For canonical history, successful input-only task calls are reconciled with Mastra's persisted `current-task-list` and `task-list-update` signals. Explicit live or persisted tool errors take precedence over inferred success.
 
 Historical rendering suppresses only the two exact errors emitted by Proteus' retired task-loop guard when an identical successful tool call already exists in that user turn. It also collapses duplicate successful terminal checks with the same completed snapshot. Other native task errors remain visible, and stored Mastra messages are never rewritten.
 
