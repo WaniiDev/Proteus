@@ -13,7 +13,7 @@ import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
-import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, planWorkflowModes } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
@@ -427,6 +427,7 @@ export class TextRuntime {
   private readonly threadActivity = new Map<string, { activity: ThreadSummary["activity"]; attention: number }>();
   private readonly resolvingInteractions = new Map<string, InteractionResolution>();
   private readonly hydratingPlans = new Set<string>();
+  private readonly hydratedPlans = new Set<string>();
   private threadSwitchQueue: Promise<void> = Promise.resolve();
   private snapshot: RuntimeSnapshot = {
     status: "booting",
@@ -972,7 +973,7 @@ export class TextRuntime {
   }
 
   private async hydratePlanSuspension(toolCallId: string, pathValue: unknown, originMessageId?: string): Promise<void> {
-    if (typeof pathValue !== "string" || this.hydratingPlans.has(toolCallId)) return;
+    if (typeof pathValue !== "string" || this.hydratingPlans.has(toolCallId) || this.hydratedPlans.has(toolCallId)) return;
     this.hydratingPlans.add(toolCallId);
     try {
       const path = normalize(pathValue.trim()).replaceAll("\\", "/");
@@ -982,16 +983,18 @@ export class TextRuntime {
       const plan = typeof content === "string" ? content : content.toString("utf8");
       if (!plan.trim()) throw new Error("Plan file is empty.");
       if (Buffer.byteLength(plan, "utf8") > 128 * 1024) throw new Error("Plan file is larger than 128 KiB.");
+      const previous = this.controllerThreadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
       const interaction = parseSuspendedInteraction(
         { toolCallId, toolName: "submit_plan", suspendPayload: { path, plan } },
-        this.nextPlanVersion(),
+        previous?.plan?.version ?? this.nextPlanVersion(),
         originMessageId,
       );
       if (!interaction) throw new Error("Plan suspension could not be parsed.");
       this.controllerThreadState = {
         ...this.controllerThreadState,
-        pendingInteractions: [...(this.controllerThreadState.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId), interaction],
+        pendingInteractions: upsertPendingInteraction(this.controllerThreadState.pendingInteractions ?? [], interaction),
       };
+      this.hydratedPlans.add(toolCallId);
       const threadId = this.controllerThreadId ?? this.selectedThreadId;
       if (threadId) await this.persistThreadState(threadId, this.controllerThreadState);
       if (this.selectedThreadId === this.controllerThreadId) {
@@ -1052,7 +1055,8 @@ export class TextRuntime {
       if (this.resolvingInteractions.size > 0) {
         const exact = this.resolvingInteractions.get(event.toolCallId);
         if (exact) {
-          exact.terminalEvidence = { status: event.isError ? "error" : "completed", toolCallId: event.toolCallId };
+          const decision = !event.isError && exact.interaction.kind === "submit_plan" ? submitPlanDecision(event.result) : null;
+          exact.terminalEvidence = { status: event.isError ? "error" : "completed", toolCallId: event.toolCallId, ...(decision ? { decision } : {}) };
           return;
         }
         const decision = event.isError ? null : submitPlanDecision(event.result);
@@ -1090,7 +1094,7 @@ export class TextRuntime {
       if (interaction) {
         this.controllerThreadState = {
           ...this.controllerThreadState,
-          pendingInteractions: [...(this.controllerThreadState.pendingInteractions ?? []), interaction],
+          pendingInteractions: upsertPendingInteraction(this.controllerThreadState.pendingInteractions ?? [], interaction),
         };
         if (this.controllerThreadId) void this.persistThreadState(this.controllerThreadId, this.controllerThreadState);
         this.runOutcome = "streaming";
@@ -1405,6 +1409,7 @@ export class TextRuntime {
     const resolved = entries.map(([, entry]) => this.resolvedInteraction(entry, terminalStatus ?? entry.status, feedback));
     const resolvedIds = new Set(entries.map(([id]) => id));
     for (const id of resolvedIds) this.resolvingInteractions.delete(id);
+    for (const id of resolvedIds) this.hydratedPlans.delete(id);
     this.controllerThreadState = {
       ...this.controllerThreadState,
       pendingInteractions: (this.controllerThreadState.pendingInteractions ?? []).filter((item) => !resolvedIds.has(item.toolCallId)),
@@ -1423,6 +1428,7 @@ export class TextRuntime {
 
   private markInteractionFailed(toolCallId: string, error: InteractionError): void {
     this.resolvingInteractions.delete(toolCallId);
+    this.hydratedPlans.delete(toolCallId);
     this.controllerThreadState = {
       ...this.controllerThreadState,
       pendingInteractions: (this.controllerThreadState.pendingInteractions ?? []).map((item) =>
@@ -1988,13 +1994,19 @@ export class TextRuntime {
     }
     try {
       await session.respondToToolSuspension({ toolCallId, resumeData });
-      this.finalizeResolvingInteractions(toolCallId);
-      return { accepted: true };
-    } catch (error) {
-      if (!session.suspensions.has({ toolCallId })) {
+      const completed = this.resolvingInteractions.get(toolCallId);
+      const evidence = completed?.terminalEvidence;
+      const expectedDecision = interaction.kind === "submit_plan" ? nextStatus : undefined;
+      if (evidence?.status === "completed" && (!expectedDecision || evidence.decision === expectedDecision)) {
         this.finalizeResolvingInteractions(toolCallId);
         return { accepted: true };
       }
+      const failed = this.controllerThreadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId && item.status === "failed");
+      if (failed?.error) return this.interactionFailure(failed.error);
+      const failure: InteractionError = { code: "resume-failed", message: "Mastra did not confirm the response with a terminal tool result. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
+      this.markInteractionFailed(toolCallId, failure);
+      return this.interactionFailure(failure);
+    } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not resume this request. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
       this.markInteractionFailed(toolCallId, failure);
       return this.interactionFailure(failure);

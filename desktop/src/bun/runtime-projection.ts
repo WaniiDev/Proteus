@@ -274,6 +274,33 @@ export function parseSuspendedInteraction(input: SuspendedToolLike, version: num
   return null;
 }
 
+/**
+ * Upsert one native suspension without letting repeated display snapshots reset
+ * local response progress or allocate another logical plan version.
+ */
+export function upsertPendingInteraction(existing: PendingInteraction[], incoming: PendingInteraction): PendingInteraction[] {
+  const previous = existing.find((item) => item.toolCallId === incoming.toolCallId);
+  if (!previous) return [...existing, incoming];
+  const merged: PendingInteraction = {
+    ...incoming,
+    status: previous.status,
+    createdAt: previous.createdAt,
+    ...(previous.originMessageId ? { originMessageId: previous.originMessageId } : {}),
+    ...(previous.error ? { error: previous.error } : {}),
+    ...(incoming.plan
+      ? {
+          plan: {
+            ...previous.plan,
+            ...incoming.plan,
+            version: previous.plan?.version ?? incoming.plan.version,
+            status: previous.plan?.status ?? incoming.plan.status,
+          },
+        }
+      : {}),
+  };
+  return existing.map((item) => (item.toolCallId === incoming.toolCallId ? merged : item));
+}
+
 export function projectPendingInteractions(
   displayState: AgentControllerDisplayState,
   existing: PendingInteraction[],
@@ -295,11 +322,8 @@ export function projectPendingInteractions(
     const parsed = parseSuspendedInteraction(suspension, version);
     if (!parsed) continue;
     if (parsed.kind === "submit_plan") version += 1;
-    const previous = existing.find((item) => item.toolCallId === parsed.toolCallId);
-    const index = next.findIndex((item) => item.toolCallId === parsed.toolCallId);
-    const merged = previous ? { ...parsed, status: previous.status, createdAt: previous.createdAt, ...(previous.plan ? { plan: previous.plan } : {}), ...(previous.originMessageId ? { originMessageId: previous.originMessageId } : {}), ...(previous.error ? { error: previous.error } : {}) } : parsed;
-    if (index >= 0) next[index] = merged;
-    else next.push(merged);
+    const merged = upsertPendingInteraction(next, parsed);
+    next.splice(0, next.length, ...merged);
   }
   return next;
 }

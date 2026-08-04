@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, PendingInteraction } from "../shared/contracts";
-import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, type LiveAssistantProjection } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
 
 const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
   isRunning: true,
@@ -167,6 +167,29 @@ describe("runtime display projection", () => {
       createdAt: "2026-08-03T12:00:00.000Z",
     };
     expect(projectPendingInteractions(displayState(), [existing], 1)).toEqual([existing]);
+  });
+
+  it("hydrates one plan call without resetting its resolving state or version", () => {
+    const pending = parseSuspendedInteraction(
+      { toolCallId: "plan-1", toolName: "submit_plan", suspendPayload: { path: ".mastracode/plans/test.md" } },
+      4,
+      "user-1",
+    );
+    const hydrated = parseSuspendedInteraction(
+      { toolCallId: "plan-1", toolName: "submit_plan", suspendPayload: { path: ".mastracode/plans/test.md", plan: "# Updated plan\n\nOne step." } },
+      5,
+      "user-1",
+    );
+    expect(pending).not.toBeNull();
+    expect(hydrated).not.toBeNull();
+
+    const resolving = { ...pending!, status: "resolving" as const };
+    const once = upsertPendingInteraction([resolving], hydrated!);
+    const twice = upsertPendingInteraction(once, { ...hydrated!, plan: { ...hydrated!.plan!, version: 6 } });
+
+    expect(twice).toHaveLength(1);
+    expect(twice[0]).toMatchObject({ toolCallId: "plan-1", status: "resolving", originMessageId: "user-1" });
+    expect(twice[0].plan).toMatchObject({ version: 4, raw: "# Updated plan\n\nOne step." });
   });
 
   it("projects task state and upserts streamed messages by id", () => {
