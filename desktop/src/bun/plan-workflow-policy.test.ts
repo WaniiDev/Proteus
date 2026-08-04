@@ -7,7 +7,7 @@ import { AgentController } from "@mastra/core/agent-controller";
 import { LocalFilesystem, Workspace } from "@mastra/core/workspace";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, planWorkflowModes } from "./plan-workflow-policy";
+import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes } from "./plan-workflow-policy";
 
 const temporaryDirectories: string[] = [];
 
@@ -28,6 +28,16 @@ describe("native Mastra plan workflow policy", () => {
     expect(approved?.availableTools).toContain("read_plan");
     expect(approved?.availableTools).not.toContain("write_plan");
     expect(approved?.availableTools).not.toContain("submit_plan");
+  });
+
+  it("re-applies the approved mode allowlist at Mastra's per-step boundary", () => {
+    const decision = approvedPlanPrepareStep({
+      requestContext: { get: (key: string) => key === "controller" ? { session: { modeId: APPROVED_PLAN_MODE_ID } } : undefined },
+    } as never);
+
+    expect(decision?.activeTools).toContain("read_plan");
+    expect(decision?.activeTools).not.toContain("write_plan");
+    expect(decision?.activeTools).not.toContain("submit_plan");
   });
 
   it("uses documented Session grants to auto-allow the contained plan draft tools", async () => {

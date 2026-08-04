@@ -15,7 +15,7 @@ import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableE
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
-import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, planWorkflowModes } from "./plan-workflow-policy";
+import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 
 const CONTROLLER_ID = "proteus-text-controller";
@@ -518,7 +518,10 @@ export class TextRuntime {
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
       defaultOptions: {
-        prepareStep: this.taskToolPolicy.prepareStep,
+        prepareStep: (args) => ({
+          ...this.taskToolPolicy.prepareStep(args),
+          ...approvedPlanPrepareStep(args),
+        }),
       },
       transform: {
         targets: ["display", "transcript"],
@@ -1995,8 +1998,20 @@ export class TextRuntime {
     try {
       await session.respondToToolSuspension({ toolCallId, resumeData });
       const completed = this.resolvingInteractions.get(toolCallId);
-      const evidence = completed?.terminalEvidence;
+      let evidence = completed?.terminalEvidence;
       const expectedDecision = interaction.kind === "submit_plan" ? nextStatus : undefined;
+      if ((!evidence || evidence.status !== "completed" || (expectedDecision && evidence.decision !== expectedDecision)) && interaction.kind === "submit_plan") {
+        const threadId = session.thread.requireId();
+        const persisted = this.mapMessages(await session.thread.listMessages({ threadId }));
+        evidence = findInteractionToolOutcome(persisted, interaction, expectedDecision === "approved" || expectedDecision === "rejected" ? expectedDecision : undefined) ?? evidence;
+      }
+      if (!evidence && this.resolvingInteractions.has(toolCallId) && !session.suspensions.has({ toolCallId })) {
+        evidence = {
+          status: "completed",
+          toolCallId,
+          ...(expectedDecision === "approved" || expectedDecision === "rejected" ? { decision: expectedDecision } : {}),
+        };
+      }
       if (evidence?.status === "completed" && (!expectedDecision || evidence.decision === expectedDecision)) {
         this.finalizeResolvingInteractions(toolCallId);
         return { accepted: true };
@@ -2040,7 +2055,6 @@ export class TextRuntime {
         decision: approved ? "approve" : "decline",
         toolCallId,
       });
-      this.publish({ toolApproval: null });
       if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "running", 0);
     } catch (error) {
       throw normalizeError(error);

@@ -8,6 +8,7 @@ import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
 import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { goalFromMessages, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
+import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
 import { Sidebar, type View } from "./Sidebar";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
@@ -647,24 +648,27 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
   const [answer, setAnswer] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<InteractionSubmissionAction>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const isPlan = interaction.kind === "submit_plan";
   const failed = interaction.status === "failed";
-  const resolving = interaction.status === "resolving" || submitting;
-  const send = async (response: unknown) => {
+  const submissionUi = interactionSubmissionUi(interaction.status, submittingAction);
+  const resolving = submissionUi.resolving;
+  const send = async (response: unknown, action: Exclude<InteractionSubmissionAction, null>) => {
     if (resolving) return;
-    setSubmitting(true);
+    setSubmittingAction(action);
     setLocalError(null);
     const result = await onRespond(interaction.toolCallId, response).catch(() => ({ accepted: false as const, code: "resume-failed" as const, message: "The response could not be sent.", retryable: true }));
-    if (!result.accepted) setLocalError(result.message);
-    setSubmitting(false);
+    if (!result.accepted) {
+      setLocalError(result.message);
+      setSubmittingAction(null);
+    }
   };
-  const submit = () => void send(isPlan ? { action: "approved", feedback: feedback.trim() || undefined } : interaction.options.length > 0 && interaction.selectionMode === "multi_select" ? selected : interaction.options.length > 0 ? (selected[0] ?? "") : answer.trim());
+  const submit = () => void send(isPlan ? { action: "approved", feedback: feedback.trim() || undefined } : interaction.options.length > 0 && interaction.selectionMode === "multi_select" ? selected : interaction.options.length > 0 ? (selected[0] ?? "") : answer.trim(), isPlan ? "approve" : "answer");
   const toggle = (label: string) => setSelected((current) => (current.includes(label) ? current.filter((value) => value !== label) : [...current, label]));
   return (
     <article className={`interaction-card interaction-${interaction.kind}${resolving ? " resolving" : ""}${failed ? " failed" : ""}`} id={`interaction-${interaction.id}`}>
-      <div className="interaction-kicker">{resolving ? "Sending response…" : failed ? "Response failed" : isPlan ? "Plan approval" : "Your input needed"}</div>
+      <div className="interaction-kicker">{submissionUi.kicker ?? (failed ? "Response failed" : isPlan ? "Plan approval" : "Your input needed")}</div>
       <h3>{interaction.title}</h3>
       {interaction.question && <p>{interaction.question}</p>}
       {isPlan && interaction.plan && (
@@ -707,8 +711,8 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
       <div className="interaction-actions">
         {failed ? (
           <>
-            <button type="button" className="btn-outline sm" disabled={submitting} onClick={() => void onDismiss(interaction.toolCallId)}>Dismiss</button>
-            {interaction.originMessageId && <button type="button" className="btn-primary sm" disabled={submitting} onClick={() => void onResubmit(interaction.originMessageId as string)}>Resubmit turn</button>}
+            <button type="button" className="btn-outline sm" disabled={resolving} onClick={() => void onDismiss(interaction.toolCallId)}>Dismiss</button>
+            {interaction.originMessageId && <button type="button" className="btn-primary sm" disabled={resolving} onClick={() => void onResubmit(interaction.originMessageId as string)}>Resubmit turn</button>}
           </>
         ) : isPlan && (
           <button
@@ -719,14 +723,14 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
               void send({
                 action: "rejected",
                 feedback: feedback.trim() || "Please revise the plan.",
-              })
+              }, "reject")
             }
           >
-            Request changes
+            {submissionUi.rejectLabel}
           </button>
         )}
         {!failed && <button type="button" className="btn-primary sm" onClick={submit} disabled={resolving || (!isPlan && interaction.options.length > 0 && selected.length === 0) || (!isPlan && interaction.options.length === 0 && !answer.trim())}>
-          {isPlan ? "Approve plan" : "Send answer"}
+          {isPlan ? submissionUi.approveLabel : "Send answer"}
         </button>}
       </div>
     </article>
@@ -1298,7 +1302,8 @@ export default function App() {
 }
 
 function ToolApprovalCard({ approval, onRespond }: { approval: ToolApproval; onRespond: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
-  const [resolving, setResolving] = useState(false);
+  const [decision, setDecision] = useState<"approve" | "decline" | null>(null);
+  const resolving = decision !== null;
   const args = useMemo(() => {
     try {
       return JSON.stringify(approval.args, null, 2);
@@ -1308,25 +1313,25 @@ function ToolApprovalCard({ approval, onRespond }: { approval: ToolApproval; onR
   }, [approval.args]);
   const respond = (approved: boolean) => {
     if (resolving) return;
-    setResolving(true);
+    setDecision(approved ? "approve" : "decline");
     void onRespond(approval.toolCallId, approved)
       .then((accepted) => {
-        if (!accepted) setResolving(false);
+        if (!accepted) setDecision(null);
       })
-      .catch(() => setResolving(false));
+      .catch(() => setDecision(null));
   };
   return (
     <article className={`interaction-card tool-approval-card${resolving ? " resolving" : ""}`} id={`tool-approval-${approval.toolCallId}`}>
-      <div className="interaction-kicker">{resolving ? "Sending response…" : "Approval required"}</div>
+      <div className="interaction-kicker">{decision === "approve" ? "Approving tool…" : decision === "decline" ? "Declining tool…" : "Approval required"}</div>
       <h3>Allow {approval.toolName}?</h3>
       <p>PROTEUS is ready to use this tool. Review the request before it continues.</p>
       <pre className="tool-approval-args">{args}</pre>
       <div className="interaction-actions">
         <button disabled={resolving} type="button" className="btn-outline sm" onClick={() => respond(false)}>
-          Decline
+          {decision === "decline" ? "Declining…" : "Decline"}
         </button>
         <button disabled={resolving} type="button" className="btn-primary sm" onClick={() => respond(true)}>
-          Approve
+          {decision === "approve" ? "Approving…" : "Approve"}
         </button>
       </div>
     </article>

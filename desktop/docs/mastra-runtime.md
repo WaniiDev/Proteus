@@ -22,6 +22,14 @@ Historical rendering suppresses only the two exact errors emitted by Proteus' re
 
 Approval recovery is derived only from the current `Session.approval`, `displayState.pendingApproval`, and controller events. Persisted message metadata is historical context, not proof that an approval is currently pending.
 
+## Plan approval boundary
+
+`read_plan` and `write_plan` operate only inside the contained private plan workspace and receive documented Session grants, so they never create a second generic approval checkpoint. `submit_plan` remains the sole human checkpoint and uses Mastra's native suspension/resume data.
+
+The default conversation mode transitions to an approved-plan mode on approval. That mode excludes `write_plan` and `submit_plan`; rejection stays in the conversation mode so the model can revise and resubmit. Mastra 1.55 can carry the prior mode's tools into the resumed step, so the same approved-mode allowlist is re-applied through the documented `prepareStep.activeTools` boundary. A later top-level user message restores the conversation mode while preserving the selected model.
+
+`Session.displayState.pendingSuspensions` and `Session.suspensions` are authoritative for live plan cards. Plan Markdown is hydrated once per unique tool-call ID, and repeated display snapshots preserve the existing version and `resolving` status. A response is accepted only after the native resume boundary completes without an emitted error; terminal tool events and canonical history are used as stronger evidence when the installed runtime provides them.
+
 ## Compatibility boundary
 
 `runtime.ts` projects Mastra state into the desktop IPC snapshot. This layer may sanitize tool payloads and shape display data, but it must not duplicate Mastra lifecycle ownership. The OpenRouter catalog endpoint remains provider-specific because the product displays modality and descriptive metadata outside Mastra's `AvailableModel` contract; selection still uses `Session.model.switch()`.

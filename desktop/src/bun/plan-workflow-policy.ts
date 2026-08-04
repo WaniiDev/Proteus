@@ -1,4 +1,5 @@
 import type { AgentControllerMode } from "@mastra/core/agent-controller";
+import type { ProcessInputStepArgs, ProcessInputStepResult } from "@mastra/core/processors";
 
 export const PLANNING_MODE_ID = "chat";
 export const APPROVED_PLAN_MODE_ID = "approved-plan";
@@ -16,7 +17,7 @@ const PLANNING_TOOLS = [
   "task_check",
 ] as const;
 
-const APPROVED_PLAN_TOOLS = [
+export const APPROVED_PLAN_TOOLS = [
   "ask_user",
   "read_plan",
   "task_write",
@@ -44,4 +45,14 @@ export function planWorkflowModes(defaultModelId: string): AgentControllerMode[]
       availableTools: [...APPROVED_PLAN_TOOLS],
     },
   ];
+}
+
+/**
+ * Mastra 1.55 transitions the Session mode before a submit_plan resume, but
+ * its resumed toolset can still contain the prior mode's tools. Re-apply the
+ * native mode allowlist at the documented per-step boundary.
+ */
+export function approvedPlanPrepareStep(args: ProcessInputStepArgs): ProcessInputStepResult | undefined {
+  const controller = args.requestContext?.get("controller") as { session?: { modeId?: unknown } } | undefined;
+  return controller?.session?.modeId === APPROVED_PLAN_MODE_ID ? { activeTools: [...APPROVED_PLAN_TOOLS] } : undefined;
 }
