@@ -118,6 +118,7 @@ export const planVersionSchema = z.object({
   summary: z.string(),
   steps: z.array(z.string()),
   raw: z.string().optional(),
+  sourcePath: z.string().optional(),
   status: z.enum(["draft", "approved", "rejected"]),
   feedback: z.string().optional(),
 });

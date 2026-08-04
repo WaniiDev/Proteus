@@ -166,6 +166,10 @@ describe("runtime display projection", () => {
 });
 
 describe("interaction terminal correlation", () => {
+  it("recognizes the installed native submit_plan result contract", () => {
+    expect(submitPlanDecision({ content: "Plan approved. Proceed with implementation following the approved plan." })).toBe("approved");
+    expect(submitPlanDecision({ content: "Plan was not approved. The user wants revisions." })).toBe("rejected");
+  });
   const planInteraction: PendingInteraction = {
     id: "call-original",
     toolCallId: "call-original",

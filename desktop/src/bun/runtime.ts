@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import { Agent } from "@mastra/core/agent";
 import { AgentController, type AgentControllerDisplayState, type AgentControllerEvent, type AgentControllerThread, type MastraDBMessage } from "@mastra/core/agent-controller";
@@ -8,10 +8,8 @@ import { Mastra } from "@mastra/core/mastra";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { createTool } from "@mastra/core/tools";
-import { LocalFilesystem, Workspace } from "@mastra/core/workspace";
+import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { Utils } from "electrobun/bun";
-import { z } from "zod";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, QueuedFollowUp, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
@@ -27,7 +25,7 @@ const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
 const MAX_INPUT_LENGTH = 32_000;
 const INTERNAL_TOOL_GRANTS = ["ask_user", "submit_plan", "task_write", "task_update", "task_complete", "task_check"] as const;
 
-const AGENT_INSTRUCTIONS = `You are PROTEUS, a personal AI companion. Respond directly and helpfully in text. You have no external, workspace, or action tools and must never claim to have taken external actions. You may use ask_user when an important user decision is genuinely needed and submit_plan before meaningful multi-step work. If the user asks for an action you cannot perform, explain that limitation. Use the user's language when clear; default to English.
+const AGENT_INSTRUCTIONS = `You are PROTEUS, a personal AI companion. Respond directly and helpfully in text. You have no external action tools and must never claim to have taken external actions. You may use ask_user when an important user decision is genuinely needed. Before submitting a meaningful multi-step plan, write the complete Markdown plan to a relative .md file with write_plan, then call submit_plan with that path. Use read_plan when revising an existing plan. If the user asks for an action you cannot perform, explain that limitation. Use the user's language when clear; default to English.
 
 Task tools are bookkeeping, not the work itself. Treat current-task-list snapshots, task-list-update deltas, and task-tool results as the authoritative task state. Use task tracking only for genuine multi-step work. Move exactly one pending task to in_progress immediately before working on it, perform substantive work, and call task_complete exactly once after it is finished. Then choose the next incomplete stable ID from the latest task snapshot. Never repeat a task mutation whose requested state already holds, never retry an unchanged or errored result, and never alternate task_update and task_complete without substantive work between them. Call task_check once after all work appears complete; when allCompleted is true, stop using tools and answer the user.`;
 
@@ -425,61 +423,12 @@ function emptyWorkbench(): WorkbenchState {
   };
 }
 
-/**
- * The native Mastra submit_plan tool expects the agent to create a file first.
- * PROTEUS intentionally has no workspace writer, so its controller exposes the
- * same suspension contract with an inline plan body instead.
- */
-const inlineSubmitPlanTool = createTool({
-  id: "submit_plan",
-  description: "Submit an inline implementation plan for the user to approve or request changes. Include a short title and the complete plan body.",
-  inputSchema: z.object({
-    title: z.string().min(1).optional(),
-    plan: z.string().min(1),
-  }),
-  suspendSchema: z.object({
-    title: z.string(),
-    plan: z.string(),
-  }),
-  resumeSchema: z.object({
-    action: z.enum(["approved", "rejected"]),
-    feedback: z.string().optional(),
-    title: z.string().optional(),
-    plan: z.string().optional(),
-  }),
-  execute: async ({ title, plan }, context) => {
-    try {
-      const resumeData = context?.agent?.resumeData;
-      if (resumeData !== undefined) {
-        const action = resumeData.action === "approved" ? "approved" : "rejected";
-        return {
-          content: action === "approved" ? "The user approved the plan. Continue with the approved work." : `The user requested plan changes${resumeData.feedback ? `: ${resumeData.feedback}` : ". Revise and resubmit the plan."}`,
-          isError: false,
-        };
-      }
-      const suspend = context?.agent?.suspend;
-      if (suspend) {
-        await suspend({ title: title?.trim() || "Plan review", plan });
-        return;
-      }
-      return { content: plan, isError: false };
-    } catch (error) {
-      return {
-        content: `Failed to submit plan: ${error instanceof Error ? error.message : "Unknown error"}`,
-        isError: true,
-      };
-    }
-  },
-  // This is a trusted, user-facing suspension. A function is intentional:
-  // Mastra gives it precedence over the controller's global approval policy.
-  requireApproval: () => false,
-});
-
 export class TextRuntime {
   private readonly vault: CredentialVault;
   private readonly listeners = new Set<SnapshotListener>();
   private readonly storage: LibSQLStore;
   private readonly memory: Memory;
+  private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
   private readonly agent: Agent;
   private readonly controller: AgentController;
@@ -494,6 +443,7 @@ export class TextRuntime {
   private readonly threadWriteQueues = new Map<string, Promise<void>>();
   private readonly threadActivity = new Map<string, { activity: ThreadSummary["activity"]; attention: number }>();
   private readonly resolvingInteractions = new Map<string, InteractionResolution>();
+  private readonly hydratingPlans = new Set<string>();
   private threadSwitchQueue: Promise<void> = Promise.resolve();
   private snapshot: RuntimeSnapshot = {
     status: "booting",
@@ -552,14 +502,20 @@ export class TextRuntime {
       id: "proteus-storage-v2",
       url: `file:${join(Utils.paths.userData, "proteus-v2.db")}`,
     });
+    this.planFilesystem = new LocalFilesystem({
+      basePath: join(Utils.paths.userData, "proteus-plans-v2"),
+      contained: true,
+      instructions: "Plan files are private PROTEUS Markdown drafts. Use relative .md paths only.",
+    });
     this.workspace = new Workspace({
-      id: "proteus-text-workspace",
-      name: "PROTEUS text chat",
-      filesystem: new LocalFilesystem({
-        basePath: Utils.paths.userData,
-        readOnly: true,
-        instructions: "",
-      }),
+      id: "proteus-plan-workspace",
+      name: "PROTEUS plan drafts",
+      filesystem: this.planFilesystem,
+      tools: {
+        enabled: false,
+        [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: { enabled: true, name: "read_plan" },
+        [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: { enabled: true, name: "write_plan", requireApproval: false, requireReadBeforeWrite: false },
+      },
     });
     this.memory = new Memory({
       storage: this.storage,
@@ -605,7 +561,6 @@ export class TextRuntime {
       memory: this.memory,
       workspace: this.workspace,
       agent: this.agent,
-      tools: { submit_plan: inlineSubmitPlanTool },
       gateways: [openRouterGateway],
       defaultModeId: "chat",
       modes: [
@@ -613,10 +568,10 @@ export class TextRuntime {
           id: "chat",
           name: "Chat",
           defaultModelId: DEFAULT_MODEL_ID,
-          availableTools: ["ask_user", "submit_plan", "task_write", "task_update", "task_complete", "task_check"],
+          availableTools: ["ask_user", "submit_plan", "read_plan", "write_plan", "task_write", "task_update", "task_complete", "task_check"],
         },
       ],
-      disableBuiltinTools: ["submit_plan", "subagent"],
+      disableBuiltinTools: ["subagent"],
     });
 
     new Mastra({
@@ -1029,6 +984,44 @@ export class TextRuntime {
     });
   }
 
+  private async hydratePlanSuspension(toolCallId: string, pathValue: unknown, originMessageId?: string): Promise<void> {
+    if (typeof pathValue !== "string" || this.hydratingPlans.has(toolCallId)) return;
+    this.hydratingPlans.add(toolCallId);
+    try {
+      const path = normalize(pathValue.trim()).replaceAll("\\", "/");
+      if (!path || isAbsolute(pathValue) || path === ".." || path.startsWith("../") || !path.toLowerCase().endsWith(".md")) throw new Error("Plan path must be a relative Markdown file.");
+      if (!this.planFilesystem.resolveAbsolutePath(path)) throw new Error("Plan path is outside the contained workspace.");
+      const content = await this.planFilesystem.readFile(path);
+      const plan = typeof content === "string" ? content : content.toString("utf8");
+      if (!plan.trim()) throw new Error("Plan file is empty.");
+      if (Buffer.byteLength(plan, "utf8") > 128 * 1024) throw new Error("Plan file is larger than 128 KiB.");
+      const interaction = parseSuspendedInteraction(
+        { toolCallId, toolName: "submit_plan", suspendPayload: { path, plan } },
+        this.nextPlanVersion(),
+        originMessageId,
+      );
+      if (!interaction) throw new Error("Plan suspension could not be parsed.");
+      this.controllerThreadState = {
+        ...this.controllerThreadState,
+        pendingInteractions: [...(this.controllerThreadState.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId), interaction],
+      };
+      const threadId = this.controllerThreadId ?? this.selectedThreadId;
+      if (threadId) await this.persistThreadState(threadId, this.controllerThreadState);
+      if (this.selectedThreadId === this.controllerThreadId) {
+        this.threadState = this.controllerThreadState;
+        this.publish({ interactions: this.controllerThreadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.controllerThreadState, this.displayState) });
+      }
+    } catch (error) {
+      this.markInteractionFailed(toolCallId, {
+        code: "resume-failed",
+        message: error instanceof Error ? error.message : "The submitted plan file could not be read.",
+        retryable: Boolean(originMessageId),
+      });
+    } finally {
+      this.hydratingPlans.delete(toolCallId);
+    }
+  }
+
   private handleControllerEvent(event: AgentControllerEvent): void {
     if (event.type === "display_state_changed") {
       this.displayState = event.displayState;
@@ -1036,6 +1029,11 @@ export class TextRuntime {
       const toolApproval = this.approvalFrom(event.displayState.pendingApproval);
       const threadId = this.controllerThreadId;
       if (threadId) {
+        for (const [toolCallId, suspension] of event.displayState.pendingSuspensions) {
+          if (suspension.toolName !== "submit_plan") continue;
+          const payload = suspension.suspendPayload && typeof suspension.suspendPayload === "object" ? (suspension.suspendPayload as { path?: unknown }) : {};
+          void this.hydratePlanSuspension(toolCallId, payload.path, this.runClientMessageId ?? undefined);
+        }
         const tasks = projectTasks(event.displayState, this.controllerThreadState.tasks ?? []);
         const pendingInteractions = projectPendingInteractions(event.displayState, this.controllerThreadState.pendingInteractions ?? [], this.nextPlanVersion());
         this.controllerThreadState = {
@@ -1110,6 +1108,10 @@ export class TextRuntime {
             workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
           });
         }
+      }
+      if (event.toolName === "submit_plan") {
+        const payload = event.suspendPayload && typeof event.suspendPayload === "object" ? (event.suspendPayload as { path?: unknown }) : {};
+        void this.hydratePlanSuspension(event.toolCallId, payload.path, originMessageId);
       }
       return;
     }
@@ -1465,23 +1467,6 @@ export class TextRuntime {
 
   private interactionFailure(error: InteractionError): InteractionResponseResult {
     return { accepted: false, ...error };
-  }
-
-  private async canonicalToolOutcome(entry: InteractionResolution): Promise<InteractionToolOutcome | { status: "missing" }> {
-    const threadId = this.controllerThreadId ?? this.selectedThreadId;
-    if (!threadId) return { status: "missing" };
-    if (entry.terminalEvidence) return entry.terminalEvidence;
-    const expectedDecision = entry.interaction.kind === "submit_plan" && entry.status !== "answered" ? entry.status : undefined;
-    for (const delay of [0, 50, 150, 300, 500]) {
-      if (delay) await new Promise<void>((resolve) => setTimeout(resolve, delay));
-      if (entry.terminalEvidence) return entry.terminalEvidence;
-      const liveOutcome = findInteractionToolOutcome(this.snapshot.messages, entry.interaction, expectedDecision);
-      if (liveOutcome) return liveOutcome;
-      const raw = (await this.requireSession().thread.listMessages({ threadId })) as MastraMessage[];
-      const storedOutcome = findInteractionToolOutcome(this.mapMessages(raw), entry.interaction, expectedDecision);
-      if (storedOutcome) return storedOutcome;
-    }
-    return { status: "missing" };
   }
 
   private async validateStoredCredential(): Promise<void> {
@@ -2022,6 +2007,9 @@ export class TextRuntime {
       resumeData = {
         action: record.action,
         ...(feedback ? { feedback } : {}),
+        ...(interaction.plan?.sourcePath ? { path: interaction.plan.sourcePath } : {}),
+        ...(interaction.title ? { title: interaction.title } : {}),
+        ...(interaction.plan?.raw ? { plan: interaction.plan.raw } : {}),
       };
       nextStatus = record.action === "approved" ? "approved" : "rejected";
     } else {
@@ -2059,17 +2047,13 @@ export class TextRuntime {
     }
     try {
       await session.respondToToolSuspension({ toolCallId, resumeData });
-      const outcome = await this.canonicalToolOutcome(resolution);
-      if (outcome.status === "completed") {
+      this.finalizeResolvingInteractions(toolCallId);
+      return { accepted: true };
+    } catch (error) {
+      if (!session.suspensions.has({ toolCallId })) {
         this.finalizeResolvingInteractions(toolCallId);
         return { accepted: true };
       }
-      const error: InteractionError = outcome.status === "declined"
-        ? { code: "resume-denied", message: "Mastra denied this plan response. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) }
-        : { code: "resume-failed", message: outcome.status === "missing" ? "The response did not reach a terminal tool result." : "The tool could not complete this response.", retryable: Boolean(interaction.originMessageId) };
-      this.markInteractionFailed(toolCallId, error);
-      return this.interactionFailure(error);
-    } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not resume this request. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
       this.markInteractionFailed(toolCallId, failure);
       return this.interactionFailure(failure);

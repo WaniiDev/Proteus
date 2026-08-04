@@ -19,8 +19,8 @@ export function submitPlanDecision(value: unknown): "approved" | "rejected" | nu
   if (!value || typeof value !== "object") return null;
   const content = (value as { content?: unknown }).content;
   if (typeof content !== "string") return null;
-  if (content === "The user approved the plan. Continue with the approved work.") return "approved";
-  if (content.startsWith("The user requested plan changes")) return "rejected";
+  if (content === "The user approved the plan. Continue with the approved work." || content.startsWith("Plan approved.")) return "approved";
+  if (content.startsWith("The user requested plan changes") || content.startsWith("Plan was not approved.")) return "rejected";
   return null;
 }
 
@@ -103,7 +103,7 @@ export function parseSuspendedInteraction(input: SuspendedToolLike, version: num
       kind: "submit_plan",
       title: typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : parsed.title,
       options: [],
-      plan: { version, ...parsed, status: "draft" },
+      plan: { version, ...parsed, ...(typeof payload.path === "string" ? { sourcePath: payload.path } : {}), status: "draft" },
       status: "pending",
       ...(originMessageId ? { originMessageId } : {}),
       createdAt: new Date().toISOString(),
