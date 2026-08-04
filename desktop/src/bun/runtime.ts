@@ -16,7 +16,7 @@ import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, Interaction
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { findInteractionToolOutcome, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection } from "./runtime-projection";
-import { TaskLoopGuardProcessor } from "./task-loop-guard";
+import { TaskToolPolicy } from "./task-tool-policy";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -268,6 +268,29 @@ function projectMessageParts(message: MastraMessage): ChatMessagePart[] {
   });
 }
 
+function latestTaskSnapshot(messages: ChatMessage[]): WorkbenchTask[] | undefined {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (part.type !== "tool" || !part.name.startsWith("task_") || !part.output || typeof part.output !== "object") continue;
+      const tasks = (part.output as { tasks?: unknown }).tasks;
+      if (!Array.isArray(tasks)) continue;
+      const parsed = tasks.filter(
+        (task): task is WorkbenchTask =>
+          Boolean(task) &&
+          typeof task === "object" &&
+          typeof (task as WorkbenchTask).id === "string" &&
+          typeof (task as WorkbenchTask).content === "string" &&
+          typeof (task as WorkbenchTask).activeForm === "string" &&
+          ["pending", "in_progress", "completed"].includes((task as WorkbenchTask).status),
+      );
+      if (parsed.length === tasks.length) return parsed;
+    }
+  }
+  return undefined;
+}
+
 function extractPartText(part: unknown): string {
   if (typeof part === "string") return part;
   if (!part || typeof part !== "object") return "";
@@ -460,6 +483,7 @@ export class TextRuntime {
   private readonly workspace: Workspace;
   private readonly agent: Agent;
   private readonly controller: AgentController;
+  private readonly taskToolPolicy = new TaskToolPolicy();
   private session: Awaited<ReturnType<AgentController["createSession"]>> | undefined;
   private controllerThreadId: string | null = null;
   private selectedThreadId: string | null = null;
@@ -547,15 +571,12 @@ export class TextRuntime {
       },
     });
 
-    const taskLoopGuard = new TaskLoopGuardProcessor();
     this.agent = new Agent({
       id: AGENT_ID,
       name: "PROTEUS",
       instructions: AGENT_INSTRUCTIONS,
       signals: [new TaskSignalProvider()],
-      inputProcessors: [taskLoopGuard],
-      outputProcessors: [taskLoopGuard],
-      maxProcessorRetries: 2,
+      hooks: this.taskToolPolicy.hooks,
       transform: {
         targets: ["display", "transcript"],
         transformToolPayload: ({ phase, input, inputTextDelta, output, error, suspendPayload, resumeData }) => {
@@ -1302,6 +1323,13 @@ export class TextRuntime {
     if (guard && ((guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration) || (guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration))) return false;
     this.recordPersistedAssistantIds(threadId, rawMessages);
     const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
+    if (threadId === this.controllerThreadId) {
+      const restoredTasks = latestTaskSnapshot(messages);
+      if (restoredTasks) {
+        this.requireSession().displayState.restoreTasks(restoredTasks);
+        this.displayState = this.requireSession().displayState.get() as AgentControllerDisplayState;
+      }
+    }
     if (threadId === this.selectedThreadId) {
       this.publish({ messages });
       if (!this.runId && rawMessages.some((message) => pendingApprovalToolName(message))) {
@@ -1811,6 +1839,7 @@ export class TextRuntime {
     const session = this.requireSession();
     const threadId = this.controllerThreadId ?? session.thread.getId();
     if (!threadId) throw new Error("No active conversation");
+    this.taskToolPolicy.reset(threadId);
     const runId = randomUUID();
     const sendGeneration = ++this.sendGeneration;
     this.runId = runId;
