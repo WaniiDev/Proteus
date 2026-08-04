@@ -10,7 +10,7 @@ import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, QueuedFollowUp, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { findInteractionToolOutcome, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection } from "./runtime-projection";
@@ -111,8 +111,6 @@ type PersistedThreadState = {
   tasks?: WorkbenchTask[];
   pendingInteractions?: PendingInteraction[];
   resolvedInteractions?: PendingInteraction[];
-  queuedFollowUps?: QueuedFollowUp[];
-  clearedFollowUps?: QueuedFollowUp[];
   events?: ChatEvent[];
   tokenUsage?: TokenUsage;
 };
@@ -775,8 +773,8 @@ export class TextRuntime {
       goal: state.goal,
       tasks,
       pendingInteractions,
-      queuedFollowUps: state.queuedFollowUps ?? [],
-      clearedFollowUps: state.clearedFollowUps ?? [],
+      queuedFollowUps: [],
+      clearedFollowUps: [],
       tokenUsage: {
         promptTokens: usage.promptTokens ?? 0,
         completionTokens: usage.completionTokens ?? 0,
@@ -1289,7 +1287,6 @@ export class TextRuntime {
     await this.retryAssistantProjectionPersistence(threadId, runId, selectionGeneration);
     await this.refreshThreadSummaries();
     if (this.selectedThreadId === threadId) await this.publishSelectedThread(threadId, { clearError: false }, selectionGeneration);
-    await this.drainQueuedFollowUp(threadId);
   }
 
   private async retryAssistantProjectionPersistence(threadId: string, runId: string, selectionGeneration: number): Promise<void> {
@@ -1769,33 +1766,7 @@ export class TextRuntime {
       if (this.selectedThreadId !== this.controllerThreadId) throw makeRuntimeError("busy");
       const threadId = this.controllerThreadId;
       if (!threadId) throw makeRuntimeError("busy");
-      const queued: QueuedFollowUp = {
-        id: messageId,
-        content: candidate,
-        createdAt: new Date().toISOString(),
-      };
-      this.controllerThreadState = {
-        ...this.controllerThreadState,
-        queuedFollowUps: [...(this.controllerThreadState.queuedFollowUps ?? []), queued],
-      };
-      this.optimisticUserMessages.set(messageId, {
-        threadId,
-        message: {
-          id: messageId,
-          role: "user",
-          text: candidate,
-          turnId: messageId,
-          parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }],
-          status: "complete",
-          createdAt: queued.createdAt,
-        },
-      });
-      await this.persistThreadState(threadId, this.controllerThreadState);
-      this.threadState = this.controllerThreadState;
-      this.publish({
-        messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
-        workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
-      });
+      await session.followUp({ content: candidate });
       return { runId: this.runId };
     }
 
@@ -1882,23 +1853,6 @@ export class TextRuntime {
     return { runId };
   }
 
-  private async drainQueuedFollowUp(threadId: string): Promise<void> {
-    if (this.runId || threadId !== this.controllerThreadId) return;
-    const next = this.controllerThreadState.queuedFollowUps?.[0];
-    if (!next) return;
-    this.startRun(next.content, { optimistic: true, clientMessageId: next.id });
-    this.controllerThreadState = {
-      ...this.controllerThreadState,
-      queuedFollowUps: (this.controllerThreadState.queuedFollowUps ?? []).slice(1),
-    };
-    await this.persistThreadState(threadId, this.controllerThreadState);
-    if (this.selectedThreadId === threadId) this.threadState = this.controllerThreadState;
-    if (this.selectedThreadId === threadId)
-      this.publish({
-        workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
-      });
-  }
-
   async steer(text: string): Promise<{ runId: string }> {
     if (this.steerInFlight) throw makeRuntimeError("busy");
     this.steerInFlight = true;
@@ -1918,14 +1872,10 @@ export class TextRuntime {
     const threadId = this.controllerThreadId;
     if (!threadId) throw new Error("No active conversation");
     const runId = this.runId;
-    const cleared = this.controllerThreadState.queuedFollowUps ?? [];
     const pendingInteractions = this.controllerThreadState.pendingInteractions ?? [];
     this.resolvingInteractions.clear();
-    for (const item of cleared) this.optimisticUserMessages.delete(item.id);
     this.controllerThreadState = {
       ...this.controllerThreadState,
-      queuedFollowUps: [],
-      clearedFollowUps: [...(this.controllerThreadState.clearedFollowUps ?? []), ...cleared],
       pendingInteractions: [],
       resolvedInteractions: [
         ...(this.controllerThreadState.resolvedInteractions ?? []),
@@ -1956,7 +1906,7 @@ export class TextRuntime {
     this.runOutcome = "streaming";
     this.runError = null;
     this.sendGeneration += 1;
-    const messagesAfterSteer = this.snapshot.messages.filter((message) => !cleared.some((item) => item.id === message.id) && !retiredMessageIds.includes(message.id));
+    const messagesAfterSteer = this.snapshot.messages.filter((message) => !retiredMessageIds.includes(message.id));
     this.publish({
       status: "running",
       error: null,
@@ -2096,80 +2046,21 @@ export class TextRuntime {
 
   async updateQueuedFollowUp(id: string, content: string): Promise<void> {
     await this.ensureInitialized();
-    const nextContent = content.trim();
-    if (!nextContent) throw new Error("Queued message cannot be empty");
-    const queue = this.controllerThreadState.queuedFollowUps ?? [];
-    if (!queue.some((item) => item.id === id)) throw new Error("Queued message not found");
-    this.controllerThreadState = {
-      ...this.controllerThreadState,
-      queuedFollowUps: queue.map((item) => (item.id === id ? { ...item, content: nextContent } : item)),
-    };
-    const optimistic = this.optimisticUserMessages.get(id);
-    if (optimistic)
-      this.optimisticUserMessages.set(id, {
-        ...optimistic,
-        message: { ...optimistic.message, text: nextContent },
-      });
-    const threadId = this.controllerThreadId ?? this.selectedThreadId ?? "";
-    await this.persistThreadState(threadId, this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId && threadId)
-      this.publish({
-        messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
-        workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
-      });
+    void id;
+    void content;
+    throw new Error("Mastra owns queued follow-ups; queued messages cannot be edited");
   }
 
   async removeQueuedFollowUp(id: string): Promise<void> {
     await this.ensureInitialized();
-    const queue = this.controllerThreadState.queuedFollowUps ?? [];
-    if (!queue.some((item) => item.id === id)) throw new Error("Queued message not found");
-    this.controllerThreadState = {
-      ...this.controllerThreadState,
-      queuedFollowUps: queue.filter((item) => item.id !== id),
-    };
-    this.optimisticUserMessages.delete(id);
-    const threadId = this.controllerThreadId ?? this.selectedThreadId ?? "";
-    await this.persistThreadState(threadId, this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId && threadId)
-      this.publish({
-        messages: this.mergeTransientMessages(
-          threadId,
-          this.snapshot.messages.filter((message) => message.id !== id),
-        ),
-        workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
-      });
+    void id;
+    throw new Error("Mastra owns queued follow-ups; queued messages cannot be removed individually");
   }
 
   async restoreQueuedFollowUp(id: string): Promise<void> {
     await this.ensureInitialized();
-    const cleared = this.controllerThreadState.clearedFollowUps ?? [];
-    const item = cleared.find((entry) => entry.id === id);
-    if (!item) throw new Error("Cleared message not found");
-    this.controllerThreadState = {
-      ...this.controllerThreadState,
-      clearedFollowUps: cleared.filter((entry) => entry.id !== id),
-      queuedFollowUps: [...(this.controllerThreadState.queuedFollowUps ?? []), item],
-    };
-    const threadId = this.controllerThreadId ?? this.selectedThreadId;
-    if (threadId)
-      this.optimisticUserMessages.set(item.id, {
-        threadId,
-        message: {
-          id: item.id,
-          role: "user",
-          text: item.content,
-          turnId: item.id,
-          parts: [{ type: "text", id: `${item.id}:text:0`, text: item.content }],
-          status: "complete",
-          createdAt: item.createdAt,
-        },
-      });
-    await this.persistThreadState(this.controllerThreadId ?? this.selectedThreadId ?? "", this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId && threadId)
-      this.publish({
-        messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
-        workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
-      });
+    void id;
+    throw new Error("Mastra owns queued follow-ups; cleared messages are not retained by Proteus");
   }
 
   async retry(messageId: string): Promise<{ runId: string }> {

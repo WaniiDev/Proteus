@@ -117,6 +117,13 @@ describe("installed Mastra contracts", () => {
       expect(second.id).not.toBe(firstThreadId);
       expect(session.thread.getId()).toBe(firstThreadId);
       expect((await session.thread.list()).map((thread) => thread.id)).toEqual(expect.arrayContaining([firstThreadId, second.id]));
+
+      session.followUps.enqueue({ content: "first" });
+      session.followUps.enqueue({ content: "second" });
+      expect(session.followUps.count()).toBe(2);
+      expect(session.followUps.dequeue()?.content).toBe("first");
+      expect(session.followUps.dequeue()?.content).toBe("second");
+      expect(session.followUps.isEmpty()).toBe(true);
     } finally {
       await controller.destroy();
       await storage.close();
