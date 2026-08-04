@@ -186,6 +186,14 @@ export function submitPlanDecision(value: unknown): "approved" | "rejected" | nu
   return null;
 }
 
+export function submitPlanResolutionResult(decision: "approved" | "rejected", feedback?: string): { content: string } {
+  return {
+    content: decision === "approved"
+      ? "The user approved the plan. Continue with the approved work."
+      : `The user requested plan changes${feedback ? `: ${feedback}` : "."}`,
+  };
+}
+
 /**
  * Mastra can persist a resumed submit_plan result under a fresh tool-call ID.
  * Exact IDs remain authoritative; aliases are accepted only for the trusted

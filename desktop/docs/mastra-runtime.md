@@ -30,6 +30,8 @@ The default conversation mode transitions to an approved-plan mode on approval. 
 
 `Session.displayState.pendingSuspensions` and `Session.suspensions` are authoritative for live plan cards. Plan Markdown is hydrated once per unique tool-call ID, and repeated display snapshots preserve the existing version and `resolving` status. A response is accepted only after the native resume boundary completes without an emitted error; terminal tool events and canonical history are used as stronger evidence when the installed runtime provides them.
 
+Mastra 1.55 does not emit `tool_end` for a resumed `submit_plan` call. After the successful native resume boundary removes that suspension, PROTEUS projects the original visible tool-call ID to `completed`; it never settles the row before Mastra confirms the resume.
+
 ## Compatibility boundary
 
 `runtime.ts` projects Mastra state into the desktop IPC snapshot. This layer may sanitize tool payloads and shape display data, but it must not duplicate Mastra lifecycle ownership. The OpenRouter catalog endpoint remains provider-specific because the product displays modality and descriptive metadata outside Mastra's `AvailableModel` contract; selection still uses `Session.model.switch()`.

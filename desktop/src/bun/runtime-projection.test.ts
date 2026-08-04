@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, PendingInteraction } from "../shared/contracts";
-import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
 
 const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
   isRunning: true,
@@ -283,6 +283,14 @@ describe("interaction terminal correlation", () => {
   it("recognizes the installed native submit_plan result contract", () => {
     expect(submitPlanDecision({ content: "Plan approved. Proceed with implementation following the approved plan." })).toBe("approved");
     expect(submitPlanDecision({ content: "Plan was not approved. The user wants revisions." })).toBe("rejected");
+  });
+
+  it("creates a terminal result for a natively resumed plan call", () => {
+    const approved = submitPlanResolutionResult("approved");
+    const rejected = submitPlanResolutionResult("rejected", "Add tests");
+    expect(submitPlanDecision(approved)).toBe("approved");
+    expect(submitPlanDecision(rejected)).toBe("rejected");
+    expect(rejected.content).toContain("Add tests");
   });
   const planInteraction: PendingInteraction = {
     id: "call-original",
