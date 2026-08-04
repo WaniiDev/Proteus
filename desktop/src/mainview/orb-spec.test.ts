@@ -37,4 +37,16 @@ describe("orb visual contract", () => {
   it("keeps the resting state free of helper copy", () => {
     expect(ORB_STATES.idle.description).toBe("");
   });
+
+  it("defines every new overlay, fallback, and reduced-motion guard", async () => {
+    const css = await Bun.file(new URL("./proteus.css", import.meta.url)).text();
+    for (const state of ["summoned", "remembering", "drafting", "verifying", "away", "error"]) {
+      expect(css).toContain(`data-state="${state}"`);
+    }
+    expect(css).toContain("animation: ripple 1.2s ease-out 1");
+    expect(css).toContain("animation: draftBreath 2.4s ease-in-out infinite");
+    expect(css).toContain("animation: scanSpin 1.6s linear infinite");
+    expect(css).toContain("opacity: .55");
+    expect(css).toContain(".orb-float { transition: none !important; }");
+  });
 });

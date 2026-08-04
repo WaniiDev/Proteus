@@ -243,7 +243,7 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
   align-items: center; justify-content: center; gap: 20px;
   padding: var(--s-base) 0;
 }
-.orb-float { position: relative; width: 100%; height: 100%; }
+.orb-float { position: relative; width: 100%; height: 100%; transition: opacity .8s ease; }
 .stage-center > .orb-float { width: 220px; height: 220px; flex-shrink: 0; }
 
 .orb-canvas {
@@ -316,6 +316,10 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 .orb-float[data-state="listening"] .orb-ring.r2 { animation-delay: .7s; }
 .orb-float[data-state="listening"] .orb-ring.r3 { animation-delay: 1.4s; }
 .orb-float[data-state="working"] .orb-orbit { opacity: 1; animation: orbitSpin 2.8s linear infinite; }
+.orb-float[data-state="summoned"] .orb-ring.r1 { animation: ripple 1.2s ease-out 1; }
+.orb-float[data-state="drafting"] .orb-ring.r2 { border-color: var(--g-peach); animation: draftBreath 2.4s ease-in-out infinite; }
+.orb-float[data-state="verifying"] .orb-ring.r1 { opacity: 1; border-color: transparent; border-top-color: var(--g-sky); animation: scanSpin 1.6s linear infinite; }
+.orb-float[data-state="away"] { opacity: .55; }
 
 /* ---- CSS-fallback state behaviours (skipped once webgl-on) ---- */
 .orb-float:not(.webgl-on)[data-state="idle"] .orb-css { animation: breathe 6.5s ease-in-out infinite; }
@@ -328,6 +332,13 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 .orb-float:not(.webgl-on)[data-state="speaking"] .orb-css { animation: speak 1.15s ease-in-out infinite; }
 .orb-float:not(.webgl-on)[data-state="done"] .orb-css { animation: donePop 1s cubic-bezier(.34,1.56,.64,1) both; }
 .orb-float:not(.webgl-on)[data-state="interrupted"] .orb-css { animation: contract .35s ease both; }
+.orb-float:not(.webgl-on)[data-state="summoned"] .orb-css { animation: summonPop 1.2s cubic-bezier(.34,1.56,.64,1) both; }
+.orb-float:not(.webgl-on)[data-state="remembering"] .orb-css { animation: rememberSway 8s ease-in-out infinite; }
+.orb-float:not(.webgl-on)[data-state="drafting"] .orb-css { animation: draftPulse 2.4s ease-in-out infinite; }
+.orb-float:not(.webgl-on)[data-state="verifying"] .orb-css { animation: breathe 2.8s ease-in-out infinite; }
+.orb-float:not(.webgl-on)[data-state="verifying"] .orb-swirl { opacity: 1; animation: swirlSpin 1.6s linear infinite; }
+.orb-float:not(.webgl-on)[data-state="away"] .orb-css { animation: awayBreathe 12s ease-in-out infinite; }
+.orb-float:not(.webgl-on)[data-state="error"] .orb-css { animation: errorShake .45s ease both, breathe 7s ease-in-out .5s infinite; }
 .orb-float:not(.webgl-on)[data-state="recovery"] .orb-css { animation: recover 1.4s ease both; }
 
 @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
@@ -338,6 +349,16 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 }
 @keyframes orbitSpin { to { transform: translate(-50%,-50%) rotate(360deg); } }
 @keyframes swirlSpin { to { transform: rotate(360deg); } }
+@keyframes scanSpin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+@keyframes draftBreath {
+  0%, 100% { transform: translate(-50%,-50%) scale(1); opacity: .45; }
+  50% { transform: translate(-50%,-50%) scale(1.08); opacity: .15; }
+}
+@keyframes summonPop { 0% { transform: scale(.9); } 45% { transform: scale(1.06); } 100% { transform: scale(1); } }
+@keyframes rememberSway { 0%,100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.03) rotate(1.5deg); } }
+@keyframes draftPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+@keyframes awayBreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.015); } }
+@keyframes errorShake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 55% { transform: translateX(3px); } 80% { transform: translateX(-1px); } }
 @keyframes workPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
 @keyframes speak { 0%,100% { transform: scale(1, 1); } 30% { transform: scale(1.05, .96); } 60% { transform: scale(.97, 1.04); } }
 @keyframes donePop { 0% { transform: scale(1); } 40% { transform: scale(1.14); } 100% { transform: scale(1); } }
@@ -757,6 +778,7 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .orb-css, .orb-ring, .orb-orbit, .orb-swirl, .ambient-orb, .wb-empty-orb { animation: none !important; }
+  .orb-float { transition: none !important; }
   .reveal { opacity: 1; transform: none; filter: none; }
 }
 
