@@ -13,7 +13,7 @@ import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
-import { findInteractionToolOutcome, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection } from "./runtime-projection";
+import { findInteractionToolOutcome, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 
@@ -859,7 +859,7 @@ export class TextRuntime {
     const sourceById = new Map(rawMessages.map((message) => [message.id, message]));
     const converted = toAISdkV5Messages(rawMessages as MastraDBMessage[]);
     let currentTurnId = "conversation-start";
-    return converted
+    const projected = converted
       .map((message) => {
         const role = message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : null;
         if (role === "user") currentTurnId = message.id;
@@ -896,6 +896,7 @@ export class TextRuntime {
         };
       })
       .filter((message) => message.parts.length > 0);
+    return normalizeLegacyTaskToolArtifacts(projected);
   }
 
   private mergeTransientMessages(threadId: string, messages: ChatMessage[], reconcilePersisted = false): ChatMessage[] {

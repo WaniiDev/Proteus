@@ -9,6 +9,70 @@ type SuspendedToolLike = {
   suspendPayload: unknown;
 };
 
+const LEGACY_TASK_POLICY_MESSAGES = new Set([
+  "This exact task mutation already ran. Use the current task state and continue without repeating it.",
+  "Task tools made no progress repeatedly. Stop using task tools and answer the user with the current result.",
+]);
+
+function stableValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableValue(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function taskToolSignature(part: ChatToolPart): string {
+  return `${part.name}:${stableValue(part.input)}`;
+}
+
+function taskOutputContent(part: ChatToolPart): string | null {
+  if (typeof part.error === "string") return part.error;
+  if (!part.output || typeof part.output !== "object") return null;
+  const content = (part.output as { content?: unknown }).content;
+  return typeof content === "string" ? content : null;
+}
+
+function completedTaskCheckKey(part: ChatToolPart): string | null {
+  if (part.name !== "task_check" || part.status !== "completed" || !part.output || typeof part.output !== "object") return null;
+  const output = part.output as { summary?: { allCompleted?: unknown }; tasks?: unknown };
+  return output.summary?.allCompleted === true ? stableValue(output.tasks) : null;
+}
+
+/**
+ * Hide only artifacts emitted by Proteus' retired task-loop guard. This is a
+ * read projection: durable Mastra history remains untouched, and native task
+ * errors continue to render.
+ */
+export function normalizeLegacyTaskToolArtifacts(messages: ChatMessage[]): ChatMessage[] {
+  const successfulByTurn = new Map<string, Set<string>>();
+  const completedChecksByTurn = new Map<string, Set<string>>();
+
+  return messages.flatMap((message) => {
+    const successes = successfulByTurn.get(message.turnId) ?? new Set<string>();
+    const completedChecks = completedChecksByTurn.get(message.turnId) ?? new Set<string>();
+    const parts = message.parts.filter((part) => {
+      if (part.type !== "tool" || !part.name.startsWith("task_")) return true;
+      const signature = taskToolSignature(part);
+      const legacyError = part.status === "error" && LEGACY_TASK_POLICY_MESSAGES.has(taskOutputContent(part) ?? "");
+      if (legacyError && successes.has(signature)) return false;
+
+      const completedCheck = completedTaskCheckKey(part);
+      if (completedCheck !== null && completedChecks.has(completedCheck)) return false;
+      if (completedCheck !== null) completedChecks.add(completedCheck);
+
+      if (part.status === "completed" && (part.output as { isError?: unknown } | undefined)?.isError !== true) successes.add(signature);
+      return true;
+    });
+    successfulByTurn.set(message.turnId, successes);
+    completedChecksByTurn.set(message.turnId, completedChecks);
+    return parts.length > 0 ? [{ ...message, parts }] : [];
+  });
+}
+
 export type InteractionToolOutcome = {
   status: Extract<ChatToolPart["status"], "completed" | "error" | "cancelled" | "declined">;
   toolCallId: string;

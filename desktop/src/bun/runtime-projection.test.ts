@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, PendingInteraction } from "../shared/contracts";
-import { findInteractionToolOutcome, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, type LiveAssistantProjection } from "./runtime-projection";
+import { findInteractionToolOutcome, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, upsertChatMessage, type LiveAssistantProjection } from "./runtime-projection";
 
 const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
   isRunning: true,
@@ -52,6 +52,31 @@ const projection = (turnId: string, messages: ChatMessage[], outcome: ChatMessag
 });
 
 describe("runtime display projection", () => {
+  const taskMessage = (id: string, toolCallId: string, status: "completed" | "error", output: unknown): ChatMessage => ({
+    ...assistant(id, ""),
+    parts: [{ type: "tool", id: `${id}:tool`, toolCallId, name: "task_check", label: "Checked task progress", status, input: {}, output }],
+  });
+
+  it("suppresses retired repeat-guard errors but preserves genuine task failures", () => {
+    const completed = { summary: { allCompleted: true }, tasks: [{ id: "task-1", status: "completed" }] };
+    const legacy = { content: "This exact task mutation already ran. Use the current task state and continue without repeating it.", isError: true };
+    const genuine = { content: "Unknown task id", isError: true };
+    const result = normalizeLegacyTaskToolArtifacts([
+      taskMessage("check-1", "call-1", "completed", completed),
+      taskMessage("check-2", "call-2", "error", legacy),
+      taskMessage("check-3", "call-3", "error", genuine),
+    ]);
+    expect(result.map((message) => message.id)).toEqual(["check-1", "check-3"]);
+  });
+
+  it("collapses repeated terminal task checks with the same completed snapshot", () => {
+    const completed = { summary: { allCompleted: true }, tasks: [{ id: "task-1", status: "completed" }] };
+    expect(normalizeLegacyTaskToolArtifacts([
+      taskMessage("check-1", "call-1", "completed", completed),
+      taskMessage("check-2", "call-2", "completed", completed),
+    ]).map((message) => message.id)).toEqual(["check-1"]);
+  });
+
   it("normalizes tool suspension payloads and preserves resolving interactions", () => {
     const question = parseSuspendedInteraction(
       {
