@@ -886,6 +886,18 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
               </div>
             </form>
           </div>
+          {workbenchOpen && (
+            <button
+              type="button"
+              className="workbench-backdrop"
+              aria-label="Close Workbench"
+              onClick={() => {
+                if (!snapshot.activeThreadId) return;
+                setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
+                requestAnimationFrame(() => workbenchToggleRef.current?.focus());
+              }}
+            />
+          )}
           {workbenchOpen && <Workbench snapshot={snapshot} onJump={jumpToInteraction} onClose={() => {
             if (!snapshot.activeThreadId) return;
             setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));

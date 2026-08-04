@@ -592,3 +592,32 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .companion-view .wb-group, .companion-view .wb-session { border-radius: 13px; background: rgba(255,255,255,.66); }
 .companion-view .wb-group { padding: 12px; }
 .companion-view .wb-groups { gap: 8px; }
+.workbench-backdrop { display: none; }
+
+@media (min-width: 761px) and (max-width: 1023px) {
+  .companion-view .text-chat-layout { overflow: hidden; }
+  .companion-view .companion-grid,
+  .companion-view .companion-grid.workbench-absent { display: block; height: 100%; min-height: 0; }
+  .companion-view .stage { height: 100%; min-height: 0; }
+  .companion-view .workbench-backdrop { position: fixed; inset: 58px 0 0; z-index: 54; display: block; border: 0; border-radius: 0; background: rgba(41,37,36,.18); backdrop-filter: blur(2px); }
+  .companion-view .workbench { position: fixed; inset: 58px 0 0 auto; z-index: 55; width: min(400px, calc(100vw - 32px)); max-height: none; overflow: hidden; padding: 12px 12px 12px 0; }
+  .companion-view .workbench-live { height: 100%; max-height: 100%; overflow: hidden; border-radius: 18px 0 0 18px; box-shadow: -16px 0 44px rgba(41,37,36,.14); }
+}
+
+@media (max-width: 760px) {
+  .companion-view .chat-titlebar { min-height: 54px; padding: 7px 14px 5px; }
+  .companion-view .chat-title { font-size: 20px; }
+  .companion-view .chat-title-trigger { max-width: calc(100vw - 76px); }
+  .workbench-toggle { width: 34px; height: 34px; justify-content: center; padding: 0; }
+  .workbench-toggle > span { display: none; }
+  .workbench-toggle b { position: absolute; top: -5px; right: -5px; }
+  .companion-view .text-chat-layout { overflow: hidden; padding: 6px 10px 10px; }
+  .companion-view .companion-grid,
+  .companion-view .companion-grid.workbench-absent { display: block; height: 100%; min-height: 0; }
+  .companion-view .stage { height: 100%; min-height: 0; }
+  .composer-hint { display: none; }
+  .composer-context > span:first-child { max-width: 120px; }
+  .companion-view .workbench-backdrop { position: fixed; inset: 54px 0 0; z-index: 54; display: block; border: 0; border-radius: 0; background: rgba(41,37,36,.22); backdrop-filter: blur(2px); }
+  .companion-view .workbench { position: fixed; inset: auto 8px 8px; z-index: 55; width: auto; max-height: min(72dvh, 680px); overflow: hidden; padding: 0; }
+  .companion-view .workbench-live { height: min(72dvh, 680px); max-height: min(72dvh, 680px); overflow: hidden; border-radius: 18px; box-shadow: 0 -18px 50px rgba(41,37,36,.18); }
+}

@@ -49,17 +49,19 @@ describe("Workbench", () => {
     expect(html).toContain("Close Workbench");
   });
 
-  it("keeps the Workbench in a 70/30 normal-flow layout with a narrow stack", async () => {
+  it("uses a desktop split, tablet drawer, and mobile bottom sheet", async () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
     const app = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
 
     expect(css).toContain("grid-template-columns: minmax(0, 7fr) minmax(0, 3fr)");
-    expect(css).toContain("@media (max-width: 1023px)");
-    expect(css).toContain("grid-template-columns: minmax(0, 1fr); grid-template-rows:");
-    expect(css).not.toContain(".companion-view .workbench-scrim");
-    expect(css).not.toContain(".companion-view .workbench { position: fixed");
+    expect(css).toContain("@media (min-width: 761px) and (max-width: 1023px)");
+    expect(css).toContain("inset: 58px 0 0 auto");
+    expect(css).toContain("@media (max-width: 760px)");
+    expect(css).toContain("inset: auto 8px 8px");
+    expect(css).toContain(".workbench-backdrop");
     expect(app).toContain("workbenchOpenByThread");
     expect(app).toContain("Open Workbench");
     expect(app).toContain("Close Workbench");
+    expect(app).toContain('className="workbench-backdrop"');
   });
 });
