@@ -49,4 +49,14 @@ describe("orb visual contract", () => {
     expect(css).toContain("opacity: .55");
     expect(css).toContain(".orb-float { transition: none !important; }");
   });
+
+  it("lets the visual orb bleed beyond its stable layout frame", async () => {
+    const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
+
+    expect(css).toContain("--orb-bleed: 16%");
+    expect(css).toContain("overflow: visible");
+    expect(css).toContain(".orb-frame > .orb-float");
+    expect(css).toContain("inset: calc(0px - var(--orb-bleed))");
+    expect(css).toContain("--orb-bleed: 14%");
+  });
 });

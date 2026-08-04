@@ -286,8 +286,21 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
   gap: var(--s-base);
   padding: 2px 2px 14px;
 }
-.orb-frame { position: relative; width: 220px; height: 220px; flex: 0 0 auto; }
-.orb-presence-docked .orb-frame { width: 76px; height: 76px; }
+.orb-frame {
+  --orb-bleed: 16%;
+  position: relative;
+  width: 220px;
+  height: 220px;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+.orb-frame > .orb-float {
+  position: absolute;
+  inset: calc(0px - var(--orb-bleed));
+  width: auto;
+  height: auto;
+}
+.orb-presence-docked .orb-frame { --orb-bleed: 14%; width: 76px; height: 76px; }
 .orb-presence-docked .orb-meta { align-items: flex-start; text-align: left; gap: 3px; }
 .orb-presence-docked .orb-state-label { font-size: 11px; }
 .orb-presence-docked .orb-state-desc { max-width: none; font-size: 12.5px; }
