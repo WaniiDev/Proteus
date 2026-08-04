@@ -296,23 +296,6 @@ function extractPartText(part: unknown): string {
   return typeof record.text === "string" ? record.text : typeof record.content === "string" ? record.content : "";
 }
 
-function pendingApprovalToolName(message: MastraMessage): string | null {
-  if (message.role !== "assistant" || !message.content || typeof message.content !== "object" || Array.isArray(message.content)) return null;
-  const metadata = (message.content as { metadata?: unknown }).metadata;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-  const pending = (metadata as { pendingToolApprovals?: unknown }).pendingToolApprovals;
-  if (Array.isArray(pending)) {
-    const item = pending.find((value) => value && typeof value === "object" && typeof (value as { toolName?: unknown }).toolName === "string");
-    return item ? (item as { toolName: string }).toolName : null;
-  }
-  if (pending && typeof pending === "object") {
-    const values = Object.values(pending as Record<string, unknown>);
-    const item = values.find((value) => value && typeof value === "object" && typeof (value as { toolName?: unknown }).toolName === "string");
-    return item ? (item as { toolName: string }).toolName : null;
-  }
-  return null;
-}
-
 function sanitizeApprovalArgs(value: unknown, depth = 0): unknown {
   if (depth > 3) return "[truncated]";
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
@@ -485,7 +468,6 @@ export class TextRuntime {
   private hideSingleRetry = false;
   private initializePromise: Promise<RuntimeSnapshot> | undefined;
   private runTerminalHandled = false;
-  private danglingApprovalThreadId: string | null = null;
   private runClientMessageId: string | null = null;
   private startingRun = false;
   private startingRunId: string | null = null;
@@ -892,22 +874,12 @@ export class TextRuntime {
         } => entry.role !== null && entry.message.id !== hiddenRetryId,
       )
       .map(({ message, source, role, turnId }) => {
-        const approvalToolName = source ? pendingApprovalToolName(source) : null;
         let parts = projectMessageParts({
           id: message.id,
           role,
           createdAt: source?.createdAt ?? new Date(),
           content: { format: 2, parts: message.parts },
         } as MastraMessage);
-        if (approvalToolName && !parts.some((part) => part.type === "text"))
-          parts = [
-            {
-              type: "text",
-              id: `${message.id}:approval-error`,
-              text: `The ${approvalToolName} request was interrupted before approval. Retry this turn to continue.`,
-            },
-            ...parts,
-          ];
         const text = parts
           .filter((part): part is Extract<ChatMessagePart, { type: "text" }> => part.type === "text")
           .map((part) => part.text)
@@ -918,9 +890,9 @@ export class TextRuntime {
           text,
           turnId,
           parts,
-          status: approvalToolName ? "error" : ((role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "streaming" ? "streaming" : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "interrupted" ? "interrupted" : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "error" ? "error" : "complete") as ChatMessage["status"]),
+          status: (role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "streaming" ? "streaming" : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "interrupted" ? "interrupted" : role === "assistant" && message.id === this.lastAssistantId && this.runOutcome === "error" ? "error" : "complete") as ChatMessage["status"],
           createdAt: isoDate(source?.createdAt ?? new Date()),
-          retryable: approvalToolName ? true : role === "assistant" && message.id === this.lastAssistantId ? this.runError?.retryable : undefined,
+          retryable: role === "assistant" && message.id === this.lastAssistantId ? this.runError?.retryable : undefined,
         };
       })
       .filter((message) => message.parts.length > 0);
@@ -1333,20 +1305,6 @@ export class TextRuntime {
     }
     if (threadId === this.selectedThreadId) {
       this.publish({ messages });
-      if (!this.runId && rawMessages.some((message) => pendingApprovalToolName(message))) {
-        if (this.danglingApprovalThreadId !== threadId) {
-          this.danglingApprovalThreadId = threadId;
-          this.publish({
-            error: {
-              code: "unknown",
-              message: "A previous tool approval was interrupted. Retry the last turn to continue.",
-              retryable: true,
-            },
-          });
-        }
-      } else if (this.danglingApprovalThreadId === threadId) {
-        this.danglingApprovalThreadId = null;
-      }
     }
     return assistantRunId ? !this.assistantProjections.has(assistantRunId) : true;
   }
@@ -1807,7 +1765,6 @@ export class TextRuntime {
     this.runOutcome = "streaming";
     this.runError = null;
     this.runTerminalHandled = false;
-    this.danglingApprovalThreadId = null;
     const messageId = options.clientMessageId ?? randomUUID();
     this.startAssistantProjection(threadId, runId, messageId, this.runStartedAt);
     this.runClientMessageId = options.optimistic ? messageId : null;

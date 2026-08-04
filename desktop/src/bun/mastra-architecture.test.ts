@@ -16,9 +16,11 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).not.toContain("inlineSubmitPlanTool");
     expect(runtime).not.toContain("drainQueuedFollowUp");
     expect(runtime).not.toContain("proteus-session.json");
+    expect(runtime).not.toContain("pendingApprovalToolName");
+    expect(runtime).not.toContain("danglingApprovalThreadId");
+    expect(runtime).not.toContain("A previous tool approval was interrupted");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
     expect(app.toLowerCase()).not.toContain("previous decisions");
     expect(app).not.toContain("TypingDots");
   });
 });
-

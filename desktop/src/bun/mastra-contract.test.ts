@@ -124,6 +124,14 @@ describe("installed Mastra contracts", () => {
       expect(session.followUps.dequeue()?.content).toBe("first");
       expect(session.followUps.dequeue()?.content).toBe("second");
       expect(session.followUps.isEmpty()).toBe(true);
+
+      const approval = session.approval.arm({ toolName: "task_write", toolCallId: "approval-1" });
+      expect(session.approval.isArmed()).toBe(true);
+      expect(session.approval.getToolCallId()).toBe("approval-1");
+      session.approval.respond({ decision: "approve", toolCallId: "approval-1" });
+      expect(await approval).toMatchObject({ decision: "approve" });
+      session.approval.clearToolName();
+      expect(session.approval.isArmed()).toBe(false);
     } finally {
       await controller.destroy();
       await storage.close();
