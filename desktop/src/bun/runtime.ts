@@ -15,6 +15,7 @@ import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableE
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
+import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, planWorkflowModes } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 
 const CONTROLLER_ID = "proteus-text-controller";
@@ -548,14 +549,7 @@ export class TextRuntime {
       agent: this.agent,
       gateways: [openRouterGateway],
       defaultModeId: "chat",
-      modes: [
-        {
-          id: "chat",
-          name: "Chat",
-          defaultModelId: DEFAULT_MODEL_ID,
-          availableTools: ["ask_user", "submit_plan", "read_plan", "write_plan", "task_write", "task_update", "task_complete", "task_check"],
-        },
-      ],
+      modes: planWorkflowModes(DEFAULT_MODEL_ID),
       disableBuiltinTools: ["subagent"],
     });
 
@@ -1510,7 +1504,7 @@ export class TextRuntime {
           ownerId: RESOURCE_ID,
           resourceId: RESOURCE_ID,
         });
-        for (const toolName of INTERNAL_TOOL_GRANTS) this.session.grantTool(toolName);
+        for (const toolName of [...INTERNAL_TOOL_GRANTS, ...PLAN_DRAFT_TOOL_GRANTS]) this.session.grantTool(toolName);
         this.subscribeToController();
         await this.syncThreadState();
         await this.validateStoredCredential();
@@ -1608,6 +1602,7 @@ export class TextRuntime {
     if (!isOpenRouterModelId(modelId)) throw makeRuntimeError("model-unavailable");
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     if (modelId !== DEFAULT_MODEL_ID && !this.snapshot.models.some((model) => model.id === modelId)) throw makeRuntimeError("model-unavailable");
+    await this.restorePlanningMode(session);
     await session.model.switch({ modelId, scope: "thread" });
     await this.syncThreadState();
   }
@@ -1755,6 +1750,8 @@ export class TextRuntime {
       return { runId: this.runId };
     }
 
+    await this.restorePlanningMode(session);
+
     if (reservedThreadId && session.thread.getId() !== reservedThreadId) {
       await session.thread.switch({ threadId: reservedThreadId });
       await this.syncThreadState();
@@ -1774,6 +1771,15 @@ export class TextRuntime {
       optimistic: true,
       clientMessageId: messageId,
     });
+  }
+
+  private async restorePlanningMode(session = this.requireSession()): Promise<void> {
+    if (session.mode.get() !== APPROVED_PLAN_MODE_ID) return;
+    const selectedModelId = session.model.get();
+    await session.mode.switch({ modeId: PLANNING_MODE_ID });
+    if (selectedModelId && session.model.get() !== selectedModelId) {
+      await session.model.switch({ modelId: selectedModelId, scope: "thread" });
+    }
   }
 
   private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {

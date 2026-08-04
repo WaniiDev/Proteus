@@ -1,0 +1,47 @@
+import type { AgentControllerMode } from "@mastra/core/agent-controller";
+
+export const PLANNING_MODE_ID = "chat";
+export const APPROVED_PLAN_MODE_ID = "approved-plan";
+
+export const PLAN_DRAFT_TOOL_GRANTS = ["read_plan", "write_plan"] as const;
+
+const PLANNING_TOOLS = [
+  "ask_user",
+  "submit_plan",
+  "read_plan",
+  "write_plan",
+  "task_write",
+  "task_update",
+  "task_complete",
+  "task_check",
+] as const;
+
+const APPROVED_PLAN_TOOLS = [
+  "ask_user",
+  "read_plan",
+  "task_write",
+  "task_update",
+  "task_complete",
+  "task_check",
+] as const;
+
+export function planWorkflowModes(defaultModelId: string): AgentControllerMode[] {
+  return [
+    {
+      id: PLANNING_MODE_ID,
+      name: "Conversation",
+      metadata: { default: true },
+      defaultModelId,
+      transitionsTo: APPROVED_PLAN_MODE_ID,
+      instructions: "When a plan is needed, write it once and submit it once for review. Revise and resubmit only after the user explicitly requests changes.",
+      availableTools: [...PLANNING_TOOLS],
+    },
+    {
+      id: APPROVED_PLAN_MODE_ID,
+      name: "Approved plan",
+      defaultModelId,
+      instructions: "The user approved the submitted plan. Continue from that approval. Do not write or submit another plan during this resumed turn.",
+      availableTools: [...APPROVED_PLAN_TOOLS],
+    },
+  ];
+}
