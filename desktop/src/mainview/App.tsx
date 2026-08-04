@@ -9,6 +9,7 @@ import { rpc } from "./bridge";
 import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
+import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { Workbench } from "./Workbench";
@@ -408,17 +409,21 @@ function useConversationOrbState(snapshot: RuntimeSnapshot): {
     threadId: string | null;
     runId: string | null;
     runStatus: string | null;
+    hadError: boolean;
   } | null>(null);
   const transientRef = useRef(false);
+  const recoveryTargetRef = useRef<OrbState | null>(null);
   const timersRef = useRef<number[]>([]);
   useEffect(() => {
     const previous = previousRef.current;
     const threadChanged = previous !== null && previous.threadId !== snapshot.activeThreadId;
     const activeRun = snapshot.activeRun?.threadId === snapshot.activeThreadId ? snapshot.activeRun : null;
+    const steadyState = deriveOrbSteadyState(snapshot);
     const clearTimers = () => {
       timersRef.current.forEach((timer) => window.clearTimeout(timer));
       timersRef.current = [];
       transientRef.current = false;
+      recoveryTargetRef.current = null;
     };
     const sequence = (steps: Array<{ state: OrbState; duration: number }>) => {
       clearTimers();
@@ -438,13 +443,36 @@ function useConversationOrbState(snapshot: RuntimeSnapshot): {
         );
       });
     };
+    const startErrorRecovery = (target: OrbState) => {
+      clearTimers();
+      transientRef.current = true;
+      recoveryTargetRef.current = target;
+      setState("recovery");
+      timersRef.current = [
+        window.setTimeout(() => setState("idle"), 1300),
+        window.setTimeout(() => {
+          setState(recoveryTargetRef.current ?? "idle");
+          recoveryTargetRef.current = null;
+          transientRef.current = false;
+          timersRef.current = [];
+        }, 1500),
+      ];
+    };
     if (threadChanged) clearTimers();
-    if (snapshot.toolApproval || snapshot.workbench.status === "waiting") {
+    const recovered = recoveryGate(previous?.hadError ?? false, threadChanged, steadyState);
+    if (steadyState === "error") {
+      clearTimers();
+      setState("error");
+    } else if (recoveryTargetRef.current) {
+      recoveryTargetRef.current = steadyState;
+    } else if (recovered) {
+      startErrorRecovery(recovered[2]);
+    } else if (steadyState === "waiting") {
       clearTimers();
       setState("waiting");
     } else if (activeRun?.status === "running") {
       clearTimers();
-      setState(snapshot.messages.some((message) => message.status === "streaming") ? "working" : "thinking");
+      setState(steadyState);
     } else if (!threadChanged && previous?.runStatus === "running" && previous.runId) {
       if (snapshot.error?.code === "aborted" || activeRun?.status === "aborted")
         sequence([
@@ -458,15 +486,13 @@ function useConversationOrbState(snapshot: RuntimeSnapshot): {
           { state: "done", duration: 1400 },
           { state: "idle", duration: 0 },
         ]);
-      } else {
-        clearTimers();
-        setState("recovery");
       }
-    } else if (!transientRef.current) setState(snapshot.error ? "recovery" : "idle");
+    } else if (!transientRef.current) setState(steadyState);
     previousRef.current = {
       threadId: snapshot.activeThreadId,
       runId: activeRun?.runId ?? null,
       runStatus: activeRun?.status ?? null,
+      hadError: steadyState === "error",
     };
   }, [snapshot]);
   useEffect(() => () => timersRef.current.forEach((timer) => window.clearTimeout(timer)), []);
