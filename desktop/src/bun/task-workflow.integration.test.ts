@@ -35,6 +35,113 @@ function modelStream(parts: LanguageModelV2StreamPart[]) {
   };
 }
 
+type ScriptedToolCall = { toolName: string; input: Record<string, unknown> };
+
+async function runFourTaskWorkflow(scripted: ScriptedToolCall[]) {
+  const directory = await mkdtemp(join(tmpdir(), "proteus-task-recovery-"));
+  temporaryDirectories.push(directory);
+  const storage = new LibSQLStore({ id: `task-recovery-${crypto.randomUUID()}`, url: `file:${join(directory, "workflow.db")}` });
+  const memory = new Memory({ storage });
+  const policy = new TaskToolPolicy();
+  const hookOutputs: Array<{ toolName: string; output: unknown }> = [];
+  const seenToolChoices: unknown[] = [];
+  let modelStep = 0;
+  const model: LanguageModelV2 = {
+    specificationVersion: "v2",
+    provider: "proteus-test",
+    modelId: "mock-task-recovery-model",
+    supportedUrls: {},
+    doGenerate: async () => {
+      throw new Error("This integration exercises streaming only.");
+    },
+    doStream: async (options) => {
+      seenToolChoices.push(options.toolChoice);
+      if (options.toolChoice && typeof options.toolChoice === "object" && options.toolChoice.type === "none") {
+        return modelStream([
+          { type: "text-start", id: "final-text" },
+          { type: "text-delta", id: "final-text", delta: "I stopped repeating task mutations and used the current task state." },
+          { type: "text-end", id: "final-text" },
+          { type: "finish", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } },
+        ]);
+      }
+      const next = scripted[modelStep++];
+      if (!next) {
+        return modelStream([
+          { type: "text-start", id: "final-text" },
+          { type: "text-delta", id: "final-text", delta: "All tasks are complete." },
+          { type: "text-end", id: "final-text" },
+          { type: "finish", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } },
+        ]);
+      }
+      const toolCallId = `call-${modelStep}`;
+      return modelStream([
+        { type: "tool-call", toolCallId, toolName: next.toolName, input: JSON.stringify(next.input) },
+        { type: "finish", finishReason: "tool-calls", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } },
+      ]);
+    },
+  };
+  const agent = new Agent({
+    id: `task-recovery-agent-${crypto.randomUUID()}`,
+    name: "Task recovery agent",
+    instructions: "Use only task tools, finish tasks one by one, check once, then answer.",
+    model,
+    memory,
+    signals: [new TaskSignalProvider()],
+    hooks: {
+      beforeToolCall: policy.hooks.beforeToolCall,
+      afterToolCall: async (args) => {
+        hookOutputs.push({ toolName: args.toolName, output: args.output });
+        await policy.hooks.afterToolCall?.(args);
+      },
+    },
+    defaultOptions: { prepareStep: policy.prepareStep },
+  });
+  const workspace = new Workspace({
+    id: `task-recovery-workspace-${crypto.randomUUID()}`,
+    filesystem: new LocalFilesystem({ basePath: join(directory, "workspace"), contained: true }),
+    tools: { enabled: false },
+  });
+  const controller = new AgentController({
+    id: `task-recovery-controller-${crypto.randomUUID()}`,
+    resourceId: "task-recovery-resource",
+    storage,
+    memory,
+    agent,
+    workspace,
+    modes: [{ id: "chat", name: "Chat", metadata: { default: true }, availableTools: ["task_write", "task_update", "task_complete", "task_check"] }],
+  });
+  const events: AgentControllerEvent[] = [];
+
+  try {
+    await controller.init();
+    const session = await controller.createSession({ id: `task-recovery-session-${crypto.randomUUID()}`, resourceId: "task-recovery-resource" });
+    session.subscribe((event) => {
+      events.push(event);
+    });
+    for (const toolName of ["task_write", "task_update", "task_complete", "task_check"]) session.grantTool(toolName);
+    await session.sendMessage({ content: "Create four tasks and finish them one by one using only task tools." });
+    const threadId = session.thread.requireId();
+    const persisted = await session.thread.listMessages({ threadId });
+    return {
+      events,
+      hookOutputs,
+      seenToolChoices,
+      tasks: session.displayState.get().tasks,
+      historicalOutcomes: historicalTaskToolOutcomes(persisted),
+    };
+  } finally {
+    await controller.destroy();
+    await storage.close();
+  }
+}
+
+const fourTasks = [1, 2, 3, 4].map((number) => ({
+  id: `placeholder_${number}`,
+  content: `Complete placeholder task ${number}`,
+  activeForm: `Completing placeholder task ${number}`,
+  status: "pending",
+}));
+
 describe("native Mastra task workflow", () => {
   it("runs the exact task-only flow, checks once, then produces a text-only final step", async () => {
     const directory = await mkdtemp(join(tmpdir(), "proteus-task-workflow-"));
@@ -148,5 +255,63 @@ describe("native Mastra task workflow", () => {
       await controller.destroy();
       await storage.close();
     }
+  });
+
+  it("keeps a task revision monotonic when the model accepts one correction", async () => {
+    const script: ScriptedToolCall[] = [
+      { toolName: "task_write", input: { tasks: fourTasks } },
+      { toolName: "task_update", input: { id: "placeholder_1", status: "in_progress" } },
+      { toolName: "task_complete", input: { id: "placeholder_1" } },
+      { toolName: "task_update", input: { id: "placeholder_2", status: "in_progress" } },
+      { toolName: "task_complete", input: { id: "placeholder_2" } },
+      { toolName: "task_update", input: { id: "placeholder_1", status: "in_progress" } },
+      { toolName: "task_update", input: { id: "placeholder_3", status: "in_progress" } },
+      { toolName: "task_complete", input: { id: "placeholder_3" } },
+      { toolName: "task_update", input: { id: "placeholder_4", status: "in_progress" } },
+      { toolName: "task_complete", input: { id: "placeholder_4" } },
+      { toolName: "task_check", input: {} },
+    ];
+    const result = await runFourTaskWorkflow(script);
+    const endedTools = result.events.filter((event): event is Extract<AgentControllerEvent, { type: "tool_end" }> => event.type === "tool_end");
+
+    expect(endedTools.map((event) => event.toolCallId)).toEqual(script.map((_, index) => `call-${index + 1}`));
+    expect(result.hookOutputs).toHaveLength(10);
+    expect(result.hookOutputs.map(({ output }) => (output as { tasks?: Array<{ status: string }> }).tasks?.filter((task) => task.status === "completed").length)
+      .slice(4)).toEqual([2, 2, 3, 3, 4, 4]);
+    expect(result.tasks.map((task) => task.status)).toEqual(["completed", "completed", "completed", "completed"]);
+    expect(result.historicalOutcomes.get("call-6")).toMatchObject({ status: "completed" });
+    expect(result.historicalOutcomes.get("call-6")?.output).toMatchObject({
+      isError: false,
+      tasks: [
+        { id: "placeholder_1", status: "completed" },
+        { id: "placeholder_2", status: "completed" },
+        { id: "placeholder_3", status: "pending" },
+        { id: "placeholder_4", status: "pending" },
+      ],
+    });
+    expect(result.seenToolChoices.at(-1)).toEqual({ type: "none" });
+    expect(result.events.some((event) => event.type === "agent_end" && event.reason === "complete")).toBe(true);
+  });
+
+  it("forces a normal text response after a model repeats a blocked mutation", async () => {
+    const script: ScriptedToolCall[] = [
+      { toolName: "task_write", input: { tasks: fourTasks } },
+      { toolName: "task_update", input: { id: "placeholder_1", status: "in_progress" } },
+      { toolName: "task_complete", input: { id: "placeholder_1" } },
+      { toolName: "task_update", input: { id: "placeholder_2", status: "in_progress" } },
+      { toolName: "task_complete", input: { id: "placeholder_2" } },
+      { toolName: "task_update", input: { id: "placeholder_1", status: "in_progress" } },
+      { toolName: "task_update", input: { id: "placeholder_1", status: "in_progress" } },
+      { toolName: "task_update", input: { id: "placeholder_3", status: "in_progress" } },
+    ];
+    const result = await runFourTaskWorkflow(script);
+    const endedTools = result.events.filter((event): event is Extract<AgentControllerEvent, { type: "tool_end" }> => event.type === "tool_end");
+
+    expect(endedTools.map((event) => event.toolCallId)).toEqual(script.slice(0, 7).map((_, index) => `call-${index + 1}`));
+    expect(result.hookOutputs).toHaveLength(5);
+    expect(result.tasks.map((task) => task.status)).toEqual(["completed", "completed", "pending", "pending"]);
+    expect(result.seenToolChoices.at(-1)).toEqual({ type: "none" });
+    expect(result.events.some((event) => event.type === "agent_end" && event.reason === "complete")).toBe(true);
+    expect(result.events.some((event) => event.type === "agent_end" && event.reason === "error")).toBe(false);
   });
 });

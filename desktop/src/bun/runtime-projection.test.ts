@@ -52,9 +52,9 @@ const projection = (turnId: string, messages: ChatMessage[], outcome: ChatMessag
 });
 
 describe("runtime display projection", () => {
-  const taskMessage = (id: string, toolCallId: string, status: "completed" | "error", output: unknown): ChatMessage => ({
+  const taskMessage = (id: string, toolCallId: string, status: "completed" | "error", output: unknown, name = "task_check"): ChatMessage => ({
     ...assistant(id, ""),
-    parts: [{ type: "tool", id: `${id}:tool`, toolCallId, name: "task_check", label: "Checked task progress", status, input: {}, output }],
+    parts: [{ type: "tool", id: `${id}:tool`, toolCallId, name, label: "Checked task progress", status, input: {}, output }],
   });
 
   it("suppresses retired repeat-guard errors but preserves genuine task failures", () => {
@@ -75,6 +75,27 @@ describe("runtime display projection", () => {
       taskMessage("check-1", "call-1", "completed", completed),
       taskMessage("check-2", "call-2", "completed", completed),
     ]).map((message) => message.id)).toEqual(["check-1"]);
+  });
+
+  it("preserves a successful policy correction as a truthful tool row", () => {
+    const correction = {
+      content: "Task task-1 is already completed. Current task state is unchanged. Next incomplete task: task-2 (pending). Continue from that stable ID.",
+      isError: false,
+      tasks: [
+        { id: "task-1", content: "First", activeForm: "Doing first", status: "completed" },
+        { id: "task-2", content: "Second", activeForm: "Doing second", status: "pending" },
+      ],
+    };
+    const result = normalizeLegacyTaskToolArtifacts([
+      taskMessage("update-1", "call-1", "completed", correction, "task_update"),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].parts[0]).toMatchObject({
+      name: "task_update",
+      status: "completed",
+      output: correction,
+    });
   });
 
   it("projects persisted Mastra task signals onto input-only task calls", () => {
