@@ -26,6 +26,29 @@ export const APPROVED_PLAN_TOOLS = [
   "task_check",
 ] as const;
 
+type PlanWorkflowSession = {
+  mode: {
+    get(): string;
+    switch(input: { modeId: string }): Promise<void>;
+  };
+  model: {
+    get(): string;
+    switch(input: { modelId: string; scope: "thread"; modeId?: string }): Promise<void>;
+  };
+};
+
+/** Keep the product's single selected model aligned across Mastra's internal modes. */
+export async function syncPlanWorkflowModel(session: PlanWorkflowSession, modelId = session.model.get()): Promise<void> {
+  if (!modelId) return;
+  await session.model.switch({ modelId, scope: "thread", modeId: PLANNING_MODE_ID });
+  await session.model.switch({ modelId, scope: "thread", modeId: APPROVED_PLAN_MODE_ID });
+}
+
+/** Restore the user-facing conversation mode and let Mastra load its saved model. */
+export async function restorePlanningMode(session: PlanWorkflowSession): Promise<void> {
+  if (session.mode.get() === APPROVED_PLAN_MODE_ID) await session.mode.switch({ modeId: PLANNING_MODE_ID });
+}
+
 export function planWorkflowModes(defaultModelId: string): AgentControllerMode[] {
   return [
     {

@@ -15,7 +15,7 @@ import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableE
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
-import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes } from "./plan-workflow-policy";
+import { PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 
 const CONTROLLER_ID = "proteus-text-controller";
@@ -552,7 +552,7 @@ export class TextRuntime {
       workspace: this.workspace,
       agent: this.agent,
       gateways: [openRouterGateway],
-      defaultModeId: "chat",
+      defaultModeId: PLANNING_MODE_ID,
       modes: planWorkflowModes(DEFAULT_MODEL_ID),
       disableBuiltinTools: ["subagent"],
     });
@@ -1611,8 +1611,8 @@ export class TextRuntime {
     if (!isOpenRouterModelId(modelId)) throw makeRuntimeError("model-unavailable");
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     if (modelId !== DEFAULT_MODEL_ID && !this.snapshot.models.some((model) => model.id === modelId)) throw makeRuntimeError("model-unavailable");
-    await this.restorePlanningMode(session);
-    await session.model.switch({ modelId, scope: "thread" });
+    await restorePlanningMode(session);
+    await syncPlanWorkflowModel(session, modelId);
     await this.syncThreadState();
   }
 
@@ -1759,12 +1759,11 @@ export class TextRuntime {
       return { runId: this.runId };
     }
 
-    await this.restorePlanningMode(session);
-
     if (reservedThreadId && session.thread.getId() !== reservedThreadId) {
       await session.thread.switch({ threadId: reservedThreadId });
       await this.syncThreadState();
     }
+    await restorePlanningMode(session);
     const activeThreadId = session.thread.getId();
     if (activeThreadId) {
       const activeThread = await session.thread.getById({
@@ -1780,15 +1779,6 @@ export class TextRuntime {
       optimistic: true,
       clientMessageId: messageId,
     });
-  }
-
-  private async restorePlanningMode(session = this.requireSession()): Promise<void> {
-    if (session.mode.get() !== APPROVED_PLAN_MODE_ID) return;
-    const selectedModelId = session.model.get();
-    await session.mode.switch({ modeId: PLANNING_MODE_ID });
-    if (selectedModelId && session.model.get() !== selectedModelId) {
-      await session.model.switch({ modelId: selectedModelId, scope: "thread" });
-    }
   }
 
   private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {
@@ -1996,6 +1986,7 @@ export class TextRuntime {
       });
     }
     try {
+      if (interaction.kind === "submit_plan" && nextStatus === "approved") await syncPlanWorkflowModel(session);
       await session.respondToToolSuspension({ toolCallId, resumeData });
       const completed = this.resolvingInteractions.get(toolCallId);
       let evidence = completed?.terminalEvidence;

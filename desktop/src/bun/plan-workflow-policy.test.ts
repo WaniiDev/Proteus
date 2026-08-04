@@ -7,7 +7,7 @@ import { AgentController } from "@mastra/core/agent-controller";
 import { LocalFilesystem, Workspace } from "@mastra/core/workspace";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes } from "./plan-workflow-policy";
+import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 
 const temporaryDirectories: string[] = [];
 
@@ -75,6 +75,43 @@ describe("native Mastra plan workflow policy", () => {
       for (const toolName of PLAN_DRAFT_TOOL_GRANTS) session.grantTool(toolName);
       expect(session.resolveToolApproval("read_plan")).toBe("allow");
       expect(session.resolveToolApproval("write_plan")).toBe("allow");
+    } finally {
+      await controller.destroy();
+      await storage.close();
+    }
+  });
+
+  it("persists one selected model across Mastra's internal plan modes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "proteus-plan-model-"));
+    temporaryDirectories.push(directory);
+    const storage = new LibSQLStore({ id: "plan-model-storage", url: `file:${join(directory, "model.db")}` });
+    const memory = new Memory({ storage });
+    const workspace = new Workspace({
+      id: "plan-model-workspace",
+      filesystem: new LocalFilesystem({ basePath: join(directory, "workspace"), contained: true }),
+      tools: { enabled: false },
+    });
+    const controller = new AgentController({
+      id: "plan-model-controller",
+      resourceId: "plan-model-resource",
+      storage,
+      memory,
+      workspace,
+      agent: new Agent({ id: "plan-model-agent", name: "Plan model agent", instructions: "Contract test only.", model: "openrouter/auto", memory }),
+      defaultModeId: PLANNING_MODE_ID,
+      modes: planWorkflowModes("openrouter/auto"),
+    });
+
+    try {
+      await controller.init();
+      const session = await controller.createSession({ id: "plan-model-session", resourceId: "plan-model-resource" });
+      await syncPlanWorkflowModel(session, "openrouter/openai/test-model");
+      expect(session.model.get()).toBe("openrouter/openai/test-model");
+      await session.mode.switch({ modeId: APPROVED_PLAN_MODE_ID });
+      expect(session.model.get()).toBe("openrouter/openai/test-model");
+      await restorePlanningMode(session);
+      expect(session.mode.get()).toBe(PLANNING_MODE_ID);
+      expect(session.model.get()).toBe("openrouter/openai/test-model");
     } finally {
       await controller.destroy();
       await storage.close();

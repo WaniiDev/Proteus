@@ -8,7 +8,7 @@ import { AgentController, type AgentControllerEvent } from "@mastra/core/agent-c
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes } from "./plan-workflow-policy";
+import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, syncPlanWorkflowModel } from "./plan-workflow-policy";
 
 const temporaryDirectories: string[] = [];
 
@@ -106,6 +106,8 @@ describe("native Mastra plan approval workflow", () => {
         events.push(event);
       });
       for (const toolName of ["submit_plan", ...PLAN_DRAFT_TOOL_GRANTS]) session.grantTool(toolName);
+      const selectedModelId = "openrouter/openai/test-model";
+      await syncPlanWorkflowModel(session, selectedModelId);
 
       await session.sendMessage({ content: "Create a placeholder plan." });
       expect(session.mode.get()).toBe(PLANNING_MODE_ID);
@@ -122,6 +124,7 @@ describe("native Mastra plan approval workflow", () => {
       await completed;
 
       expect(session.mode.get()).toBe(APPROVED_PLAN_MODE_ID);
+      expect(session.model.get()).toBe(selectedModelId);
       expect(events.filter((event) => event.type === "mode_changed" && event.modeId === APPROVED_PLAN_MODE_ID)).toHaveLength(1);
       expect(events.filter((event) => event.type === "tool_suspended" && event.toolName === "submit_plan")).toHaveLength(1);
       expect(events.filter((event) => event.type === "tool_end").map((event) => event.toolCallId)).toEqual(["call-1"]);
