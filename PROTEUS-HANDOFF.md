@@ -166,7 +166,7 @@ The prototype's scenario engine is scripted. In production, the orchestrator emi
 
 ```jsonc
 // Orchestrator → UI
-{ "type": "orb.state",        "state": "idle|listening|thinking|working|waiting|speaking|done|interrupted|recovery", "desc?": "string" }
+{ "type": "orb.state",        "state": "idle|summoned|away|listening|thinking|working|remembering|drafting|verifying|waiting|speaking|done|interrupted|error|recovery", "desc?": "string" }
 { "type": "orb.dock" }                                    // first generation of a run: orb center → bottom dock (fire once per session start)
 { "type": "orb.pulse" } | { "type": "orb.nudge" }         // transient liquid accents (arrival, typing)
 { "type": "message.append",   "blocks": [ { "text": "..." }, { "thai": "..." }, { "card": { ... } } ] }
@@ -202,8 +202,9 @@ Mapping to prototype code: `orb.set()` implements `orb.state`; `dockOrb()` imple
 ```ts
 type Confidence = "verified" | "inferred" | "unverified";
 type Lang = "en" | "th";
-type OrbState = "idle" | "listening" | "thinking" | "working" | "waiting"
-              | "speaking" | "done" | "interrupted" | "recovery";
+type OrbState = "idle" | "summoned" | "away" | "listening" | "thinking" | "working"
+              | "remembering" | "drafting" | "verifying" | "waiting" | "speaking"
+              | "done" | "interrupted" | "error" | "recovery";
 
 interface Project {
   id: string;

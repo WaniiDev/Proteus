@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const orbStates = ["idle", "listening", "thinking", "working", "waiting", "speaking", "done", "interrupted", "recovery"] as const;
+export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
 export const orbStateSchema = z.enum(orbStates);
 export type OrbState = z.infer<typeof orbStateSchema>;
 

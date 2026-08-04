@@ -21,6 +21,17 @@ describe("orb visual contract", () => {
     expect(ORB_STATES.working).toMatchObject({ amp: 0.27, speed: 1.65, a: "#f4c5a8", b: "#c8b8e0" });
     expect(ORB_STATES.interrupted).toMatchObject({ amp: 0.03, speed: 0.10, scale: 0.80 });
     expect(ORB_STATES.done).toMatchObject({ scale: 1.12, a: "#a7e5d3", b: "#d8f3e8" });
+    expect(ORB_STATES.summoned).toMatchObject({ amp: 0.14, speed: 0.90, freq: 1.10, scale: 1.06, voice: 0, a: "#a8c8e8", b: "#c8b8e0" });
+    expect(ORB_STATES.remembering).toMatchObject({ amp: 0.16, speed: 0.55, freq: 0.80, scale: 0.98, voice: 0, a: "#c8b8e0", b: "#e8b8c4" });
+    expect(ORB_STATES.drafting).toMatchObject({ amp: 0.18, speed: 1.10, freq: 1.25, scale: 1.02, voice: 0.35, a: "#f4c5a8", b: "#e8b8c4" });
+    expect(ORB_STATES.verifying).toMatchObject({ amp: 0.12, speed: 1.40, freq: 2.10, scale: 1.00, voice: 0, a: "#a7e5d3", b: "#a8c8e8" });
+    expect(ORB_STATES.away).toMatchObject({ amp: 0.02, speed: 0.08, freq: 1.00, scale: 0.90, voice: 0, a: "#f0efed", b: "#e7e5e4" });
+    expect(ORB_STATES.error).toMatchObject({ amp: 0.08, speed: 0.30, freq: 1.90, scale: 0.94, voice: 0, a: "#e8b8c4", b: "#d6d3d1" });
+  });
+
+  it("keeps every state palette pair unique", () => {
+    const pairs = orbStates.map((state) => `${ORB_STATES[state].a}:${ORB_STATES[state].b}`);
+    expect(new Set(pairs).size).toBe(orbStates.length);
   });
 
   it("keeps the resting state free of helper copy", () => {
