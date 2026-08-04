@@ -12,6 +12,7 @@ import { interactionSubmissionUi, type InteractionSubmissionAction } from "./int
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { Workbench } from "./Workbench";
+import { composerAction, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -682,7 +683,19 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
   );
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteer: () => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
+function QueuedMessageBubble({ draft, onSteer }: { draft: QueuedDraft; onSteer: (draft: QueuedDraft) => void }) {
+  return (
+    <div className="msg user queued-message" data-queued-state={draft.state}>
+      <div className="bubble"><span>{draft.text}</span></div>
+      <div className="queued-message-meta">
+        <span className="queued-badge">{draft.state === "sending" ? "Sending" : "Queued"}</span>
+        {draft.state === "queued" && <button type="button" className="queued-steer" onClick={() => onSteer(draft)}>Steer now</button>}
+      </div>
+    </div>
+  );
+}
+
+function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSend, onSteerQueued, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteerQueued: (draft: QueuedDraft) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -690,12 +703,15 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [renameRequest, setRenameRequest] = useState<string | null>(null);
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
+  const draftPresent = input.trim().length > 0;
+  const primaryComposerAction = composerAction(runningForSelected, draftPresent);
   const titleTriggerClose = () => {
     setSessionsOpen(false);
     setRenameRequest(null);
@@ -710,6 +726,12 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   useEffect(() => {
     if (!sessionsOpen) titleRef.current?.focus();
   }, [sessionsOpen]);
+  useLayoutEffect(() => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+  }, [input]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
@@ -764,6 +786,7 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
                   <AssistantTurn key={item.id} messages={item.messages} textParts={item.textParts} tools={item.tools} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
                 ),
               )}
+              {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} onSteer={onSteerQueued} />)}
               {snapshot.events.map((event: ChatEvent) => (
                 <div className="chat-event" key={event.id}>
                   {event.text}
@@ -793,20 +816,9 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
                 <Icon name="latest" size={14} /> Latest
               </button>
             )}
-            <div className="chat-context-row">
-              <span>{selectedModel?.name ?? snapshot.selectedModelId}</span>
-              <span>via OpenRouter</span>
-              <span className={`runtime-dot ${snapshot.credential.verified ? "ok" : "off"}`} />
-              {snapshot.credential.verified ? (
-                "Connected"
-              ) : (
-                <button className="btn-tertiary" type="button" onClick={onSettings}>
-                  Connect a key
-                </button>
-              )}
-            </div>
             <form className={`composer${canChat ? "" : " disabled"}`} onSubmit={onSend} autoComplete="off">
-              <input
+              <textarea
+                ref={composerRef}
                 className="composer-input"
                 value={input}
                 onChange={(event) => {
@@ -817,20 +829,27 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
                 aria-label="Message PROTEUS"
                 disabled={!canChat}
                 maxLength={32_000}
+                rows={1}
+                onKeyDown={(event) => {
+                  if (!shouldSubmitComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return;
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }}
               />
-              {runningForSelected && (
-                <button type="button" className="stop-btn composer-stop" onClick={onAbort}>
-                  <Icon name="stop" size={14} /> Stop
-                </button>
-              )}
-              {runningForSelected && (
-                <button type="button" className="steer-btn" onClick={onSteer} disabled={!input.trim()}>
-                  <Icon name="steer" size={14} /> Steer
-                </button>
-              )}
-              <button className="send-btn" type="submit" aria-label="Send" disabled={!canChat || !input.trim()}>
-                <Icon name="send" size={18} />
-              </button>
+              <div className="composer-footer">
+                <div className="composer-context">
+                  <span>{selectedModel?.name ?? snapshot.selectedModelId}</span>
+                  <span>via OpenRouter</span>
+                  <span className={`runtime-dot ${snapshot.credential.verified ? "ok" : "off"}`} />
+                  {snapshot.credential.verified ? <span>Connected</span> : <button className="btn-tertiary" type="button" onClick={onSettings}>Connect a key</button>}
+                </div>
+                <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
+                {primaryComposerAction === "stop" ? (
+                  <button className="composer-primary composer-primary-stop" type="button" aria-label="Stop response" onClick={onAbort}><Icon name="stop" size={17} /></button>
+                ) : (
+                  <button className="composer-primary" type="submit" aria-label={primaryComposerAction === "queue" ? "Queue message" : "Send"} disabled={!canChat || !draftPresent}><Icon name="send" size={18} /></button>
+                )}
+              </div>
             </form>
           </div>
           {workbenchHasContent && <Workbench snapshot={snapshot} onJump={jumpToInteraction} />}
@@ -934,6 +953,7 @@ export default function App() {
   const [, setOrbState] = useState<OrbState>("idle");
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(DEFAULT_SNAPSHOT);
   const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
+  const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
   const latestRevisionRef = useRef(0);
   useEffect(() => {
@@ -981,6 +1001,9 @@ export default function App() {
     });
   }, [localMessages.size, snapshot.activeThreadId, snapshot.messages]);
   useEffect(() => {
+    setQueuedDrafts((current) => reconcileQueuedDrafts(current, snapshot.messages, snapshot.activeThreadId, snapshot.workbench.queuedFollowUpCount));
+  }, [snapshot.activeThreadId, snapshot.messages, snapshot.workbench.queuedFollowUpCount]);
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape" && snapshot.activeRun) ignoreRpc(rpc.request["chat.abort"]());
@@ -998,21 +1021,29 @@ export default function App() {
     const text = input.trim();
     if (!text || !snapshot.activeThreadId) return;
     const clientMessageId = crypto.randomUUID();
-    setLocalMessages((current) =>
-      new Map(current).set(clientMessageId, {
-        id: clientMessageId,
-        role: "user",
-        text,
-        turnId: clientMessageId,
-        parts: [{ type: "text", id: `${clientMessageId}:text:0`, text }],
-        status: "complete",
-        createdAt: new Date().toISOString(),
-      }),
-    );
+    const threadId = snapshot.activeThreadId;
+    const runningForThread = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === threadId;
+    const createdAt = new Date().toISOString();
+    if (runningForThread) {
+      setQueuedDrafts((current) => [...current, { id: clientMessageId, threadId, text, createdAt, state: "queued" }]);
+    } else {
+      setLocalMessages((current) =>
+        new Map(current).set(clientMessageId, {
+          id: clientMessageId,
+          role: "user",
+          text,
+          turnId: clientMessageId,
+          parts: [{ type: "text", id: `${clientMessageId}:text:0`, text }],
+          status: "complete",
+          createdAt,
+        }),
+      );
+    }
     setInput("");
     void rpc.request["chat.send"]({ text, clientMessageId })
       .then((result) => {
         if (result.accepted) return;
+        if (runningForThread) setQueuedDrafts((current) => current.filter((draft) => draft.id !== clientMessageId));
         setLocalMessages((current) => {
           const next = new Map(current);
           next.delete(clientMessageId);
@@ -1021,6 +1052,7 @@ export default function App() {
         setInput(text);
       })
       .catch(() => {
+        if (runningForThread) setQueuedDrafts((current) => current.filter((draft) => draft.id !== clientMessageId));
         setLocalMessages((current) => {
           const next = new Map(current);
           next.delete(clientMessageId);
@@ -1029,14 +1061,11 @@ export default function App() {
         setInput(text);
       });
   };
-  const handleSteer = () => {
-    const text = input.trim();
-    if (!text) return;
-    ignoreRpc(
-      rpc.request["chat.steer"]({ text }).then((result) => {
-        if (result.accepted) setInput("");
-      }),
-    );
+  const handleSteerQueued = (draft: QueuedDraft) => {
+    void rpc.request["chat.steer"]({ text: draft.text }).then((result) => {
+      if (!result.accepted) return;
+      setQueuedDrafts((current) => current.filter((item) => item.threadId !== draft.threadId));
+    }).catch(() => undefined);
   };
   const handleConnect = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1082,8 +1111,9 @@ export default function App() {
               activeTitle={activeTitle}
               input={input}
               setInput={setInput}
+              queuedDrafts={queuedDrafts.filter((draft) => draft.threadId === renderedSnapshot.activeThreadId)}
               onSend={handleSend}
-              onSteer={handleSteer}
+              onSteerQueued={handleSteerQueued}
               onAbort={() => ignoreRpc(rpc.request["chat.abort"]())}
               onSettings={() => handleNavigate("settings")}
               onCreate={handleCreate}
