@@ -15,7 +15,7 @@ export type OrbSpec = {
 export const ORB_STATES: Record<OrbState, OrbSpec> = {
   idle: {
     label: "At rest",
-    description: "Speak or type below — English or Thai.",
+    description: "",
     amp: 0.10,
     speed: 0.40,
     freq: 1.00,

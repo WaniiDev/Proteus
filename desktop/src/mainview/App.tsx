@@ -392,7 +392,7 @@ function OrbPresence({ state, docked, animateDock, pulseVersion, orbRef }: { sta
       </div>
       <div className="orb-meta">
         <span className="orb-state-label">{spec.label}</span>
-        <span className="orb-state-desc">{spec.description}</span>
+        {spec.description && <span className="orb-state-desc">{spec.description}</span>}
       </div>
     </div>
   );

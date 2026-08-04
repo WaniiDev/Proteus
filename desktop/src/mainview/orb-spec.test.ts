@@ -22,4 +22,8 @@ describe("orb visual contract", () => {
     expect(ORB_STATES.interrupted).toMatchObject({ amp: 0.03, speed: 0.10, scale: 0.80 });
     expect(ORB_STATES.done).toMatchObject({ scale: 1.12, a: "#a7e5d3", b: "#d8f3e8" });
   });
+
+  it("keeps the resting state free of helper copy", () => {
+    expect(ORB_STATES.idle.description).toBe("");
+  });
 });
