@@ -415,8 +415,7 @@ function emptyWorkbench(): WorkbenchState {
     status: "idle",
     tasks: [],
     pendingInteractions: [],
-    queuedFollowUps: [],
-    clearedFollowUps: [],
+    queuedFollowUpCount: 0,
     tokenUsage: emptyTokenUsage(),
   };
 }
@@ -773,8 +772,7 @@ export class TextRuntime {
       goal: state.goal,
       tasks,
       pendingInteractions,
-      queuedFollowUps: [],
-      clearedFollowUps: [],
+      queuedFollowUpCount: displayState?.queuedFollowUps ?? 0,
       tokenUsage: {
         promptTokens: usage.promptTokens ?? 0,
         completionTokens: usage.completionTokens ?? 0,
@@ -2042,25 +2040,6 @@ export class TextRuntime {
     } catch (error) {
       throw normalizeError(error);
     }
-  }
-
-  async updateQueuedFollowUp(id: string, content: string): Promise<void> {
-    await this.ensureInitialized();
-    void id;
-    void content;
-    throw new Error("Mastra owns queued follow-ups; queued messages cannot be edited");
-  }
-
-  async removeQueuedFollowUp(id: string): Promise<void> {
-    await this.ensureInitialized();
-    void id;
-    throw new Error("Mastra owns queued follow-ups; queued messages cannot be removed individually");
-  }
-
-  async restoreQueuedFollowUp(id: string): Promise<void> {
-    await this.ensureInitialized();
-    void id;
-    throw new Error("Mastra owns queued follow-ups; cleared messages are not retained by Proteus");
   }
 
   async retry(messageId: string): Promise<{ runId: string }> {

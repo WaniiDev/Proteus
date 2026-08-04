@@ -100,14 +100,7 @@ const snapshot = runtimeSnapshotSchema.parse({
       },
     ],
     pendingInteractions: [],
-    queuedFollowUps: [
-      {
-        id: "queue-1",
-        content: "Continue with 日本語 😀",
-        createdAt: "2026-08-03T00:00:03.000Z",
-      },
-    ],
-    clearedFollowUps: [],
+    queuedFollowUpCount: 1,
     tokenUsage: { promptTokens: 5, completionTokens: 8, totalTokens: 13 },
     activeTools: [{ id: "tool-2", name: "submit_plan", status: "running" }],
   },

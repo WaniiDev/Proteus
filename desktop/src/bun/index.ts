@@ -197,33 +197,6 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { accepted: false };
         }
       },
-      "chat.queue.update": async ({ id, content }) => {
-        try {
-          await runtime.updateQueuedFollowUp(id, content);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "chat.queue.remove": async ({ id }) => {
-        try {
-          await runtime.removeQueuedFollowUp(id);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "chat.queue.restore": async ({ id }) => {
-        try {
-          await runtime.restoreQueuedFollowUp(id);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
       "chat.abort": async () => {
         runtime.abort();
         return { accepted: true };

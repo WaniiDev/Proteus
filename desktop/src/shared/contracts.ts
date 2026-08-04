@@ -147,13 +147,6 @@ export const pendingInteractionSchema = z.object({
 });
 export type PendingInteraction = z.infer<typeof pendingInteractionSchema>;
 
-export const queuedFollowUpSchema = z.object({
-  id: z.string().min(1),
-  content: z.string().min(1),
-  createdAt: z.string(),
-});
-export type QueuedFollowUp = z.infer<typeof queuedFollowUpSchema>;
-
 export const tokenUsageSchema = z.object({
   promptTokens: z.number().nonnegative().default(0),
   completionTokens: z.number().nonnegative().default(0),
@@ -170,8 +163,7 @@ export const workbenchSchema = z.object({
   goal: z.string().optional(),
   tasks: z.array(workbenchTaskSchema),
   pendingInteractions: z.array(pendingInteractionSchema),
-  queuedFollowUps: z.array(queuedFollowUpSchema),
-  clearedFollowUps: z.array(queuedFollowUpSchema),
+  queuedFollowUpCount: z.number().int().nonnegative(),
   tokenUsage: tokenUsageSchema,
 });
 export type WorkbenchState = z.infer<typeof workbenchSchema>;
@@ -304,18 +296,6 @@ export const proteusRpcSchema = {
       },
       "chat.tool-approval.respond": {
         params: {} as { toolCallId: string; approved: boolean },
-        response: {} as { accepted: boolean },
-      },
-      "chat.queue.update": {
-        params: {} as { id: string; content: string },
-        response: {} as { accepted: boolean },
-      },
-      "chat.queue.remove": {
-        params: {} as { id: string },
-        response: {} as { accepted: boolean },
-      },
-      "chat.queue.restore": {
-        params: {} as { id: string },
         response: {} as { accepted: boolean },
       },
       "chat.abort": {

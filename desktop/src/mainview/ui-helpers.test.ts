@@ -15,8 +15,7 @@ const emptyWorkbench = (overrides: Partial<WorkbenchState> = {}): WorkbenchState
   status: "idle",
   tasks: [],
   pendingInteractions: [],
-  queuedFollowUps: [],
-  clearedFollowUps: [],
+  queuedFollowUpCount: 0,
   tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   ...overrides,
 });

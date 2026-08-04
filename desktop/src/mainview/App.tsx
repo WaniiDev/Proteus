@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, OpenRouterModel, OrbState, PendingInteraction, QueuedFollowUp, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary, WorkbenchTask } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, OpenRouterModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary, WorkbenchTask } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
@@ -35,8 +35,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
     status: "idle",
     tasks: [],
     pendingInteractions: [],
-    queuedFollowUps: [],
-    clearedFollowUps: [],
+    queuedFollowUpCount: 0,
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   },
   activeRun: null,
@@ -644,16 +643,6 @@ function AssistantTurn({ messages, textParts, tools, pendingIds, onRetry, onCont
   );
 }
 
-function TypingDots() {
-  return (
-    <div className="typing-dots" aria-label="PROTEUS is thinking">
-      <span />
-      <span />
-      <span />
-    </div>
-  );
-}
-
 function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { interaction: PendingInteraction; onRespond: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onResubmit: (messageId: string) => Promise<boolean>; onDismiss: (toolCallId: string) => Promise<InteractionResponseResult> }) {
   const [answer, setAnswer] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -744,10 +733,9 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
   );
 }
 
-function Workbench({ snapshot, open, onClose, onQueueUpdate, onQueueRemove, onQueueRestore, onJump }: { snapshot: RuntimeSnapshot; open: boolean; onClose: () => void; onQueueUpdate: (item: QueuedFollowUp) => void; onQueueRemove: (id: string) => void; onQueueRestore: (id: string) => void; onJump: (id: string) => void }) {
+function Workbench({ snapshot, open, onClose, onJump }: { snapshot: RuntimeSnapshot; open: boolean; onClose: () => void; onJump: (id: string) => void }) {
   const wb = snapshot.workbench;
   const attentionItems = wb.pendingInteractions.filter((item) => item.status === "pending");
-  const [editingId, setEditingId] = useState<string | null>(null);
   const totalTokens = wb.tokenUsage.totalTokens;
   const statusLabel = attentionItems.length > 0 ? "Needs you" : wb.status === "complete" ? "Done" : wb.status === "active" ? "Active" : wb.status === "waiting" ? "Waiting" : wb.status === "interrupted" ? "Interrupted" : wb.status === "error" ? "Error" : "Current";
   if (!open) return null;
@@ -801,71 +789,13 @@ function Workbench({ snapshot, open, onClose, onQueueUpdate, onQueueRemove, onQu
                 </ul>
               </section>
             )}
-            {wb.queuedFollowUps.length > 0 && (
-              <section className="wb-group">
+            {wb.queuedFollowUpCount > 0 && (
+              <section className="wb-group" aria-label="Queued follow-ups">
                 <div className="wb-group-title">
                   <span>Queued follow-ups</span>
-                  <b>{wb.queuedFollowUps.length}</b>
+                  <b>{wb.queuedFollowUpCount}</b>
                 </div>
-                <ol className="wb-queue">
-                  {wb.queuedFollowUps.map((item) => (
-                    <li key={item.id}>
-                      {editingId === item.id ? (
-                        <input
-                          autoFocus
-                          defaultValue={item.content}
-                          onBlur={(event) => {
-                            onQueueUpdate({
-                              ...item,
-                              content: event.target.value,
-                            });
-                            setEditingId(null);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              onQueueUpdate({
-                                ...item,
-                                content: event.currentTarget.value,
-                              });
-                              setEditingId(null);
-                            }
-                            if (event.key === "Escape") setEditingId(null);
-                          }}
-                        />
-                      ) : (
-                        <>
-                          <span>{item.content}</span>
-                          <span className="wb-row-actions">
-                            <button type="button" onClick={() => setEditingId(item.id)}>
-                              Edit
-                            </button>
-                            <button type="button" onClick={() => onQueueRemove(item.id)}>
-                              Remove
-                            </button>
-                          </span>
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              </section>
-            )}
-            {wb.clearedFollowUps.length > 0 && (
-              <section className="wb-group">
-                <div className="wb-group-title">
-                  <span>Cleared by steering</span>
-                  <span>{wb.clearedFollowUps.length}</span>
-                </div>
-                <ul className="wb-cleared">
-                  {wb.clearedFollowUps.slice(-4).map((item) => (
-                    <li key={item.id}>
-                      <span>{item.content}</span>
-                      <button type="button" onClick={() => onQueueRestore(item.id)}>
-                        Restore
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <p className="wb-note">Mastra will send {wb.queuedFollowUpCount === 1 ? "this message" : "these messages"} after the current response.</p>
               </section>
             )}
             {totalTokens > 0 && (
@@ -897,7 +827,7 @@ function Workbench({ snapshot, open, onClose, onQueueUpdate, onQueueRemove, onQu
   );
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onQueueUpdate, onQueueRemove, onQueueRestore }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteer: () => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean>; onQueueUpdate: (item: QueuedFollowUp) => void; onQueueRemove: (id: string) => void; onQueueRestore: (id: string) => void }) {
+function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteer: () => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -915,7 +845,7 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
   const actionableInteractionCount = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
-  const liveWorkbenchSignal = !!snapshot.toolApproval || snapshot.workbench.pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving") || snapshot.workbench.tasks.some((task) => task.status !== "completed") || snapshot.workbench.queuedFollowUps.length > 0 || snapshot.workbench.status === "waiting";
+  const liveWorkbenchSignal = !!snapshot.toolApproval || snapshot.workbench.pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving") || snapshot.workbench.tasks.some((task) => task.status !== "completed") || snapshot.workbench.queuedFollowUpCount > 0 || snapshot.workbench.status === "waiting";
   const titleTriggerClose = () => {
     setSessionsOpen(false);
     setRenameRequest(null);
@@ -960,8 +890,6 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
   const retryTarget = snapshot.retryMessageId ?? lastErrorMessage?.id;
   const conversationItems = useMemo(() => groupConversationItems(snapshot.messages), [snapshot.messages]);
   const pendingToolIds = useMemo(() => new Set([...snapshot.interactions.map((item) => item.toolCallId), ...(snapshot.toolApproval ? [snapshot.toolApproval.toolCallId] : [])]), [snapshot.interactions, snapshot.toolApproval]);
-  const latestAssistant = [...conversationItems].reverse().find((item) => item.type === "assistant");
-  const showTyping = runningForSelected && snapshot.interactions.length === 0 && !snapshot.toolApproval && (!latestAssistant || latestAssistant.type !== "assistant" || latestAssistant.textParts.length + latestAssistant.tools.length === 0);
   const jumpToInteraction = (id: string) => {
     document.getElementById(`interaction-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
@@ -1018,7 +946,6 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
                   <AssistantTurn key={item.id} messages={item.messages} textParts={item.textParts} tools={item.tools} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
                 ),
               )}
-              {showTyping && <TypingDots />}
               {snapshot.events.map((event: ChatEvent) => (
                 <div className="chat-event" key={event.id}>
                   {event.text}
@@ -1088,7 +1015,7 @@ function Companion({ snapshot, activeTitle, input, setInput, onSend, onSteer, on
               </button>
             </form>
           </div>
-          <Workbench snapshot={snapshot} open={workbenchOpen} onClose={() => setWorkbenchOpen(false)} onQueueUpdate={onQueueUpdate} onQueueRemove={onQueueRemove} onQueueRestore={onQueueRestore} onJump={jumpToInteraction} />
+          <Workbench snapshot={snapshot} open={workbenchOpen} onClose={() => setWorkbenchOpen(false)} onJump={jumpToInteraction} />
         </div>
       </div>
     </section>
@@ -1358,16 +1285,6 @@ export default function App() {
                   .then((result) => result.accepted)
                   .catch(() => false)
               }
-              onQueueUpdate={(item) =>
-                ignoreRpc(
-                  rpc.request["chat.queue.update"]({
-                    id: item.id,
-                    content: item.content,
-                  }),
-                )
-              }
-              onQueueRemove={(id) => ignoreRpc(rpc.request["chat.queue.remove"]({ id }))}
-              onQueueRestore={(id) => ignoreRpc(rpc.request["chat.queue.restore"]({ id }))}
             />
           )}
           {view === "projects" && <Projects />}

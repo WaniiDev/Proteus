@@ -98,7 +98,7 @@ export function goalFromMessages(messages: ChatMessage[], fallback = "Current wo
 export function shouldShowWorkbench(workbench: WorkbenchState): boolean {
   const hasPendingAttention = workbench.pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving");
   const hasIncompleteTask = workbench.tasks.some((task) => task.status !== "completed");
-  const hasQueue = workbench.queuedFollowUps.length > 0 || workbench.clearedFollowUps.length > 0;
+  const hasQueue = workbench.queuedFollowUpCount > 0;
   const hasUsage = workbench.tokenUsage.totalTokens > 0;
   return hasPendingAttention || hasIncompleteTask || hasQueue || hasUsage || workbench.status === "waiting" || workbench.status === "complete" || workbench.status === "interrupted" || workbench.status === "error";
 }
