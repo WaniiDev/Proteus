@@ -17,6 +17,7 @@ import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcom
 import { TaskToolPolicy } from "./task-tool-policy";
 import { PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
+import { AGENT_INSTRUCTIONS } from "./agent-instructions";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -26,10 +27,6 @@ const THREAD_METADATA_KEY = "proteus.workbench.v1";
 const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
 const MAX_INPUT_LENGTH = 32_000;
 const INTERNAL_TOOL_GRANTS = ["ask_user", "submit_plan", "task_write", "task_update", "task_complete", "task_check"] as const;
-
-const AGENT_INSTRUCTIONS = `You are PROTEUS, a personal AI companion. Respond directly and helpfully in text. You have no external action tools and must never claim to have taken external actions. You may use ask_user when an important user decision is genuinely needed. Before submitting a meaningful multi-step plan, write the complete Markdown plan to a relative .md file with write_plan, then call submit_plan with that path. Use read_plan when revising an existing plan. If the user asks for an action you cannot perform, explain that limitation. Use the user's language when clear; default to English.
-
-Task tools are bookkeeping, not the work itself. Treat current-task-list snapshots, task-list-update deltas, and task-tool results as the authoritative task state. Use task tracking only for genuine multi-step work. Move exactly one pending task to in_progress immediately before working on it, perform substantive work, and call task_complete exactly once after it is finished. Then choose the next incomplete stable ID from the latest task snapshot. Never repeat a task mutation whose requested state already holds, never retry an unchanged or errored result, and never alternate task_update and task_complete without substantive work between them. Call task_check once after all work appears complete; when allCompleted is true, stop using tools and answer the user.`;
 
 const OPENROUTER_PROVIDER_CONFIG: ProviderConfig = {
   url: "https://openrouter.ai/api/v1",

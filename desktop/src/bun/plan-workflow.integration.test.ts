@@ -8,7 +8,7 @@ import { AgentController, type AgentControllerEvent } from "@mastra/core/agent-c
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, syncPlanWorkflowModel } from "./plan-workflow-policy";
+import { APPROVED_PLAN_MODE_ID, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 
 const temporaryDirectories: string[] = [];
 
@@ -42,9 +42,12 @@ describe("native Mastra plan approval workflow", () => {
     const events: AgentControllerEvent[] = [];
     const seenTools: string[][] = [];
     let modelStep = 0;
-    const scripted = [
+    const scripted: Array<{ toolName: string; input: Record<string, unknown> } | null> = [
       { toolName: "write_plan", input: { path: ".mastracode/plans/placeholder.md", content: "# Placeholder plan\n\n1. Verify approval.", overwrite: true } },
       { toolName: "submit_plan", input: { path: ".mastracode/plans/placeholder.md" } },
+      null,
+      { toolName: "write_plan", input: { path: ".mastracode/plans/placeholder-2.md", content: "# Second placeholder plan\n\n1. Verify planning mode restoration.", overwrite: true } },
+      { toolName: "submit_plan", input: { path: ".mastracode/plans/placeholder-2.md" } },
     ];
     const model: LanguageModelV2 = {
       specificationVersion: "v2",
@@ -130,6 +133,25 @@ describe("native Mastra plan approval workflow", () => {
       expect(events.filter((event) => event.type === "tool_end").map((event) => event.toolCallId)).toEqual(["call-1"]);
       expect(seenTools.at(-1)).not.toContain("write_plan");
       expect(seenTools.at(-1)).not.toContain("submit_plan");
+
+      await restorePlanningMode(session);
+      expect(session.mode.get()).toBe(PLANNING_MODE_ID);
+      expect(session.model.get()).toBe(selectedModelId);
+      await session.sendMessage({ content: "Create another placeholder plan." });
+
+      expect(session.suspensions.has({ toolCallId: "call-5" })).toBe(true);
+      expect(events.filter((event) => event.type === "tool_suspended" && event.toolName === "submit_plan")).toHaveLength(2);
+      expect(seenTools[3]).toEqual(expect.arrayContaining(["write_plan", "submit_plan"]));
+      expect(seenTools[4]).toEqual(expect.arrayContaining(["write_plan", "submit_plan"]));
+      expect(session.model.get()).toBe(selectedModelId);
+
+      const secondCompleted = new Promise<void>((resolve) => {
+        session.subscribe((event) => {
+          if (event.type === "agent_end" && event.reason === "complete") resolve();
+        });
+      });
+      await session.respondToToolSuspension({ toolCallId: "call-5", resumeData: { action: "rejected", feedback: "Test cleanup" } });
+      await secondCompleted;
     } finally {
       await controller.destroy();
       await storage.close();
