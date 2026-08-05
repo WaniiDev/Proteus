@@ -1,5 +1,7 @@
 import type { ElectrobunConfig } from "electrobun";
 
+const windowsIcon = process.env.PROTEUS_WINDOWS_ICONS_PREPARED === "1" ? undefined : "assets/proteus.ico";
+
 export default {
   app: {
     name: "Proteus",
@@ -17,12 +19,17 @@ export default {
     copy: {
       "dist/index.html": "views/mainview/index.html",
       "dist/assets": "views/mainview/assets",
+      "assets/proteus.ico": "views/mainview/assets/proteus.ico",
       "node_modules/@napi-rs/keyring-win32-x64-msvc/keyring.win32-x64-msvc.node": "bun/keyring.win32-x64-msvc.node",
+      "node_modules/@libsql/win32-x64-msvc": "bun/node_modules/@libsql/win32-x64-msvc",
     },
     watchIgnore: ["dist/**"],
     win: {
       bundleCEF: false,
-      icon: "assets/proteus.ico",
+      // Electrobun 1.18.1's packaged CLI cannot resolve its bundled rcedit.
+      // The project scripts pre-embed this icon into the Windows templates and
+      // disable only the CLI's duplicate pass for prepared invocations.
+      icon: windowsIcon,
     },
     mac: {
       bundleCEF: false,

@@ -267,7 +267,9 @@ let windowVisible = true;
 
 const tray = new Tray({
   title: "Proteus",
-  image: "views://mainview/assets/proteus-orb-32.png",
+  // Electrobun's native Windows tray loader expects an icon resource even
+  // though views:// PNGs work on the other desktop platforms.
+  image: process.platform === "win32" ? "views://mainview/assets/proteus.ico" : "views://mainview/assets/proteus-orb-32.png",
   template: false,
   width: 20,
   height: 20,

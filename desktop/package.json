@@ -5,12 +5,13 @@
   "type": "module",
   "description": "Proteus personal AI companion desktop application",
   "scripts": {
-    "dev": "vite build && NODE_USE_SYSTEM_CA=1 electrobun dev --watch",
+    "dev": "vite build && bun run icon:prepare && PROTEUS_WINDOWS_ICONS_PREPARED=1 NODE_USE_SYSTEM_CA=1 electrobun dev --watch",
     "dev:hmr": "concurrently \"bun run hmr\" \"bun run start\"",
     "hmr": "vite --port 5173",
-    "start": "vite build && NODE_USE_SYSTEM_CA=1 electrobun dev",
-    "build": "vite build && NODE_USE_SYSTEM_CA=1 electrobun build --env=production && bun run icon:embed",
-    "icon:embed": "bun run scripts/embed-windows-icons.ts",
+    "start": "vite build && bun run icon:prepare && PROTEUS_WINDOWS_ICONS_PREPARED=1 NODE_USE_SYSTEM_CA=1 electrobun dev",
+    "build": "vite build && bun run icon:prepare && PROTEUS_WINDOWS_ICONS_PREPARED=1 NODE_USE_SYSTEM_CA=1 electrobun build --env=stable && bun run icon:embed",
+    "icon:prepare": "bun run scripts/embed-windows-icons.ts --prepare",
+    "icon:embed": "bun run scripts/embed-windows-icons.ts --build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:e2e": "playwright test"
