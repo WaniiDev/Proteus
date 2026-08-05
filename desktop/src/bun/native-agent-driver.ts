@@ -21,9 +21,9 @@ export type NativeQueueAgent = {
     message: { contents: string; metadata?: Record<string, unknown> },
     options: { resourceId: string; threadId: string },
   ): { accepted: Promise<NativeQueueAccepted> };
-  sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
+  sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown; streamOptions?: { activeTools?: string[] } }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
   listSuspendedRuns?(options: { resourceId: string; threadId: string }): Promise<{
-    runs: Array<{ runId: string; toolCalls: Array<{ toolCallId?: string; requiresApproval: boolean; suspendPayload?: unknown }> }>;
+    runs: Array<{ runId: string; toolCalls: Array<{ toolCallId?: string; toolName?: string; args?: unknown; requiresApproval: boolean; suspendPayload?: unknown }> }>;
   }>;
   sendToolApproval?(options: { resourceId: string; threadId: string; toolCallId?: string; approved: boolean }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
 };
@@ -71,11 +71,17 @@ export class NativeAgentDriver {
     return this.subscriptions.get(threadId)?.abort() ?? false;
   }
 
-  async resume(threadId: string, runId: string, toolCallId: string, resumeData: unknown): Promise<{ runId: string }> {
+  async resume(threadId: string, runId: string, toolCallId: string, resumeData: unknown, streamOptions?: { activeTools?: string[] }): Promise<{ runId: string }> {
     await this.ensureSubscription(threadId);
-    const result = await this.agent.sendStreamResume({ resourceId: this.resourceId, threadId, runId, toolCallId, resumeData });
+    const result = await this.agent.sendStreamResume({ resourceId: this.resourceId, threadId, runId, toolCallId, resumeData, ...(streamOptions ? { streamOptions } : {}) });
     if (!result.accepted) throw new Error("Mastra did not accept the stream resume request.");
     return { runId: result.runId };
+  }
+
+  async listSuspensions(threadId: string) {
+    if (!this.agent.listSuspendedRuns) return [];
+    const { runs } = await this.agent.listSuspendedRuns({ resourceId: this.resourceId, threadId });
+    return runs.flatMap((run) => run.toolCalls.map((toolCall) => ({ ...toolCall, runId: run.runId })));
   }
 
   async findSuspension(threadId: string, toolCallId: string): Promise<{ runId: string; requiresApproval: boolean } | null> {

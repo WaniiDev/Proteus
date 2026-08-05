@@ -40,13 +40,18 @@ describe("native Mastra agent driver", () => {
   });
 
   test("acknowledges native suspension resumption without waiting for run completion", async () => {
+    const resumes: unknown[] = [];
     const agent: NativeQueueAgent = {
       subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
       queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
-      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+      sendStreamResume: async (options) => {
+        resumes.push(options);
+        return { accepted: true, runId: options.runId, toolCallId: options.toolCallId };
+      },
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
-    expect(await driver.resume("thread-1", "run-1", "call-1", { action: "approved" })).toEqual({ runId: "run-1" });
+    expect(await driver.resume("thread-1", "run-1", "call-1", { action: "approved" }, { activeTools: ["task_write"] })).toEqual({ runId: "run-1" });
+    expect(resumes).toEqual([{ resourceId: "local-user", threadId: "thread-1", runId: "run-1", toolCallId: "call-1", resumeData: { action: "approved" }, streamOptions: { activeTools: ["task_write"] } }]);
   });
 
   test("rediscovers durable suspensions and uses native tool approval", async () => {

@@ -19,7 +19,7 @@ import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirect
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
-import { PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
+import { APPROVED_PLAN_TOOLS, PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
 import { selectedModelMissingFromCatalog } from "./provider-readiness";
@@ -737,7 +737,7 @@ export class TextRuntime {
 
   private async loadThreadState(threadId: string): Promise<PersistedThreadState> {
     const cached = this.threadStateCache.get(threadId);
-    if (cached) return structuredClone(cached);
+    if (cached) return this.reconcileNativeSuspensions(threadId, structuredClone(cached));
     try {
       const memoryStore = await this.storage.getStore("memory");
       const thread = await memoryStore?.getThreadById({
@@ -747,22 +747,7 @@ export class TextRuntime {
       const value = thread?.metadata?.[THREAD_METADATA_KEY];
       if (value && typeof value === "object" && !Array.isArray(value)) {
         const state = structuredClone(value as PersistedThreadState);
-        const pendingInteractions = state.pendingInteractions ?? [];
-        const liveInteractions = pendingInteractions.filter((item) => threadId === this.controllerThreadId && this.session?.suspensions.has({ toolCallId: item.toolCallId }));
-        const staleInteractions = pendingInteractions.filter((item) => !liveInteractions.includes(item));
-        if (staleInteractions.length > 0) {
-          state.pendingInteractions = liveInteractions;
-          state.resolvedInteractions = [
-            ...(state.resolvedInteractions ?? []),
-            ...staleInteractions.map((item) => ({
-              ...item,
-              status: "cancelled" as const,
-            })),
-          ];
-          await this.persistThreadState(threadId, state);
-        }
-        this.threadStateCache.set(threadId, structuredClone(state));
-        return structuredClone(state);
+        return this.reconcileNativeSuspensions(threadId, state);
       }
     } catch {
       // Metadata is optional; an empty state is a valid first-run state.
@@ -770,6 +755,41 @@ export class TextRuntime {
     const empty: PersistedThreadState = {};
     this.threadStateCache.set(threadId, empty);
     return {};
+  }
+
+  private async reconcileNativeSuspensions(threadId: string, state: PersistedThreadState): Promise<PersistedThreadState> {
+    const suspensions = await this.nativeDriver.listSuspensions(threadId).catch(() => null);
+    if (!suspensions) return state;
+    const liveIds = new Set(suspensions.flatMap((item) => item.toolCallId ? [item.toolCallId] : []));
+    for (const item of suspensions) if (item.toolCallId) this.nativeSuspensions.set(item.toolCallId, { runId: item.runId, threadId });
+    const pending = state.pendingInteractions ?? [];
+    const stale = pending.filter((item) => !liveIds.has(item.toolCallId));
+    let nextPending = pending.filter((item) => liveIds.has(item.toolCallId));
+    let nextVersion = Math.max(0, ...[...(state.pendingInteractions ?? []), ...(state.resolvedInteractions ?? [])].map((item) => item.plan?.version ?? 0));
+    for (const item of suspensions) {
+      if (!item.toolCallId || !item.toolName || nextPending.some((interaction) => interaction.toolCallId === item.toolCallId)) continue;
+      let suspendPayload = item.suspendPayload;
+      if (item.toolName === "submit_plan" && suspendPayload && typeof suspendPayload === "object" && typeof (suspendPayload as { path?: unknown }).path === "string") {
+        const path = (suspendPayload as { path: string }).path;
+        try {
+          const content = await this.planFilesystem.readFile(path);
+          suspendPayload = { ...(suspendPayload as Record<string, unknown>), plan: typeof content === "string" ? content : content.toString("utf8") };
+        } catch {
+          // Keep the durable suspension visible even when its optional draft cannot be read.
+        }
+      }
+      const parsed = parseSuspendedInteraction({ toolCallId: item.toolCallId, toolName: item.toolName, suspendPayload }, ++nextVersion);
+      if (parsed) nextPending = upsertPendingInteraction(nextPending, parsed);
+    }
+    const next = stale.length > 0 || nextPending.length !== pending.length
+      ? {
+          ...state,
+          pendingInteractions: nextPending,
+          resolvedInteractions: [...(state.resolvedInteractions ?? []), ...stale.map((item) => ({ ...item, status: "cancelled" as const }))],
+        }
+      : state;
+    this.threadStateCache.set(threadId, structuredClone(next));
+    return structuredClone(next);
   }
 
   private async persistThreadState(threadId: string, state = this.threadState): Promise<void> {
@@ -2132,7 +2152,7 @@ export class TextRuntime {
 
   async respondToInteraction(toolCallId: string, response: unknown): Promise<InteractionResponseResult> {
     const requestStartedAt = performance.now();
-    const session = await this.ensureInitialized();
+    await this.ensureInitialized();
     this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "received", threadId: this.controllerThreadId, runId: this.runId, toolCallId, payload: { response } });
     const interaction = this.controllerThreadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
     if (!interaction) return this.interactionFailure({ code: "stale", message: "That request is no longer waiting for an answer.", retryable: false });
@@ -2142,7 +2162,7 @@ export class TextRuntime {
     const nativeSuspension = nativeThreadId
       ? this.nativeSuspensions.get(toolCallId) ?? (await this.nativeDriver.findSuspension(nativeThreadId, toolCallId))
       : null;
-    if (!nativeSuspension && !session.suspensions.has({ toolCallId })) return this.interactionFailure({ code: "stale", message: "This approval expired. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) });
+    if (!nativeSuspension) return this.interactionFailure({ code: "stale", message: "This approval expired. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) });
     let resumeData: unknown;
     let nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">;
     let feedback: string | undefined;
@@ -2197,68 +2217,20 @@ export class TextRuntime {
   }
 
   private async completeInteractionResponse(toolCallId: string, resumeData: unknown, interaction: PendingInteraction, nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">, feedback?: string): Promise<void> {
-    const session = this.requireSession();
     const threadId = this.controllerThreadId ?? this.selectedThreadId ?? undefined;
-    const persistStartedAt = performance.now();
     try {
       const nativeSuspension = threadId
         ? this.nativeSuspensions.get(toolCallId) ?? (await this.nativeDriver.findSuspension(threadId, toolCallId))
         : null;
-      if (threadId && nativeSuspension) {
-        const resumeStartedAt = performance.now();
-        await this.nativeDriver.resume(threadId, nativeSuspension.runId, toolCallId, resumeData);
-        this.nativeSuspensions.delete(toolCallId);
-        if (interaction.kind === "submit_plan") {
-          this.recordToolOutcome(toolCallId, submitPlanResolutionResult(nextStatus === "approved" ? "approved" : "rejected", feedback), false);
-        }
-        this.finalizeResolvingInteractions(toolCallId);
-        this.updateThreadActivity(threadId, "running", 0);
-        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: nativeSuspension.runId, toolCallId, durationMs: performance.now() - resumeStartedAt });
-        return;
-      }
-      if (threadId) await this.persistThreadState(threadId, this.controllerThreadState);
-      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "state_persisted", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - persistStartedAt });
-      if (interaction.kind === "submit_plan" && nextStatus === "approved") {
-        const modelStartedAt = performance.now();
-        await syncPlanWorkflowModel(session);
-        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "plan_model_synced", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - modelStartedAt, payload: { modelId: session.model.get(), modeId: session.mode.get() } });
-      }
+      if (!threadId || !nativeSuspension) throw new Error("Mastra no longer has this suspended run.");
       const resumeStartedAt = performance.now();
-      await session.respondToToolSuspension({ toolCallId, resumeData });
-      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - resumeStartedAt, payload: { suspensionRemaining: session.suspensions.has({ toolCallId }) } });
-      const completed = this.resolvingInteractions.get(toolCallId);
-      let evidence = completed?.terminalEvidence;
-      const expectedDecision = interaction.kind === "submit_plan" ? nextStatus : undefined;
-      if ((!evidence || evidence.status !== "completed" || (expectedDecision && evidence.decision !== expectedDecision)) && interaction.kind === "submit_plan") {
-        const persistedThreadId = session.thread.requireId();
-        const persisted = this.mapMessages(await this.threads.recall(persistedThreadId), this.controllerThreadState.toolOutcomes);
-        evidence = findInteractionToolOutcome(persisted, interaction, expectedDecision === "approved" || expectedDecision === "rejected" ? expectedDecision : undefined) ?? evidence;
-      }
-      if (!evidence && this.resolvingInteractions.has(toolCallId) && !session.suspensions.has({ toolCallId })) {
-        evidence = {
-          status: "completed",
-          toolCallId,
-          ...(expectedDecision === "approved" || expectedDecision === "rejected" ? { decision: expectedDecision } : {}),
-        };
-      }
-      if (evidence?.status === "completed" && (!expectedDecision || evidence.decision === expectedDecision)) {
-        if (interaction.kind === "submit_plan") {
-          // Mastra 1.56 resumes submit_plan without emitting tool_end. Once the
-          // native resume boundary succeeds, settle the original visible call.
-          this.recordToolOutcome(toolCallId, submitPlanResolutionResult(nextStatus === "approved" ? "approved" : "rejected", feedback), false);
-        }
-        this.finalizeResolvingInteractions(toolCallId);
-        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "completed", threadId, runId: this.runId, toolCallId, payload: evidence });
-        return;
-      }
-      const failed = this.controllerThreadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId && item.status === "failed");
-      if (failed?.error) {
-        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "failed", threadId, runId: this.runId, toolCallId, payload: failed.error });
-        return;
-      }
-      const failure: InteractionError = { code: "resume-failed", message: "Mastra did not confirm the response with a terminal tool result. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
-      this.markInteractionFailed(toolCallId, failure);
-      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "failed", threadId, runId: this.runId, toolCallId, payload: failure });
+      const approvedPlan = interaction.kind === "submit_plan" && nextStatus === "approved";
+      await this.nativeDriver.resume(threadId, nativeSuspension.runId, toolCallId, resumeData, approvedPlan ? { activeTools: [...APPROVED_PLAN_TOOLS] } : undefined);
+      this.nativeSuspensions.delete(toolCallId);
+      if (interaction.kind === "submit_plan") this.recordToolOutcome(toolCallId, submitPlanResolutionResult(nextStatus === "approved" ? "approved" : "rejected", feedback), false);
+      this.finalizeResolvingInteractions(toolCallId);
+      this.updateThreadActivity(threadId, "running", 0);
+      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: nativeSuspension.runId, toolCallId, durationMs: performance.now() - resumeStartedAt });
     } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not resume this request. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
       this.markInteractionFailed(toolCallId, failure);
