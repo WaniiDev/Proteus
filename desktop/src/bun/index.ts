@@ -100,6 +100,15 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { accepted: false };
         }
       },
+      "models.reasoning.select": async ({ reasoningEffort }) => {
+        try {
+          await runtime.selectReasoning(reasoningEffort);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
       "threads.create": async (params) => {
         try {
           const threadId = await runtime.createThread(params?.title);

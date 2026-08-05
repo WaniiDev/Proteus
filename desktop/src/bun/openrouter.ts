@@ -18,6 +18,10 @@ type RawOpenRouterModel = {
     prompt?: unknown;
     completion?: unknown;
   };
+  reasoning?: {
+    supported_efforts?: unknown;
+    default_effort?: unknown;
+  };
 };
 
 type OpenRouterModelsResponse = { data?: RawOpenRouterModel[] };
@@ -90,6 +94,10 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
   const contextLength = typeof raw.context_length === "number" && Number.isInteger(raw.context_length) && raw.context_length > 0
     ? raw.context_length
     : undefined;
+  const supportedReasoning = safeStringArray(raw.reasoning?.supported_efforts, []).filter((effort): effort is "minimal" | "low" | "medium" | "high" => ["minimal", "low", "medium", "high"].includes(effort));
+  const defaultReasoning = typeof raw.reasoning?.default_effort === "string" && supportedReasoning.includes(raw.reasoning.default_effort as "minimal" | "low" | "medium" | "high")
+    ? raw.reasoning.default_effort as "minimal" | "low" | "medium" | "high"
+    : undefined;
 
   return {
     id: canonicalizeOpenRouterModelId(raw.id),
@@ -102,6 +110,8 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
     completionPrice: safeNumber(raw.pricing?.completion),
     inputModalities,
     outputModalities,
+    ...(supportedReasoning.length > 0 ? { reasoningOptions: supportedReasoning } : {}),
+    ...(defaultReasoning ? { reasoningEffort: defaultReasoning } : {}),
   };
 }
 

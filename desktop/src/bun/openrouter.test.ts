@@ -44,6 +44,7 @@ describe("OpenRouter control-plane client", () => {
           architecture: { input_modalities: ["text"], output_modalities: ["text"] },
           context_length: 128000,
           pricing: { prompt: "0.000002", completion: "0.000008" },
+          reasoning: { supported_efforts: ["low", "medium", "high"], default_effort: "medium" },
         },
         {
           id: "openai/gpt-image-1",
@@ -58,6 +59,8 @@ describe("OpenRouter control-plane client", () => {
     expect(models.map((model) => model.id)).toEqual(["openrouter/auto", "openrouter/openai/gpt-4.1"]);
     expect(models[1]?.promptPrice).toBe(0.000002);
     expect(models[1]?.contextLength).toBe(128000);
+    expect(models[1]?.reasoningOptions).toEqual(["low", "medium", "high"]);
+    expect(models[1]?.reasoningEffort).toBe("medium");
   });
 
   it("reads provider status from common error shapes", () => {

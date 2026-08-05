@@ -1699,6 +1699,33 @@ export class TextRuntime {
     });
   }
 
+  async selectReasoning(reasoningEffort: ReasoningEffort | null): Promise<void> {
+    await this.ensureInitialized();
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+    const selected = this.snapshot.models.find((model) => model.id === this.snapshot.selectedModelId);
+    if (!selected) throw makeRuntimeError("model-unavailable");
+    if (reasoningEffort && !selected.reasoningOptions?.includes(reasoningEffort)) throw makeRuntimeError("model-unavailable");
+    if (selected.providerId === "codex" && reasoningEffort) {
+      const replacement = this.snapshot.models.find((model) => model.providerId === "codex" && model.baseModelId === selected.baseModelId && model.reasoningEffort === reasoningEffort);
+      if (!replacement) throw makeRuntimeError("model-unavailable");
+      await this.selectModel(replacement.id);
+      return;
+    }
+    if (this.selectedThreadId) {
+      this.threadState = {
+        ...this.threadState,
+        modelSelection: {
+          providerId: selected.providerId,
+          modelId: selected.id,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        },
+      };
+      this.controllerThreadState = this.threadState;
+      await this.persistThreadState(this.selectedThreadId);
+    }
+    this.publish({ selectedReasoningEffort: reasoningEffort, error: null });
+  }
+
   async createThread(title?: string): Promise<string> {
     const session = await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
@@ -2020,6 +2047,7 @@ export class TextRuntime {
           createdAt: this.runStartedAt,
           type: "user",
           contents: candidate,
+          ...(this.snapshot.selectedReasoningEffort ? { providerOptions: { openrouter: { reasoning: { effort: this.snapshot.selectedReasoningEffort } } } } : {}),
         },
         { requireDelivery: true },
       );

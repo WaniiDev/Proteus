@@ -288,6 +288,10 @@ export const proteusRpcSchema = {
         params: {} as { providerId: ProviderId },
         response: {} as { accepted: boolean },
       },
+      "models.reasoning.select": {
+        params: {} as { reasoningEffort: ReasoningEffort | null },
+        response: {} as { accepted: boolean },
+      },
       "threads.create": {
         params: {} as { title?: string } | undefined,
         response: {} as { threadId: string },
