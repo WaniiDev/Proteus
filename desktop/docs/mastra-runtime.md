@@ -26,7 +26,7 @@ Approval recovery is derived only from the current `Session.approval`, `displayS
 
 `read_plan` and `write_plan` operate only inside the contained private plan workspace and receive documented Session grants, so they never create a second generic approval checkpoint. `submit_plan` remains the sole human checkpoint and uses Mastra's native suspension/resume data.
 
-The default conversation mode transitions to an approved-plan mode on approval. That mode excludes `write_plan` and `submit_plan`; rejection stays in the conversation mode so the model can revise and resubmit. Mastra 1.55 can carry the prior mode's tools into the resumed step, so the same approved-mode allowlist is re-applied through the documented `prepareStep.activeTools` boundary. A later top-level user message restores the conversation mode while preserving the selected model.
+The default conversation mode transitions to an approved-plan mode on approval. That mode excludes `write_plan` and `submit_plan`; rejection stays in the conversation mode so the model can revise and resubmit. Mastra 1.56 can carry the prior mode's tools into the resumed step, so the same approved-mode allowlist is re-applied through the documented `prepareStep.activeTools` boundary. A later top-level user message restores the conversation mode while preserving the selected model.
 
 PROTEUS exposes one model selection even though Mastra stores models per mode. A user selection is persisted to both internal modes with the documented `session.model.switch({ modelId, modeId, scope: "thread" })` API, and approval backfills the target mode before Mastra performs its native transition. Restoring conversation mode relies on Mastra's saved per-mode model and never copies the outgoing execution-mode model over it.
 
@@ -34,7 +34,7 @@ The contained plan filesystem is an available internal capability, not an extern
 
 `Session.displayState.pendingSuspensions` and `Session.suspensions` are authoritative for live plan cards. Plan Markdown is hydrated once per unique tool-call ID, and repeated display snapshots preserve the existing version and `resolving` status. A response is accepted only after the native resume boundary completes without an emitted error; terminal tool events and canonical history are used as stronger evidence when the installed runtime provides them.
 
-Mastra 1.55 does not emit `tool_end` for a resumed `submit_plan` call. After the successful native resume boundary removes that suspension, PROTEUS projects the original visible tool-call ID to `completed`; it never settles the row before Mastra confirms the resume.
+Mastra 1.56 does not emit `tool_end` for a resumed `submit_plan` call. After the successful native resume boundary removes that suspension, PROTEUS projects the original visible tool-call ID to `completed`; it never settles the row before Mastra confirms the resume.
 
 ## Compatibility boundary
 
@@ -46,21 +46,23 @@ OpenRouter and Codex are alternative primary providers. A conversation persists 
 
 OpenRouter continues through `AgentController` and `Session.sendSignal()`. Its catalog is merged into the provider-neutral snapshot, and supported reasoning effort is read from OpenRouter's per-model `reasoning.supported_efforts` metadata. The chosen effort is attached to the user signal as `providerOptions.openrouter.reasoning.effort`, using Mastra's documented provider-options boundary.
 
-Codex runs through Mastra `AcpAgent` from `@mastra/acp`. `CodexProviderRuntime` owns one persistent ACP agent per PROTEUS thread and uses only public APIs: `getAvailableModels()`, `setModel()`, `connection.promptStream()`, `connection.cancel()`, and `connection.disconnect()`. The official adapter's advertised composite model IDs, such as `gpt-5.6-sol[high]`, are authoritative for both model and reasoning selection; PROTEUS does not reach into private ACP session configuration.
+Codex uses MastraCode's upstream `MastraCodeGateway` with `routeThroughMastraGateway: false`. The gateway owns ChatGPT OAuth authentication and constructs the OpenAI Codex language model; PROTEUS does not implement a second provider client. The same `Agent`, `AgentController`, and `Session.sendSignal()` path handles Codex and OpenRouter, so instructions, tasks, plans, approvals, memory, history, steering, cancellation, and display events have one lifecycle owner.
 
-Mastra Memory remains canonical history for both paths. A newly created ACP session receives the existing provider-neutral transcript once, then its live session owns subsequent conversational context. Completed Codex user/assistant turns and normalized tool parts are persisted back through `Memory.saveMessages()`.
+The upstream `createModelCatalogProvider()` supplies authenticated OpenAI catalog entries. PROTEUS filters that catalog to GPT-5-family models, applies MastraCode's `remapOpenAIModelForCodexOAuth()`, and exposes stable product IDs as `codex/<model>`. Mastra's internal session modes receive `openai/<model>` through the documented `session.model.switch({ modelId, modeId, scope: "thread" })` API. Legacy ACP composite selections are migrated once to a stable model ID plus separate reasoning effort.
 
-ACP `text` events become streamed assistant text. Native session updates become tool rows, workbench plan tasks, and usage. Tool-call IDs and statuses remain authoritative so repeated updates replace the same visible tool row instead of duplicating it.
+Codex reasoning uses MastraCode's public `ThinkingLevel` contract (`low`, `medium`, `high`, `xhigh`) and defaults to `medium`. A gateway instance is resolved for each run with the conversation's current thinking level. GPT-5 reasoning floors and provider request shaping remain upstream behavior.
 
-## ACP permission and safety boundary
+## ChatGPT OAuth and credential boundary
 
-Every `AcpAgent` supplies `onPermissionRequest`; PROTEUS never uses Mastra ACP's default first-option selection. A native ACP permission request becomes the existing `toolApproval` snapshot card. Approve chooses an `allow_once` option when available; decline chooses `reject_once`; otherwise the request is cancelled. Each pending resolver is removed before it is completed so a UI retry cannot resolve the same native request twice.
+MastraCode's `loginOpenAICodex()` owns browser callback and device-code authorization. PROTEUS exposes progress only as provider, mode, status, URL, user code, instructions, and a safe error. Browser authorization opens through Electrobun, supports manual callback URL/code entry, and can be cancelled; device authorization is the fallback for blocked localhost callbacks.
 
-The packaged adapter starts in `read-only` mode. This preserves the existing product authority boundary until Projects supplies an explicit shared coding workspace. ACP stderr, authentication material, and private reasoning are not copied into runtime snapshots or Mastra messages.
+OAuth access/refresh credentials are serialized only into the `openai-codex.oauth` Windows Credential Manager account through an injected structural `CredentialStore`. `allowEnvironmentFallback` is false, expired-token refresh uses upstream `refreshOpenAICodexToken()`, and concurrent refreshes share one in-flight promise. Tokens, account IDs, and raw OAuth failures never enter IPC snapshots, messages, logs, thread metadata, or plan files. Disconnect clears only the Codex credential and never silently selects or invokes OpenRouter.
 
-## ACP packaging
+OpenRouter uses the separate `openrouter.api-key` keyring account. Existing installations migrate the legacy `openrouter` account on first read without writing plaintext files.
 
-Production builds copy `@agentclientprotocol/codex-acp`'s bundled adapter entry and the matching official Windows Codex vendor directory into Electrobun's Bun resources. `resolveCodexAcpLaunch()` resolves packaged paths first and development `node_modules` paths second, then passes the exact executable through `CODEX_PATH`. The shipped application therefore does not depend on a global Codex, Bun, or npm installation.
+## Desktop packaging
+
+The Electrobun Bun bundle contains MastraCode's OAuth gateway runtime. MastraCode's optional Stagehand and Playwright browser subsystems are external because PROTEUS does not enable them; no ACP adapter or Codex executable is copied into the application.
 
 ## Storage cutover
 

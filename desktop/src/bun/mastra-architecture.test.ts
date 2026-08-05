@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const sourceRoot = join(import.meta.dir, "..");
@@ -26,5 +27,18 @@ describe("Mastra-first architecture boundaries", () => {
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
     expect(app.toLowerCase()).not.toContain("previous decisions");
     expect(app).not.toContain("TypingDots");
+  });
+
+  it("removes the retired ACP runtime and packaged adapter", async () => {
+    const [packageJson, electrobunConfig] = await Promise.all([
+      readFile(join(sourceRoot, "..", "package.json"), "utf8"),
+      readFile(join(sourceRoot, "..", "electrobun.config.ts"), "utf8"),
+    ]);
+
+    expect(packageJson).not.toContain("@mastra/acp");
+    expect(packageJson).not.toContain("@agentclientprotocol/codex-acp");
+    expect(electrobunConfig).not.toContain("codex-acp.js");
+    expect(existsSync(join(sourceRoot, "bun", "codex-provider.ts"))).toBe(false);
+    expect(existsSync(join(sourceRoot, "bun", "codex-acp.ts"))).toBe(false);
   });
 });

@@ -2269,7 +2269,7 @@ export class TextRuntime {
       }
       if (evidence?.status === "completed" && (!expectedDecision || evidence.decision === expectedDecision)) {
         if (interaction.kind === "submit_plan") {
-          // Mastra 1.55 resumes submit_plan without emitting tool_end. Once the
+          // Mastra 1.56 resumes submit_plan without emitting tool_end. Once the
           // native resume boundary succeeds, settle the original visible call.
           this.recordToolOutcome(toolCallId, submitPlanResolutionResult(nextStatus === "approved" ? "approved" : "rejected", feedback), false);
         }

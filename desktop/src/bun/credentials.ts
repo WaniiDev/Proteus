@@ -2,7 +2,6 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { refreshOpenAICodexToken } from "@mastra/code-sdk/auth/providers/openai-codex";
 import type { CredentialStore, OAuthCredential, OAuthCredentials } from "@mastra/code-sdk/auth/types";
-import { Utils } from "electrobun/bun";
 
 const SERVICE = "com.proteus.companion";
 const OPENROUTER_ACCOUNT = "openrouter.api-key";
@@ -174,6 +173,7 @@ export function createCodexCredentialStore(
 }
 
 export async function ensureUserDataDirectory(): Promise<string> {
+  const { Utils } = await import("electrobun/bun");
   const userData = Utils.paths.userData;
   await mkdir(userData, { recursive: true });
   return userData;

@@ -71,7 +71,7 @@ export function planWorkflowModes(defaultModelId: string): AgentControllerMode[]
 }
 
 /**
- * Mastra 1.55 transitions the Session mode before a submit_plan resume, but
+ * Mastra 1.56 transitions the Session mode before a submit_plan resume, but
  * its resumed toolset can still contain the prior mode's tools. Re-apply the
  * native mode allowlist at the documented per-step boundary.
  */
