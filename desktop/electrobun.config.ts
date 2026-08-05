@@ -17,7 +17,6 @@ export default {
     copy: {
       "dist/index.html": "views/mainview/index.html",
       "dist/assets": "views/mainview/assets",
-      "src/mainview/assets/proteus-orb-32.png": "views/mainview/assets/proteus-orb-32.png",
       "node_modules/@napi-rs/keyring-win32-x64-msvc/keyring.win32-x64-msvc.node": "bun/keyring.win32-x64-msvc.node",
     },
     watchIgnore: ["dist/**"],

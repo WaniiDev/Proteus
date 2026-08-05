@@ -12,7 +12,7 @@ describe("Proteus application icons", () => {
     const files = [
       new URL("../../assets/proteus.ico", import.meta.url),
       new URL("../../assets/proteus-orb.png", import.meta.url),
-      new URL("../mainview/assets/proteus-orb-32.png", import.meta.url),
+      new URL("../mainview/public/assets/proteus-orb-32.png", import.meta.url),
       new URL("../mainview/assets/proteus-orb-64.png", import.meta.url),
       new URL("../mainview/assets/proteus-orb-256.png", import.meta.url),
     ];
