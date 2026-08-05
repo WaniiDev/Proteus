@@ -14,6 +14,8 @@ export default {
       "dist/index.html": "views/mainview/index.html",
       "dist/assets": "views/mainview/assets",
       "node_modules/@napi-rs/keyring-win32-x64-msvc/keyring.win32-x64-msvc.node": "bun/keyring.win32-x64-msvc.node",
+      "node_modules/@agentclientprotocol/codex-acp/dist/index.js": "bun/codex-acp.js",
+      "node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc": "bun/codex",
     },
     watchIgnore: ["dist/**"],
     win: {
