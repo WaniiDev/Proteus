@@ -47,12 +47,12 @@ export class NativeAgentDriver {
   ) {}
 
   async queue(threadId: string, text: string, metadata?: Record<string, unknown>): Promise<{ runId: string; queued: boolean }> {
-    const subscription = await this.ensureSubscription(threadId);
-    const queued = subscription.activeRunId() !== null;
+    await this.ensureSubscription(threadId);
     const result = this.agent.queueMessage({ contents: text, ...(metadata ? { metadata } : {}) }, { resourceId: this.resourceId, threadId });
     const accepted = await result.accepted;
     if (accepted.action === "blocked") throw new Error("This conversation is waiting for a suspended tool response.");
     if (accepted.action === "persist" || accepted.action === "discard") throw new Error("Mastra accepted the message without starting or queueing a run.");
+    const queued = accepted.action === "deliver";
     if (queued) this.setQueuedCount(threadId, this.queuedCount(threadId) + 1);
     if (accepted.action === "wake") void accepted.output.consumeStream().catch((error) => this.callbacks.onError?.(error, threadId));
     return { runId: accepted.runId, queued };

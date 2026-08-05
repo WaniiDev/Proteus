@@ -27,12 +27,12 @@ describe("native Mastra agent driver", () => {
     let aborted = false;
     const counts: number[] = [];
     const agent: NativeQueueAgent = {
-      subscribeToThread: async () => ({ stream: pendingChunks(), activeRunId: () => "run-active", abort: () => (aborted = true), unsubscribe: () => undefined }),
-      queueMessage: () => ({ accepted: Promise.resolve({ action: "deliver", runId: "run-active" }) }),
+      subscribeToThread: async () => ({ stream: pendingChunks(), activeRunId: () => null, abort: () => (aborted = true), unsubscribe: () => undefined }),
+      queueMessage: () => ({ accepted: Promise.resolve({ action: "deliver", runId: "run-queued" }) }),
       sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined, onQueueChanged: (_threadId, count) => counts.push(count) });
-    expect(await driver.queue("thread-1", "next")).toEqual({ runId: "run-active", queued: true });
+    expect(await driver.queue("thread-1", "next")).toEqual({ runId: "run-queued", queued: true });
     expect(driver.queuedCount("thread-1")).toBe(1);
     expect(driver.abort("thread-1")).toBeTrue();
     expect(aborted).toBeTrue();

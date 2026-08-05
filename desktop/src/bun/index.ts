@@ -188,15 +188,6 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { accepted: false, runId: "" };
         }
       },
-      "chat.steer": async ({ text }) => {
-        try {
-          const { runId } = await runtime.steer(text);
-          return { accepted: true, runId };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false, runId: "" };
-        }
-      },
       "chat.retry": async ({ messageId }) => {
         try {
           const { runId } = await runtime.retry(messageId);

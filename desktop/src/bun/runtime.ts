@@ -504,9 +504,6 @@ export class TextRuntime {
   private runId: string | null = null;
   private runOutcome: "streaming" | "complete" | "interrupted" | "error" = "complete";
   private runError: RuntimeError | null = null;
-  private sendGeneration = 0;
-  private readonly steerAbortTokens = new Set<string>();
-  private steerInFlight = false;
   private lastAssistantId: string | null = null;
   private readonly assistantProjections = new Map<string, LiveAssistantProjection>();
   private readonly persistedAssistantIds = new Map<string, Set<string>>();
@@ -824,23 +821,6 @@ export class TextRuntime {
     this.persistedAssistantIds.set(threadId, new Set(rawMessages.filter((message) => message.role === "assistant").map((message) => message.id)));
   }
 
-  private assistantBaselineForThread(threadId: string): Set<string> {
-    return new Set([...(this.persistedAssistantIds.get(threadId) ?? []), ...this.snapshot.messages.filter((message) => message.role === "assistant").map((message) => message.id)]);
-  }
-
-  private startAssistantProjection(threadId: string, runId: string, turnId: string, runStartedAt: string): void {
-    this.assistantProjections.set(runId, {
-      runId,
-      threadId,
-      turnId,
-      runStartedAt,
-      baselineAssistantIds: this.assistantBaselineForThread(threadId),
-      messages: new Map(),
-      messageOrder: [],
-      outcome: null,
-    });
-  }
-
   private updateAssistantProjection(threadId: string, message: ChatMessage): void {
     const runId = this.runId;
     if (!runId || threadId !== this.controllerThreadId) return;
@@ -867,23 +847,6 @@ export class TextRuntime {
     const lastId = projection.messageOrder.at(-1);
     const last = lastId ? projection.messages.get(lastId) : undefined;
     if (last && lastId) projection.messages.set(lastId, { ...last, status });
-  }
-
-  private resetAssistantProjectionForSteer(threadId: string, runId: string, runStartedAt: string): string[] {
-    const projection = this.assistantProjections.get(runId);
-    const previousMessageIds = projection?.messageOrder ?? [];
-    for (const messageId of previousMessageIds) this.retiredAssistantIds.add(messageId);
-    this.assistantProjections.set(runId, {
-      runId,
-      threadId,
-      turnId: projection?.turnId ?? this.runClientMessageId ?? runId,
-      runStartedAt,
-      baselineAssistantIds: this.assistantBaselineForThread(threadId),
-      messages: new Map(),
-      messageOrder: [],
-      outcome: null,
-    });
-    return [...previousMessageIds];
   }
 
   private discardEmptyAssistantProjection(runId: string): void {
@@ -1419,10 +1382,6 @@ export class TextRuntime {
     }
 
     if (event.type === "agent_start") {
-      // Mastra emits an aborted terminal event for the stream that steer()
-      // replaces. Keep the handoff marker until that old terminal event is
-      // observed; the replacement can start before the old stream reports its
-      // abort, and clearing here would let the stale event terminate the new run.
       this.runOutcome = "streaming";
       this.runError = null;
       this.runTerminalHandled = false;
@@ -1456,11 +1415,6 @@ export class TextRuntime {
     }
 
     if (event.type === "agent_end") {
-      if (event.reason === "aborted" && this.steerAbortTokens.size > 0) {
-        const staleToken = this.steerAbortTokens.values().next().value as string | undefined;
-        if (staleToken) this.steerAbortTokens.delete(staleToken);
-        return;
-      }
       if (event.reason === "suspended") {
         if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "waiting", 1);
         return;
@@ -2152,170 +2106,28 @@ export class TextRuntime {
     if (this.snapshot.selectedProviderId === "codex" && this.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
     let threadId = this.selectedThreadId ?? this.controllerThreadId ?? this.snapshot.activeThreadId;
     if (!threadId) threadId = await this.createThread("New chat");
-    const createdAt = new Date().toISOString();
-    this.optimisticUserMessages.set(messageId, {
-      threadId,
-      message: { id: messageId, role: "user", text: candidate, turnId: messageId, parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }], status: "complete", createdAt },
-    });
-    this.runClientMessageId = messageId;
-    this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), error: null, retryMessageId: null });
+    return this.queueNativeMessage(threadId, candidate, { clientMessageId: messageId, optimistic: true });
+  }
+
+  private async queueNativeMessage(threadId: string, candidate: string, options: { clientMessageId?: string; optimistic?: boolean } = {}): Promise<{ runId: string }> {
+    const messageId = options.clientMessageId ?? randomUUID();
+    if (options.optimistic !== false) {
+      const createdAt = new Date().toISOString();
+      this.optimisticUserMessages.set(messageId, {
+        threadId,
+        message: { id: messageId, role: "user", text: candidate, turnId: messageId, parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }], status: "complete", createdAt },
+      });
+      this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), error: null, retryMessageId: null });
+    }
     const result = await this.nativeDriver.queue(threadId, candidate, { clientMessageId: messageId });
     if (!result.queued) {
+      this.runClientMessageId = options.optimistic === false ? null : messageId;
       this.runId = result.runId;
       this.publish({ status: "running", activeRun: { runId: result.runId, threadId, status: "running" } });
     } else {
       this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
     }
     return { runId: result.runId };
-  }
-
-  private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {
-    const session = this.requireSession();
-    const threadId = this.controllerThreadId ?? session.thread.getId();
-    if (!threadId) throw new Error("No active conversation");
-    this.taskToolPolicy.reset(threadId);
-    this.runToolOutcomes.clear();
-    const runId = randomUUID();
-    const sendGeneration = ++this.sendGeneration;
-    this.runId = runId;
-    this.lastAssistantId = null;
-    this.runStartedAt = new Date().toISOString();
-    this.runOutcome = "streaming";
-    this.runError = null;
-    this.runTerminalHandled = false;
-    const messageId = options.clientMessageId ?? randomUUID();
-    this.startAssistantProjection(threadId, runId, messageId, this.runStartedAt);
-    this.runClientMessageId = options.optimistic ? messageId : null;
-    if (options.optimistic) {
-      const createdAt = this.runStartedAt;
-      this.optimisticUserMessages.set(messageId, {
-        threadId,
-        message: {
-          id: messageId,
-          role: "user",
-          text: candidate,
-          turnId: messageId,
-          parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }],
-          status: "complete",
-          createdAt,
-        },
-      });
-    }
-    this.publish({
-      status: "running",
-      activeRun: { runId, threadId, status: "running" },
-      error: null,
-      retryMessageId: null,
-      messages: this.mergeTransientMessages(threadId, this.snapshot.messages, true),
-    });
-    this.updateThreadActivity(threadId, "running");
-
-    try {
-      const signal = session.sendSignal(
-        {
-          id: messageId,
-          createdAt: this.runStartedAt,
-          type: "user",
-          contents: candidate,
-          ...(this.snapshot.selectedProviderId === "openrouter" && this.snapshot.selectedReasoningEffort ? { providerOptions: { openrouter: { reasoning: { effort: this.snapshot.selectedReasoningEffort } } } } : {}),
-        },
-        { requireDelivery: true },
-      );
-      void signal.accepted.catch(async (error) => {
-        if (this.runId !== runId || this.sendGeneration !== sendGeneration) return;
-        await this.finishFailedRun(runId, normalizeError(error));
-      });
-    } catch (error) {
-      void this.finishFailedRun(runId, normalizeError(error));
-    }
-
-    return { runId };
-  }
-
-  async steer(text: string): Promise<{ runId: string }> {
-    if (this.steerInFlight) throw makeRuntimeError("busy");
-    this.steerInFlight = true;
-    try {
-      return await this.steerReserved(text);
-    } catch (error) {
-      this.steerInFlight = false;
-      throw error;
-    }
-  }
-
-  private async steerReserved(text: string): Promise<{ runId: string }> {
-    await this.ensureInitialized();
-    const candidate = text.trim();
-    if (!candidate) throw new Error("Steering message cannot be empty");
-    if (!this.runId || this.selectedThreadId !== this.controllerThreadId) throw makeRuntimeError("busy");
-    const threadId = this.controllerThreadId;
-    if (!threadId) throw new Error("No active conversation");
-    const runId = this.runId;
-    const pendingInteractions = this.controllerThreadState.pendingInteractions ?? [];
-    this.resolvingInteractions.clear();
-    this.controllerThreadState = {
-      ...this.controllerThreadState,
-      pendingInteractions: [],
-      resolvedInteractions: [
-        ...(this.controllerThreadState.resolvedInteractions ?? []),
-        ...pendingInteractions.map((item) => ({
-          ...item,
-          status: "cancelled" as const,
-        })),
-      ],
-      events: [
-        ...(this.controllerThreadState.events ?? []),
-        {
-          id: randomUUID(),
-          type: "steer",
-          text: `You redirected PROTEUS: ${candidate}`,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    };
-    void this.persistThreadState(threadId, this.controllerThreadState);
-    if (this.runId !== runId || this.controllerThreadId !== threadId || this.selectedThreadId !== threadId) {
-      throw makeRuntimeError("busy");
-    }
-    this.threadState = this.controllerThreadState;
-    const steerStartedAt = new Date().toISOString();
-    const retiredMessageIds = this.resetAssistantProjectionForSteer(threadId, runId, steerStartedAt);
-    this.runStartedAt = steerStartedAt;
-    this.lastAssistantId = null;
-    this.runOutcome = "streaming";
-    this.runError = null;
-    this.sendGeneration += 1;
-    const messagesAfterSteer = this.snapshot.messages.filter((message) => !retiredMessageIds.includes(message.id));
-    this.publish({
-      status: "running",
-      error: null,
-      messages: this.mergeTransientMessages(threadId, messagesAfterSteer),
-      events: this.controllerThreadState.events ?? [],
-      interactions: [],
-      workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
-    });
-    let expectsAbortedTerminal = false;
-    const steerToken = randomUUID();
-    try {
-      const session = this.requireSession();
-      expectsAbortedTerminal = session.stream.isActive();
-      if (expectsAbortedTerminal) this.steerAbortTokens.add(steerToken);
-      void session
-        .steer({ content: candidate })
-        .catch(async (error) => {
-          if (expectsAbortedTerminal) this.steerAbortTokens.delete(steerToken);
-          if (this.runId === runId) await this.finishFailedRun(runId, normalizeError(error));
-        })
-        .finally(() => {
-          this.steerInFlight = false;
-        });
-    } catch (error) {
-      if (expectsAbortedTerminal) this.steerAbortTokens.delete(steerToken);
-      this.steerInFlight = false;
-      await this.finishFailedRun(runId, normalizeError(error));
-      throw error;
-    }
-    return { runId };
   }
 
   async respondToInteraction(toolCallId: string, response: unknown): Promise<InteractionResponseResult> {
@@ -2526,7 +2338,7 @@ export class TextRuntime {
   }
 
   private async retryReserved(messageId: string): Promise<{ runId: string }> {
-    await this.ensureInitialized();
+    const session = await this.ensureInitialized();
     if (this.runId) throw makeRuntimeError("busy");
     const sourceThreadId = this.selectedThreadId ?? this.controllerThreadId ?? "";
     const messages = await this.threads.recall(sourceThreadId) as MastraMessage[];
@@ -2548,10 +2360,7 @@ export class TextRuntime {
     if (!source) {
       this.retryingText = null;
       this.hideSingleRetry = false;
-      return this.startRun(content, {
-        optimistic: true,
-        clientMessageId: messageId,
-      });
+      return this.queueNativeMessage(sourceThreadId, content, { optimistic: true, clientMessageId: messageId });
     }
     const originalThread = await this.threads.get(sourceThreadId);
     const sourceState = await this.loadThreadState(sourceThreadId);
@@ -2590,11 +2399,12 @@ export class TextRuntime {
     const removeIds = retryMessages.slice(retrySourceIndex).map((message) => message.id);
     if (removeIds.length > 0) await this.memory.deleteMessages(removeIds);
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
+    await session.thread.switch({ threadId: retryThread.id });
     await this.syncThreadState();
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     this.retryingText = null;
     this.hideSingleRetry = false;
-    return this.startRun(content, { optimistic: true });
+    return this.queueNativeMessage(retryThread.id, content, { optimistic: true });
   }
 
   async continueFrom(messageId: string): Promise<{ runId: string }> {
@@ -2644,7 +2454,9 @@ export class TextRuntime {
     const continuation = "Continue from the stopped response without repeating what is already visible. Finish the answer naturally.";
     this.retryingText = continuation;
     this.hideSingleRetry = true;
-    return this.startRun(continuation);
+    const threadId = this.selectedThreadId ?? this.controllerThreadId;
+    if (!threadId) throw new Error("No active conversation");
+    return this.queueNativeMessage(threadId, continuation, { optimistic: false });
   }
 
   abort(): void {

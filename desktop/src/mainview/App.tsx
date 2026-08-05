@@ -718,19 +718,18 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
   );
 }
 
-function QueuedMessageBubble({ draft, onSteer }: { draft: QueuedDraft; onSteer: (draft: QueuedDraft) => void }) {
+function QueuedMessageBubble({ draft }: { draft: QueuedDraft }) {
   return (
     <div className="msg user queued-message" data-queued-state={draft.state}>
       <div className="bubble"><span>{draft.text}</span></div>
       <div className="queued-message-meta">
         <span className="queued-badge">{draft.state === "sending" ? "Sending" : "Queued"}</span>
-        {draft.state === "queued" && <button type="button" className="queued-steer" onClick={() => onSteer(draft)}>Steer now</button>}
       </div>
     </div>
   );
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSend, onSteerQueued, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; onSend: (event: FormEvent<HTMLFormElement>) => void; onSteerQueued: (draft: QueuedDraft) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
+function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSend, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -849,7 +848,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                   <AssistantTurn key={item.id} messages={item.messages} textParts={item.textParts} tools={item.tools} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
                 ),
               )}
-              {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} onSteer={onSteerQueued} />)}
+              {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} />)}
               {snapshot.events.map((event: ChatEvent) => (
                 <div className="chat-event" key={event.id}>
                   {event.text}
@@ -1183,12 +1182,6 @@ export default function App() {
         setInput(text);
       });
   };
-  const handleSteerQueued = (draft: QueuedDraft) => {
-    void rpc.request["chat.steer"]({ text: draft.text }).then((result) => {
-      if (!result.accepted) return;
-      setQueuedDrafts((current) => current.filter((item) => item.threadId !== draft.threadId));
-    }).catch(() => undefined);
-  };
   const handleConnect = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const candidate = apiKey;
@@ -1235,7 +1228,6 @@ export default function App() {
               setInput={setInput}
               queuedDrafts={queuedDrafts.filter((draft) => draft.threadId === renderedSnapshot.activeThreadId)}
               onSend={handleSend}
-              onSteerQueued={handleSteerQueued}
               onAbort={() => ignoreRpc(rpc.request["chat.abort"]())}
               onSettings={() => handleNavigate("settings")}
               onCreate={handleCreate}

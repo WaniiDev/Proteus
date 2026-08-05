@@ -360,10 +360,6 @@ export const proteusRpcSchema = {
         params: {} as { text: string; clientMessageId: string },
         response: {} as { accepted: boolean; runId: string },
       },
-      "chat.steer": {
-        params: {} as { text: string },
-        response: {} as { accepted: boolean; runId: string },
-      },
       "chat.retry": {
         params: {} as { messageId: string },
         response: {} as { accepted: boolean; runId: string },

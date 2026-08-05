@@ -653,8 +653,6 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .queued-message .bubble { opacity: .78; border: 1px dashed rgba(255,255,255,.32); }
 .queued-message-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 20px; }
 .queued-badge { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .65px; text-transform: uppercase; }
-.queued-steer { padding: 3px 7px; border-radius: 7px; color: var(--body-strong); background: var(--canvas-soft); font-size: 10.5px; }
-.queued-steer:hover { background: var(--surface-strong); color: var(--ink); }
 
 /* Compact conversation frame + manually controlled Workbench */
 .companion-view .chat-titlebar { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px max(var(--s-xl), 24px) 5px; }
