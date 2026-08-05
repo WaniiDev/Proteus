@@ -27,5 +27,6 @@ describe("Settings provider and model UI", () => {
     expect(appSource).toContain("Paste callback URL or code");
     expect(appSource).toContain('rpc.request["providers.auth.cancel"]');
     expect(appSource).not.toContain("Native ACP");
+    expect(appSource).toContain('!provider.verified && snapshot.providerAuth?.providerId === "codex"');
   });
 });

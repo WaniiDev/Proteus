@@ -23,6 +23,7 @@ import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
 import { selectedModelMissingFromCatalog } from "./provider-readiness";
 import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection, resolveCodexGatewayModel } from "./codex-models";
+import { reconcileProviderAuth } from "./provider-auth";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -636,10 +637,13 @@ export class TextRuntime {
             : provider,
         )
       : next.providers;
+    const nextProviders = providers ?? this.snapshot.providers;
+    const requestedProviderAuth = Object.hasOwn(next, "providerAuth") ? next.providerAuth ?? null : this.snapshot.providerAuth;
     this.snapshot = {
       ...this.snapshot,
       ...next,
       ...(providers ? { providers } : {}),
+      providerAuth: reconcileProviderAuth(nextProviders, requestedProviderAuth),
       revision: this.snapshot.revision + 1,
     };
     const snapshot = this.getSnapshot();
@@ -1661,6 +1665,7 @@ export class TextRuntime {
       signal: abortController.signal,
       originator: "proteus",
       onAuth: ({ url, instructions }) => {
+        if (this.codexAuthAbortController !== abortController) return;
         const code = mode === "device" ? instructions?.match(/Enter code:\s*(\S+)/i)?.[1] : undefined;
         this.publish({ providerAuth: { providerId: "codex", mode, status: "waiting", url, ...(code ? { code } : {}), ...(instructions ? { instructions } : {}) } });
         try {
@@ -1670,18 +1675,21 @@ export class TextRuntime {
         }
       },
       onProgress: (instructions) => {
+        if (this.codexAuthAbortController !== abortController) return;
         const current = this.snapshot.providerAuth;
         if (current?.providerId === "codex") this.publish({ providerAuth: { ...current, instructions } });
       },
       onPrompt: async () => manualInput,
       ...(mode === "browser" ? { onManualCodeInput: async () => manualInput } : {}),
     }).then(async (credentials) => {
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted || this.codexAuthAbortController !== abortController) return;
       this.publish({ providerAuth: { providerId: "codex", mode, status: "completing", instructions: "Saving the authorization securely…" } });
       this.codexCredentialStore.setOAuth(credentials);
       await this.refreshCodexModels();
+      if (this.codexAuthAbortController !== abortController) return;
       this.publish({ providerAuth: null, error: null, status: this.idleStatus() });
     }).catch((error) => {
+      if (this.codexAuthAbortController !== abortController) return;
       if (abortController.signal.aborted) {
         this.publish({ providerAuth: null });
         return;

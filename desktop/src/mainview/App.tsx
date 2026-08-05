@@ -969,7 +969,7 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
           </> : <div className="provider-auth-controls">
             <p className="provider-detail">{provider.detail}</p>
             {!provider.configured && !snapshot.providerAuth && <div className="provider-auth-actions"><button className="btn-primary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Connect in browser</button><button className="btn-outline sm" type="button" onClick={() => onStartCodexAuth("device")}>Use device code</button></div>}
-            {snapshot.providerAuth?.providerId === "codex" && <div className={`provider-auth-progress ${snapshot.providerAuth.status}`} role="status">
+            {!provider.verified && snapshot.providerAuth?.providerId === "codex" && <div className={`provider-auth-progress ${snapshot.providerAuth.status}`} role="status">
               <strong>{snapshot.providerAuth.status === "failed" ? "Authorization failed" : snapshot.providerAuth.status === "waiting" ? "Waiting for you" : "Connecting…"}</strong>
               <p>{snapshot.providerAuth.error ?? snapshot.providerAuth.instructions}</p>
               {snapshot.providerAuth.code && <code>{snapshot.providerAuth.code}</code>}
