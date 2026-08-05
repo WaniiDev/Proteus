@@ -8,6 +8,20 @@ Refactor Settings into a tabbed provider/model experience where OpenRouter and C
 
 ## Current status
 
+Implementation completed on `main` on 2026-08-05. Phases 1-5 were committed independently; Phase 6 contains final documentation, graph refresh, verification, and delivery.
+
+Important research correction: the official Codex ACP adapter advertises model-and-reasoning combinations directly (for example `gpt-5.6-sol[high]`). The implementation therefore uses public `AcpAgent.setModel()` with those IDs instead of the provisional `CODEX_CONFIG.model_reasoning_effort` workaround described later in this original handoff.
+
+Implementation commits:
+
+- `2f86df2` — packaged Codex ACP support.
+- `484a9e9` — provider-neutral contracts and per-thread selection.
+- `ab67ea6` — native Codex ACP provider runtime.
+- `c88cfa5` — provider-native reasoning controls.
+- `f86c6d1` — Settings provider/model UI revamp.
+
+Original pre-implementation handoff follows for audit history.
+
 Research and implementation planning are complete; implementation has not started. The working tree was clean and synchronized with `origin/main` at `59b3cf3` before this handoff document was added.
 
 Baseline verification:

@@ -40,6 +40,28 @@ Mastra 1.55 does not emit `tool_end` for a resumed `submit_plan` call. After the
 
 `runtime.ts` projects Mastra state into the desktop IPC snapshot. This layer may sanitize tool payloads and shape display data, but it must not duplicate Mastra lifecycle ownership. The OpenRouter catalog endpoint remains provider-specific because the product displays modality and descriptive metadata outside Mastra's `AvailableModel` contract; selection still uses `Session.model.switch()`.
 
+## Primary providers
+
+OpenRouter and Codex are alternative primary providers. A conversation persists its provider, provider model ID, and optional reasoning effort in the existing thread metadata. There is no provider delegation and no silent fallback to OpenRouter.
+
+OpenRouter continues through `AgentController` and `Session.sendSignal()`. Its catalog is merged into the provider-neutral snapshot, and supported reasoning effort is read from OpenRouter's per-model `reasoning.supported_efforts` metadata. The chosen effort is attached to the user signal as `providerOptions.openrouter.reasoning.effort`, using Mastra's documented provider-options boundary.
+
+Codex runs through Mastra `AcpAgent` from `@mastra/acp`. `CodexProviderRuntime` owns one persistent ACP agent per PROTEUS thread and uses only public APIs: `getAvailableModels()`, `setModel()`, `connection.promptStream()`, `connection.cancel()`, and `connection.disconnect()`. The official adapter's advertised composite model IDs, such as `gpt-5.6-sol[high]`, are authoritative for both model and reasoning selection; PROTEUS does not reach into private ACP session configuration.
+
+Mastra Memory remains canonical history for both paths. A newly created ACP session receives the existing provider-neutral transcript once, then its live session owns subsequent conversational context. Completed Codex user/assistant turns and normalized tool parts are persisted back through `Memory.saveMessages()`.
+
+ACP `text` events become streamed assistant text. Native session updates become tool rows, workbench plan tasks, and usage. Tool-call IDs and statuses remain authoritative so repeated updates replace the same visible tool row instead of duplicating it.
+
+## ACP permission and safety boundary
+
+Every `AcpAgent` supplies `onPermissionRequest`; PROTEUS never uses Mastra ACP's default first-option selection. A native ACP permission request becomes the existing `toolApproval` snapshot card. Approve chooses an `allow_once` option when available; decline chooses `reject_once`; otherwise the request is cancelled. Each pending resolver is removed before it is completed so a UI retry cannot resolve the same native request twice.
+
+The packaged adapter starts in `read-only` mode. This preserves the existing product authority boundary until Projects supplies an explicit shared coding workspace. ACP stderr, authentication material, and private reasoning are not copied into runtime snapshots or Mastra messages.
+
+## ACP packaging
+
+Production builds copy `@agentclientprotocol/codex-acp`'s bundled adapter entry and the matching official Windows Codex vendor directory into Electrobun's Bun resources. `resolveCodexAcpLaunch()` resolves packaged paths first and development `node_modules` paths second, then passes the exact executable through `CODEX_PATH`. The shipped application therefore does not depend on a global Codex, Bun, or npm installation.
+
 ## Storage cutover
 
 The v2 runtime uses `proteus-v2.db` and `proteus-plans-v2`. On first launch, an allowlisted, idempotent cutover removes only `proteus.db`, its WAL/SHM companions, and `proteus-session.json`, then writes `proteus-mastra-v2.cutover`. Windows Credential Manager data is not touched.

@@ -25,4 +25,10 @@ describe("Codex ACP projection", () => {
     expect(state.tasks[0]?.status).toBe("completed");
     expect(state.usage.totalTokens).toBe(120);
   });
+
+  it("documents one-time transcript seeding at the ACP session boundary", async () => {
+    const source = await Bun.file(new URL("./codex-provider.ts", import.meta.url)).text();
+    expect(source).toContain("isNewSession && transcript.trim()");
+    expect(source).toContain("<proteus_transcript>");
+  });
 });

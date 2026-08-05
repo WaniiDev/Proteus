@@ -1900,6 +1900,10 @@ export class TextRuntime {
     if (!selectedModel) throw makeRuntimeError("model-unavailable");
     const runId = randomUUID();
     const createdAt = new Date().toISOString();
+    const transcript = this.snapshot.messages
+      .filter((message) => message.status === "complete" && message.text.trim())
+      .map((message) => `${message.role === "user" ? "User" : "PROTEUS"}: ${message.text}`)
+      .join("\n\n");
     this.runId = runId;
     this.runClientMessageId = messageId;
     this.runStartedAt = createdAt;
@@ -1927,7 +1931,7 @@ export class TextRuntime {
       messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
     });
     this.updateThreadActivity(threadId, "running");
-    void this.runCodexTurn({ runId, threadId, messageId, candidate, modelId: selectedModel.rawId, createdAt, signal: this.codexAbortController.signal });
+    void this.runCodexTurn({ runId, threadId, messageId, candidate, modelId: selectedModel.rawId, createdAt, signal: this.codexAbortController.signal, transcript });
     return { runId };
   }
 
@@ -1968,7 +1972,7 @@ export class TextRuntime {
     });
   }
 
-  private async runCodexTurn(options: { runId: string; threadId: string; messageId: string; candidate: string; modelId: string; createdAt: string; signal: AbortSignal }): Promise<void> {
+  private async runCodexTurn(options: { runId: string; threadId: string; messageId: string; candidate: string; modelId: string; createdAt: string; signal: AbortSignal; transcript: string }): Promise<void> {
     let projection = emptyCodexProjection();
     try {
       await this.codex.run(options.threadId, options.modelId, options.candidate, options.signal, (update) => {
@@ -1981,7 +1985,7 @@ export class TextRuntime {
           messages: upsertChatMessage(this.mergeTransientMessages(options.threadId, this.snapshot.messages), assistant),
           workbench: this.workbenchFromState(this.controllerThreadState, null),
         });
-      });
+      }, options.transcript);
       if (this.runId !== options.runId) return;
       await this.persistCodexTurn(options.threadId, options.messageId, options.candidate, options.createdAt, options.runId, projection);
       await this.persistThreadState(options.threadId, this.controllerThreadState);
