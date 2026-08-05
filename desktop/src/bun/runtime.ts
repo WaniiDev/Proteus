@@ -4,6 +4,7 @@ import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import { Agent } from "@mastra/core/agent";
 import { AgentController, type AgentControllerDisplayState, type AgentControllerEvent, type AgentControllerThread, type MastraDBMessage } from "@mastra/core/agent-controller";
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
+import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import { Mastra } from "@mastra/core/mastra";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { LibSQLStore } from "@mastra/libsql";
@@ -21,6 +22,7 @@ import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
 import { CodexProviderRuntime, emptyCodexProjection, projectCodexUpdate, type CodexProjection } from "./codex-provider";
 import { selectedModelMissingFromCatalog } from "./provider-readiness";
+import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection } from "./codex-models";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -422,6 +424,8 @@ export class TextRuntime {
   private readonly agent: Agent;
   private readonly controller: AgentController;
   private readonly codex: CodexProviderRuntime;
+  private readonly codexGateway: MastraCodeGateway;
+  private readonly codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>;
   private codexAbortController: AbortController | null = null;
   private readonly codexCredentialStore: CodexCredentialStore;
   private codexAuthAbortController: AbortController | null = null;
@@ -502,6 +506,13 @@ export class TextRuntime {
   constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore()) {
     this.vault = vault;
     this.codexCredentialStore = codexCredentialStore;
+    this.codexGateway = new MastraCodeGateway({
+      mastraGatewayBaseUrl: "https://gateway-api.mastra.ai",
+      routeThroughMastraGateway: false,
+      thinkingLevel: "medium",
+      credentialStore: this.codexCredentialStore,
+    });
+    this.codexCatalogProvider = createProteusCodexCatalogProvider(this.codexGateway);
     this.storage = new LibSQLStore({
       id: "proteus-storage-v2",
       url: `file:${join(Utils.paths.userData, "proteus-v2.db")}`,
@@ -576,7 +587,7 @@ export class TextRuntime {
       memory: this.memory,
       workspace: this.workspace,
       agent: this.agent,
-      gateways: [openRouterGateway],
+      gateways: [openRouterGateway, this.codexGateway],
       defaultModeId: PLANNING_MODE_ID,
       modes: planWorkflowModes(DEFAULT_MODEL_ID),
       disableBuiltinTools: ["subagent"],
@@ -586,7 +597,7 @@ export class TextRuntime {
       storage: this.storage,
       agents: { proteus: this.agent },
       agentControllers: { proteus: this.controller },
-      gateways: { "models.dev": openRouterGateway },
+      gateways: { "models.dev": openRouterGateway, mastracode: this.codexGateway },
       logger: false,
     });
   }
@@ -654,7 +665,8 @@ export class TextRuntime {
     }
     this.publish({ providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, availability: "checking" } : provider) });
     try {
-      const models = await this.codex.listModels();
+      const models = await listProteusCodexModels(this.codexCatalogProvider);
+      if (models.length === 0) throw new Error("The upstream MastraCode catalog did not return any GPT-5 Codex models.");
       this.publish({
         models: this.mergeProviderModels("codex", models),
         providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: true, availability: "ready", detail: "Connected with ChatGPT OAuth." } : provider),
@@ -1428,10 +1440,18 @@ export class TextRuntime {
     this.selectedThreadId = activeThreadId;
     this.threadState = nextThreadState;
     this.controllerThreadState = nextThreadState;
-    const modelSelection = nextThreadState.modelSelection ?? {
+    let modelSelection = nextThreadState.modelSelection ?? {
       providerId: DEFAULT_PROVIDER_ID,
       modelId: modelFromSession(session.model.get()),
     };
+    if (modelSelection.providerId === "codex") {
+      const migrated = migrateCodexSelection(modelSelection.modelId, modelSelection.reasoningEffort);
+      if (migrated.modelId !== modelSelection.modelId || migrated.reasoningEffort !== modelSelection.reasoningEffort) {
+        modelSelection = { providerId: "codex", ...migrated };
+        nextThreadState.modelSelection = modelSelection;
+        await this.persistThreadState(activeThreadId!, nextThreadState);
+      }
+    }
     const nextSnapshot: Partial<RuntimeSnapshot> = {
       threads,
       activeThreadId,
@@ -1802,6 +1822,9 @@ export class TextRuntime {
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     const model = this.snapshot.models.find((candidate) => candidate.id === modelId);
     if (!model) throw makeRuntimeError("model-unavailable");
+    const selectedReasoningEffort = model.providerId === "codex"
+      ? (model.reasoningOptions?.includes(this.snapshot.selectedReasoningEffort as ReasoningEffort) ? this.snapshot.selectedReasoningEffort! : DEFAULT_CODEX_REASONING)
+      : model.reasoningEffort ?? null;
     if (isOpenRouterModelId(modelId)) {
       await restorePlanningMode(session);
       await syncPlanWorkflowModel(session, modelId);
@@ -1812,7 +1835,7 @@ export class TextRuntime {
         modelSelection: {
           providerId: model.providerId,
           modelId,
-          ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
+          ...(selectedReasoningEffort ? { reasoningEffort: selectedReasoningEffort } : {}),
         },
       };
       this.controllerThreadState = this.threadState;
@@ -1821,7 +1844,7 @@ export class TextRuntime {
     this.publish({
       selectedProviderId: model.providerId,
       selectedModelId: modelId,
-      selectedReasoningEffort: model.reasoningEffort ?? null,
+      selectedReasoningEffort,
       status: this.idleStatus(model.providerId),
       error: null,
     });
@@ -1833,25 +1856,20 @@ export class TextRuntime {
     const selected = this.snapshot.models.find((model) => model.id === this.snapshot.selectedModelId);
     if (!selected) throw makeRuntimeError("model-unavailable");
     if (reasoningEffort && !selected.reasoningOptions?.includes(reasoningEffort)) throw makeRuntimeError("model-unavailable");
-    if (selected.providerId === "codex" && reasoningEffort) {
-      const replacement = this.snapshot.models.find((model) => model.providerId === "codex" && model.baseModelId === selected.baseModelId && model.reasoningEffort === reasoningEffort);
-      if (!replacement) throw makeRuntimeError("model-unavailable");
-      await this.selectModel(replacement.id);
-      return;
-    }
+    const nextReasoningEffort = selected.providerId === "codex" ? reasoningEffort ?? DEFAULT_CODEX_REASONING : reasoningEffort;
     if (this.selectedThreadId) {
       this.threadState = {
         ...this.threadState,
         modelSelection: {
           providerId: selected.providerId,
           modelId: selected.id,
-          ...(reasoningEffort ? { reasoningEffort } : {}),
+          ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
         },
       };
       this.controllerThreadState = this.threadState;
       await this.persistThreadState(this.selectedThreadId);
     }
-    this.publish({ selectedReasoningEffort: reasoningEffort, error: null });
+    this.publish({ selectedReasoningEffort: nextReasoningEffort, error: null });
   }
 
   async createThread(title?: string): Promise<string> {
@@ -2059,7 +2077,8 @@ export class TextRuntime {
       messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
     });
     this.updateThreadActivity(threadId, "running");
-    void this.runCodexTurn({ runId, threadId, messageId, candidate, modelId: selectedModel.rawId, createdAt, signal: this.codexAbortController.signal, transcript });
+    const acpModelId = this.snapshot.selectedReasoningEffort ? `${selectedModel.rawId}[${this.snapshot.selectedReasoningEffort}]` : selectedModel.rawId;
+    void this.runCodexTurn({ runId, threadId, messageId, candidate, modelId: acpModelId, createdAt, signal: this.codexAbortController.signal, transcript });
     return { runId };
   }
 

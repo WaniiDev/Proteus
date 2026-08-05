@@ -9,6 +9,10 @@ export default {
   build: {
     bun: {
       entrypoint: "src/bun/index.ts",
+      // MastraCode's settings module contains an optional Stagehand dynamic import.
+      // PROTEUS does not enable that browser subsystem, so keep it out of the
+      // desktop runtime bundle instead of pulling Playwright into production.
+      external: ["@mastra/stagehand", "playwright-core", "playwright-core/*"],
     },
     copy: {
       "dist/index.html": "views/mainview/index.html",

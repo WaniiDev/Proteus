@@ -67,19 +67,18 @@ describe("OpenRouter contracts", () => {
 });
 
 describe("provider-neutral model contracts", () => {
-  it("accepts Codex ACP model and reasoning metadata", () => {
+  it("accepts stable Codex product IDs and separate reasoning metadata", () => {
     const model = providerModelSchema.parse({
-      id: "codex/gpt-5.6-sol[high]",
+      id: "codex/gpt-5.6-sol",
       providerId: "codex",
-      rawId: "gpt-5.6-sol[high]",
+      rawId: "gpt-5.6-sol",
       baseModelId: "gpt-5.6-sol",
       name: "GPT-5.6 Sol",
-      reasoningEffort: "high",
-      reasoningOptions: ["low", "medium", "high"],
+      reasoningOptions: ["low", "medium", "high", "xhigh"],
     });
 
     expect(model.providerId).toBe("codex");
-    expect(model.reasoningEffort).toBe("high");
+    expect(model.reasoningEffort).toBeUndefined();
   });
 
   it("exposes only safe OAuth progress fields and provider-aware RPCs", () => {
