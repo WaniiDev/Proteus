@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { CustomModelCatalogProvider } from "@mastra/core/agent-controller";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { CredentialStore } from "@mastra/code-sdk/auth/types";
-import { createProteusCodexCatalogProvider, listProteusCodexModels, migrateCodexSelection } from "./codex-models";
+import { createProteusCodexCatalogProvider, listProteusCodexModels, migrateCodexSelection, resolveCodexGatewayModel } from "./codex-models";
 
 describe("MastraCode Codex model projection", () => {
   it("projects only upstream catalog entries into stable product IDs", async () => {
@@ -42,5 +42,21 @@ describe("MastraCode Codex model projection", () => {
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((model) => model.provider === "openai" && model.modelName.startsWith("gpt-5") && model.hasApiKey)).toBe(true);
     expect(models.some((model) => model.modelName === "gpt-5.6-sol")).toBe(true);
+  });
+
+  it("resolves a stable product ID through the upstream OAuth gateway", () => {
+    const credentials: CredentialStore = {
+      allowEnvironmentFallback: false,
+      reload() {},
+      get: (provider) => provider === "openai-codex" ? { type: "oauth", access: "test", refresh: "test", expires: Date.now() + 60_000 } : undefined,
+      getStoredApiKey: () => undefined,
+      getApiKey: async () => "test",
+    };
+
+    const model = resolveCodexGatewayModel("codex/gpt-5.6-sol", "xhigh", credentials);
+
+    expect(model).toBeDefined();
+    expect(typeof model.doStream).toBe("function");
+    expect(() => resolveCodexGatewayModel("codex/gpt-5.6-sol", "medium", { ...credentials, get: () => undefined })).toThrow("No verified ChatGPT OAuth credential");
   });
 });

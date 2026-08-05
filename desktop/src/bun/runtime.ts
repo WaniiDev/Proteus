@@ -5,6 +5,7 @@ import { Agent } from "@mastra/core/agent";
 import { AgentController, type AgentControllerDisplayState, type AgentControllerEvent, type AgentControllerThread, type MastraDBMessage } from "@mastra/core/agent-controller";
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
+import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { LibSQLStore } from "@mastra/libsql";
@@ -20,9 +21,8 @@ import { TaskToolPolicy } from "./task-tool-policy";
 import { PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
-import { CodexProviderRuntime, emptyCodexProjection, projectCodexUpdate, type CodexProjection } from "./codex-provider";
 import { selectedModelMissingFromCatalog } from "./provider-readiness";
-import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection } from "./codex-models";
+import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection, resolveCodexGatewayModel } from "./codex-models";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -333,8 +333,19 @@ function chatRole(message: MastraMessage): ChatMessage["role"] | null {
   return null;
 }
 
-function modelFromSession(value: string | undefined): OpenRouterModelId {
-  return value && isOpenRouterModelId(value) ? value : DEFAULT_MODEL_ID;
+function productModelFromSession(value: string | undefined): ProviderModelId {
+  if (value && isOpenRouterModelId(value)) return value;
+  if (value?.startsWith("openai/") && value.length > "openai/".length) return `codex/${value.slice("openai/".length)}`;
+  if (value?.startsWith("codex/") && value.length > "codex/".length) return value as ProviderModelId;
+  return DEFAULT_MODEL_ID;
+}
+
+function sessionModelId(value: ProviderModelId): string {
+  return value.startsWith("codex/") ? `openai/${value.slice("codex/".length)}` : value;
+}
+
+function codexThinkingLevel(value: ReasoningEffort | null): ThinkingLevel {
+  return value === "low" || value === "high" || value === "xhigh" ? value : "medium";
 }
 
 function makeRuntimeError(code: ProviderErrorCode): RuntimeError {
@@ -423,10 +434,8 @@ export class TextRuntime {
   private readonly workspace: Workspace;
   private readonly agent: Agent;
   private readonly controller: AgentController;
-  private readonly codex: CodexProviderRuntime;
   private readonly codexGateway: MastraCodeGateway;
   private readonly codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>;
-  private codexAbortController: AbortController | null = null;
   private readonly codexCredentialStore: CodexCredentialStore;
   private codexAuthAbortController: AbortController | null = null;
   private codexManualInput: { resolve: (value: string) => void; reject: (error: Error) => void } | null = null;
@@ -541,12 +550,6 @@ export class TextRuntime {
         generateTitle: false,
       },
     });
-    this.codex = new CodexProviderRuntime(process.cwd(), (permission) => {
-      this.publish({ toolApproval: permission });
-      const threadId = this.controllerThreadId ?? this.selectedThreadId;
-      if (threadId) this.updateThreadActivity(threadId, permission ? "waiting" : "running", permission ? 1 : 0);
-    });
-
     this.agent = new Agent({
       id: AGENT_ID,
       name: "PROTEUS",
@@ -573,7 +576,10 @@ export class TextRuntime {
       },
       model: async ({ requestContext }) => {
         const controllerContext = requestContext.get("controller") as ControllerContext | undefined;
-        const modelId = modelFromSession(controllerContext?.session?.modelId ?? this.snapshot.selectedModelId);
+        const modelId = productModelFromSession(controllerContext?.session?.modelId ?? this.snapshot.selectedModelId);
+        if (modelId.startsWith("codex/")) {
+          return resolveCodexGatewayModel(modelId, codexThinkingLevel(this.snapshot.selectedReasoningEffort), this.codexCredentialStore);
+        }
         const apiKey = await this.vault.get();
         if (!apiKey) throw new Error("No verified OpenRouter credential");
         return { id: modelId, apiKey };
@@ -1442,7 +1448,7 @@ export class TextRuntime {
     this.controllerThreadState = nextThreadState;
     let modelSelection = nextThreadState.modelSelection ?? {
       providerId: DEFAULT_PROVIDER_ID,
-      modelId: modelFromSession(session.model.get()),
+      modelId: productModelFromSession(session.model.get()),
     };
     if (modelSelection.providerId === "codex") {
       const migrated = migrateCodexSelection(modelSelection.modelId, modelSelection.reasoningEffort);
@@ -1452,6 +1458,8 @@ export class TextRuntime {
         await this.persistThreadState(activeThreadId!, nextThreadState);
       }
     }
+    const internalModelId = sessionModelId(modelSelection.modelId);
+    if (session.model.get() !== internalModelId) await syncPlanWorkflowModel(session, internalModelId);
     const nextSnapshot: Partial<RuntimeSnapshot> = {
       threads,
       activeThreadId,
@@ -1825,10 +1833,8 @@ export class TextRuntime {
     const selectedReasoningEffort = model.providerId === "codex"
       ? (model.reasoningOptions?.includes(this.snapshot.selectedReasoningEffort as ReasoningEffort) ? this.snapshot.selectedReasoningEffort! : DEFAULT_CODEX_REASONING)
       : model.reasoningEffort ?? null;
-    if (isOpenRouterModelId(modelId)) {
-      await restorePlanningMode(session);
-      await syncPlanWorkflowModel(session, modelId);
-    }
+    await restorePlanningMode(session);
+    await syncPlanWorkflowModel(session, sessionModelId(modelId));
     if (this.selectedThreadId) {
       this.threadState = {
         ...this.threadState,
@@ -2032,122 +2038,10 @@ export class TextRuntime {
       }
     }
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
-    if (this.snapshot.selectedProviderId === "codex") return this.startCodexRun(candidate, messageId);
     return this.startRun(candidate, {
       optimistic: true,
       clientMessageId: messageId,
     });
-  }
-
-  private startCodexRun(candidate: string, messageId: string): { runId: string } {
-    const threadId = this.controllerThreadId ?? this.requireSession().thread.getId();
-    if (!threadId) throw new Error("No active conversation");
-    const selectedModel = this.snapshot.models.find((model) => model.id === this.snapshot.selectedModelId && model.providerId === "codex");
-    if (!selectedModel) throw makeRuntimeError("model-unavailable");
-    const runId = randomUUID();
-    const createdAt = new Date().toISOString();
-    const transcript = this.snapshot.messages
-      .filter((message) => message.status === "complete" && message.text.trim())
-      .map((message) => `${message.role === "user" ? "User" : "PROTEUS"}: ${message.text}`)
-      .join("\n\n");
-    this.runId = runId;
-    this.runClientMessageId = messageId;
-    this.runStartedAt = createdAt;
-    this.runOutcome = "streaming";
-    this.runError = null;
-    this.lastAssistantId = `codex-assistant:${runId}`;
-    this.optimisticUserMessages.set(messageId, {
-      threadId,
-      message: {
-        id: messageId,
-        role: "user",
-        text: candidate,
-        turnId: messageId,
-        parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }],
-        status: "complete",
-        createdAt,
-      },
-    });
-    this.codexAbortController = new AbortController();
-    this.publish({
-      status: "running",
-      activeRun: { runId, threadId, status: "running" },
-      error: null,
-      retryMessageId: null,
-      messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
-    });
-    this.updateThreadActivity(threadId, "running");
-    const acpModelId = this.snapshot.selectedReasoningEffort ? `${selectedModel.rawId}[${this.snapshot.selectedReasoningEffort}]` : selectedModel.rawId;
-    void this.runCodexTurn({ runId, threadId, messageId, candidate, modelId: acpModelId, createdAt, signal: this.codexAbortController.signal, transcript });
-    return { runId };
-  }
-
-  private codexLiveMessage(runId: string, messageId: string, createdAt: string, projection: CodexProjection): ChatMessage {
-    const assistantId = `codex-assistant:${runId}`;
-    const parts: ChatMessagePart[] = [
-      ...(projection.text ? [{ type: "text" as const, id: `${assistantId}:text:0`, text: projection.text }] : []),
-      ...projection.tools.values(),
-    ];
-    return {
-      id: assistantId,
-      role: "assistant",
-      text: projection.text,
-      turnId: messageId,
-      parts,
-      status: "streaming",
-      createdAt,
-    };
-  }
-
-  private async persistCodexTurn(threadId: string, messageId: string, candidate: string, createdAt: string, runId: string, projection: CodexProjection): Promise<void> {
-    const assistantId = `codex-assistant:${runId}`;
-    const toolParts = [...projection.tools.values()].map((tool) => ({
-      type: "tool-invocation" as const,
-      toolInvocation: {
-        toolCallId: tool.toolCallId,
-        toolName: tool.name,
-        args: tool.input ?? {},
-        state: tool.status === "error" ? "output-error" as const : "result" as const,
-        result: tool.output,
-      },
-    }));
-    await this.memory.saveMessages({
-      messages: [
-        { id: messageId, role: "user", createdAt: new Date(createdAt), threadId, resourceId: RESOURCE_ID, content: { format: 2, parts: [{ type: "text", text: candidate }] } },
-        { id: assistantId, role: "assistant", createdAt: new Date(), threadId, resourceId: RESOURCE_ID, content: { format: 2, parts: [...(projection.text ? [{ type: "text" as const, text: projection.text }] : []), ...toolParts] } },
-      ],
-    });
-  }
-
-  private async runCodexTurn(options: { runId: string; threadId: string; messageId: string; candidate: string; modelId: string; createdAt: string; signal: AbortSignal; transcript: string }): Promise<void> {
-    let projection = emptyCodexProjection();
-    try {
-      await this.codex.run(options.threadId, options.modelId, options.candidate, options.signal, (update) => {
-        if (this.runId !== options.runId) return;
-        projection = projectCodexUpdate(projection, update);
-        this.controllerThreadState = { ...this.controllerThreadState, tasks: projection.tasks, tokenUsage: projection.usage };
-        this.threadState = this.controllerThreadState;
-        const assistant = this.codexLiveMessage(options.runId, options.messageId, options.createdAt, projection);
-        this.publish({
-          messages: upsertChatMessage(this.mergeTransientMessages(options.threadId, this.snapshot.messages), assistant),
-          workbench: this.workbenchFromState(this.controllerThreadState, null),
-        });
-      }, options.transcript);
-      if (this.runId !== options.runId) return;
-      await this.persistCodexTurn(options.threadId, options.messageId, options.candidate, options.createdAt, options.runId, projection);
-      await this.persistThreadState(options.threadId, this.controllerThreadState);
-      this.optimisticUserMessages.delete(options.messageId);
-      this.runId = null;
-      this.runClientMessageId = null;
-      this.codexAbortController = null;
-      this.runOutcome = "complete";
-      this.publish({ status: "ready", activeRun: null, error: null, toolApproval: null });
-      this.updateThreadActivity(options.threadId, "complete", 0);
-      await this.syncMessages(options.threadId);
-      await this.refreshThreadSummaries();
-    } catch (error) {
-      if (this.runId === options.runId) await this.finishFailedRun(options.runId, normalizeError(error));
-    }
   }
 
   private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {
@@ -2198,7 +2092,7 @@ export class TextRuntime {
           createdAt: this.runStartedAt,
           type: "user",
           contents: candidate,
-          ...(this.snapshot.selectedReasoningEffort ? { providerOptions: { openrouter: { reasoning: { effort: this.snapshot.selectedReasoningEffort } } } } : {}),
+          ...(this.snapshot.selectedProviderId === "openrouter" && this.snapshot.selectedReasoningEffort ? { providerOptions: { openrouter: { reasoning: { effort: this.snapshot.selectedReasoningEffort } } } } : {}),
         },
         { requireDelivery: true },
       );
@@ -2417,7 +2311,6 @@ export class TextRuntime {
     const pending = this.snapshot.toolApproval;
     if (!pending || pending.toolCallId !== toolCallId) throw new Error("That tool approval is no longer available");
     try {
-      if (this.codex.respondToPermission(toolCallId, approved)) return;
       session.respondToToolApproval({
         decision: approved ? "approve" : "decline",
         toolCallId,
@@ -2634,12 +2527,7 @@ export class TextRuntime {
           workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
         });
     }
-    if (this.snapshot.selectedProviderId === "codex" && this.controllerThreadId) {
-      this.codexAbortController?.abort();
-      void this.codex.cancel(this.controllerThreadId).catch(() => undefined);
-    } else {
-      this.requireSession().abort();
-    }
+    this.requireSession().abort();
     this.publish({
       activeRun: {
         runId: this.runId,

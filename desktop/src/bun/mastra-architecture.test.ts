@@ -19,6 +19,10 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).not.toContain("pendingApprovalToolName");
     expect(runtime).not.toContain("danglingApprovalThreadId");
     expect(runtime).not.toContain("A previous tool approval was interrupted");
+    expect(runtime).not.toContain('if (this.snapshot.selectedProviderId === "codex") return this.startCodexRun');
+    expect(runtime).not.toContain("CodexProviderRuntime");
+    expect(runtime).toContain("return resolveCodexGatewayModel(modelId");
+    expect(runtime).toContain("gateways: [openRouterGateway, this.codexGateway]");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
     expect(app.toLowerCase()).not.toContain("previous decisions");
     expect(app).not.toContain("TypingDots");

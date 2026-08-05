@@ -1,5 +1,7 @@
 import type { CustomModelCatalogProvider, CustomAvailableModel } from "@mastra/core/agent-controller";
 import { MastraCodeGateway, remapOpenAIModelForCodexOAuth } from "@mastra/code-sdk/agents/mastracode-gateway";
+import type { CredentialStore } from "@mastra/code-sdk/auth/types";
+import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import type { ProviderModel, ProviderModelId, ReasoningEffort } from "../shared/contracts";
 
 export const CODEX_REASONING_OPTIONS = ["low", "medium", "high", "xhigh"] as const satisfies readonly ReasoningEffort[];
@@ -56,4 +58,27 @@ export function migrateCodexSelection(modelId: ProviderModelId, reasoningEffort?
       ? legacyEffort!
       : DEFAULT_CODEX_REASONING;
   return { modelId: `codex/${remapped}`, reasoningEffort: effort };
+}
+
+export function resolveCodexGatewayModel(modelId: ProviderModelId, thinkingLevel: ThinkingLevel, credentialStore: CredentialStore) {
+  if (!modelId.startsWith("codex/") || !credentialStore.get("openai-codex")) throw new Error("No verified ChatGPT OAuth credential");
+  const rawModelId = modelId.slice("codex/".length);
+  const gateway = new MastraCodeGateway({
+    mastraGatewayBaseUrl: "https://gateway-api.mastra.ai",
+    routeThroughMastraGateway: false,
+    thinkingLevel,
+    credentialStore,
+  });
+  const auth = gateway.resolveAuth({
+    gatewayId: gateway.id,
+    providerId: "openai",
+    modelId: rawModelId,
+    routerId: `${gateway.id}/openai/${rawModelId}`,
+  });
+  if (!auth) throw new Error("ChatGPT OAuth is not available for the selected Codex model");
+  return gateway.resolveLanguageModel({
+    providerId: "openai",
+    modelId: rawModelId,
+    apiKey: auth.apiKey ?? "",
+  });
 }
