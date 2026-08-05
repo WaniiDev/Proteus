@@ -21,4 +21,14 @@ describe("native Mastra stream projection", () => {
     expect(projector.apply("thread-1", { type: "abort", runId: "run-1", payload: {} })?.message.status).toBe("interrupted");
     expect(projector.apply("thread-2", { type: "error", runId: "run-2", payload: { error: new Error("boom") } })?.message.status).toBe("error");
   });
+
+  test("keeps native approval calls visibly waiting until Mastra resumes them", () => {
+    const projector = new NativeStreamProjector();
+    const approval = projector.apply("thread-1", {
+      type: "tool-call-approval",
+      runId: "run-1",
+      payload: { toolCallId: "call-1", toolName: "write_file", args: { path: "notes.md" } },
+    });
+    expect(approval?.message.parts[0]).toMatchObject({ type: "tool", status: "waiting", toolCallId: "call-1", name: "write_file" });
+  });
 });

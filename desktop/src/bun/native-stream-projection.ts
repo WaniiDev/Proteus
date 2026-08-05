@@ -63,7 +63,7 @@ export class NativeStreamProjector {
 
     const toolCallId = typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
     const toolName = typeof payload.toolName === "string" ? payload.toolName : undefined;
-    if (toolCallId && toolName && ["tool-call-input-streaming-start", "tool-call", "tool-result", "tool-error", "tool-call-suspended"].includes(chunk.type)) {
+    if (toolCallId && toolName && ["tool-call-input-streaming-start", "tool-call", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended"].includes(chunk.type)) {
       const index = parts.findIndex((part) => part.type === "tool" && part.toolCallId === toolCallId);
       const prior = index >= 0 && parts[index]?.type === "tool" ? parts[index] as ChatToolPart : undefined;
       const next: ChatToolPart = {
@@ -72,7 +72,7 @@ export class NativeStreamProjector {
         toolCallId,
         name: toolName,
         label: prior?.label ?? labelForTool(toolName),
-        status: chunk.type === "tool-call-input-streaming-start" ? "streaming_input" : chunk.type === "tool-call" ? "running" : chunk.type === "tool-call-suspended" ? "waiting" : chunk.type === "tool-error" || payload.isError === true ? "error" : "completed",
+        status: chunk.type === "tool-call-input-streaming-start" ? "streaming_input" : chunk.type === "tool-call" ? "running" : chunk.type === "tool-call-approval" || chunk.type === "tool-call-suspended" ? "waiting" : chunk.type === "tool-error" || payload.isError === true ? "error" : "completed",
         ...(payload.args === undefined ? (prior?.input === undefined ? {} : { input: prior.input }) : { input: payload.args }),
         ...(chunk.type === "tool-result" ? { output: payload.result } : prior?.output === undefined ? {} : { output: prior.output }),
         ...(chunk.type === "tool-error" ? { error: errorText(payload.error) } : {}),

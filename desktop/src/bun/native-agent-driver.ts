@@ -22,6 +22,10 @@ export type NativeQueueAgent = {
     options: { resourceId: string; threadId: string },
   ): { accepted: Promise<NativeQueueAccepted> };
   sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
+  listSuspendedRuns?(options: { resourceId: string; threadId: string }): Promise<{
+    runs: Array<{ runId: string; toolCalls: Array<{ toolCallId?: string; requiresApproval: boolean; suspendPayload?: unknown }> }>;
+  }>;
+  sendToolApproval?(options: { resourceId: string; threadId: string; toolCallId?: string; approved: boolean }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
 };
 
 export type NativeAgentDriverCallbacks = {
@@ -71,6 +75,23 @@ export class NativeAgentDriver {
     await this.ensureSubscription(threadId);
     const result = await this.agent.sendStreamResume({ resourceId: this.resourceId, threadId, runId, toolCallId, resumeData });
     if (!result.accepted) throw new Error("Mastra did not accept the stream resume request.");
+    return { runId: result.runId };
+  }
+
+  async findSuspension(threadId: string, toolCallId: string): Promise<{ runId: string; requiresApproval: boolean } | null> {
+    if (!this.agent.listSuspendedRuns) return null;
+    const { runs } = await this.agent.listSuspendedRuns({ resourceId: this.resourceId, threadId });
+    for (const run of runs) {
+      const toolCall = run.toolCalls.find((item) => item.toolCallId === toolCallId);
+      if (toolCall) return { runId: run.runId, requiresApproval: toolCall.requiresApproval };
+    }
+    return null;
+  }
+
+  async approve(threadId: string, toolCallId: string, approved: boolean): Promise<{ runId: string }> {
+    await this.ensureSubscription(threadId);
+    if (!this.agent.sendToolApproval) throw new Error("This agent does not support native tool approval.");
+    const result = await this.agent.sendToolApproval({ resourceId: this.resourceId, threadId, toolCallId, approved });
     return { runId: result.runId };
   }
 

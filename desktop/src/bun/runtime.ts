@@ -29,6 +29,8 @@ import { reconcileProviderAuth } from "./provider-auth";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
 import { createProteusStorage } from "./mastra-foundation";
 import { NativeThreadRepository } from "./native-thread-repository";
+import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
+import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -438,6 +440,8 @@ export class TextRuntime {
   private readonly storage: MastraCompositeStore;
   private readonly memory: Memory;
   private readonly threads: NativeThreadRepository;
+  private readonly nativeDriver: NativeAgentDriver;
+  private readonly nativeSuspensions = new Map<string, { runId: string; threadId: string }>();
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
   private readonly agent: Agent;
@@ -595,6 +599,13 @@ export class TextRuntime {
         if (!apiKey) throw new Error("No verified OpenRouter credential");
         return { id: modelId, apiKey };
       },
+    });
+    this.nativeDriver = new NativeAgentDriver(this.agent as unknown as NativeQueueAgent, RESOURCE_ID, {
+      onProjection: (projection, chunk) => this.handleNativeProjection(projection, chunk),
+      onQueueChanged: (threadId) => {
+        if (threadId === this.selectedThreadId) this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
+      },
+      onError: (error) => this.reportError(error),
     });
 
     this.controller = new AgentController({
@@ -886,7 +897,7 @@ export class TextRuntime {
       goal: state.goal,
       tasks,
       pendingInteractions,
-      queuedFollowUpCount: displayState?.queuedFollowUps ?? 0,
+      queuedFollowUpCount: this.selectedThreadId ? this.nativeDriver.queuedCount(this.selectedThreadId) : displayState?.queuedFollowUps ?? 0,
       tokenUsage: {
         promptTokens: usage.promptTokens ?? 0,
         completionTokens: usage.completionTokens ?? 0,
@@ -1056,8 +1067,11 @@ export class TextRuntime {
   }
 
   private subscribeToController(): void {
-    const session = this.requireSession();
-    session.subscribe((event) => this.handleControllerEvent(event));
+    // Keep the legacy event adapter available only for retry-branch compatibility;
+    // the live backbone is the native thread subscription below.
+    void this.handleControllerEvent;
+    const threadId = this.selectedThreadId ?? this.controllerThreadId;
+    if (threadId) void this.nativeDriver.ensureSubscription(threadId).catch((error) => this.reportError(error));
   }
 
   private approvalFrom(value: { toolCallId: string; toolName: string; args: unknown } | null | undefined): ToolApproval | null {
@@ -1147,6 +1161,99 @@ export class TextRuntime {
       });
     } finally {
       this.hydratingPlans.delete(toolCallId);
+    }
+  }
+
+  private handleNativeProjection(projection: NativeStreamProjection, chunk: NativeAgentChunk): void {
+    const { threadId, runId } = projection;
+    const payload = chunk.payload ?? {};
+    const toolCallId = typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
+    this.diagnostics.record({ source: "mastra", type: chunk.type, threadId, runId, toolCallId, payload: chunk });
+
+    if (chunk.type === "start") {
+      this.taskToolPolicy.reset(threadId);
+      this.runId = runId;
+      this.runOutcome = "streaming";
+      this.runError = null;
+      this.updateThreadActivity(threadId, "running", 0);
+    }
+
+    if (chunk.type === "tool-call-suspended" && toolCallId && typeof payload.toolName === "string") {
+      this.nativeSuspensions.set(toolCallId, { runId, threadId });
+      const interaction = parseSuspendedInteraction(
+        { toolCallId, toolName: payload.toolName, suspendPayload: payload.suspendPayload },
+        this.nextPlanVersion(),
+        this.runClientMessageId ?? undefined,
+      );
+      if (interaction) {
+        this.controllerThreadState = { ...this.controllerThreadState, pendingInteractions: upsertPendingInteraction(this.controllerThreadState.pendingInteractions ?? [], interaction) };
+        if (threadId === this.selectedThreadId) {
+          this.threadState = this.controllerThreadState;
+          this.publish({ interactions: this.controllerThreadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.controllerThreadState, null) });
+        }
+      }
+      if (payload.toolName === "submit_plan") {
+        const suspendPayload = payload.suspendPayload && typeof payload.suspendPayload === "object" ? payload.suspendPayload as { path?: unknown } : {};
+        void this.hydratePlanSuspension(toolCallId, suspendPayload.path, this.runClientMessageId ?? undefined);
+      }
+      this.updateThreadActivity(threadId, "waiting", 1);
+    }
+
+    if (chunk.type === "tool-call-approval" && toolCallId && typeof payload.toolName === "string") {
+      this.nativeSuspensions.set(toolCallId, { runId, threadId });
+      const toolApproval = { toolCallId, toolName: payload.toolName, args: payload.args };
+      if (threadId === this.selectedThreadId) {
+        this.publish({ toolApproval, workbench: this.workbenchFromState(this.threadState, null, this.snapshot.activeRun, toolApproval) });
+      }
+      this.updateThreadActivity(threadId, "waiting", 1);
+    }
+
+    if (chunk.type === "tool-result") {
+      const result = payload.result;
+      if (result && typeof result === "object" && Array.isArray((result as { tasks?: unknown }).tasks)) {
+        const tasks = ((result as { tasks: unknown[] }).tasks).flatMap((value): WorkbenchTask[] => {
+          if (!value || typeof value !== "object") return [];
+          const task = value as Record<string, unknown>;
+          if (typeof task.id !== "string" || typeof task.content !== "string" || typeof task.activeForm !== "string" || (task.status !== "pending" && task.status !== "in_progress" && task.status !== "completed")) return [];
+          return [{ id: task.id, content: task.content, activeForm: task.activeForm, status: task.status }];
+        });
+        if (tasks.length === (result as { tasks: unknown[] }).tasks.length) {
+          this.controllerThreadState = { ...this.controllerThreadState, tasks };
+          if (threadId === this.selectedThreadId) {
+            this.threadState = this.controllerThreadState;
+            this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
+          }
+        }
+      }
+    }
+
+    if (threadId === this.selectedThreadId && projection.message.parts.length > 0) {
+      this.lastAssistantId = projection.message.id;
+      this.publish({
+        status: projection.terminal === "error" ? "error" : projection.terminal ? this.idleStatus() : "running",
+        activeRun: projection.terminal ? null : { runId, threadId, status: "running" },
+        messages: upsertChatMessage(this.snapshot.messages, projection.message),
+        ...(projection.usage ? { workbench: { ...this.workbenchFromState(this.threadState, null), tokenUsage: projection.usage } } : {}),
+      });
+    }
+
+    if (projection.terminal) {
+      if (this.runId === runId) this.runId = null;
+      this.runOutcome = projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error";
+      this.updateThreadActivity(threadId, projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error", 0);
+      void this.settleNativeRun(threadId);
+    }
+  }
+
+  private async settleNativeRun(threadId: string): Promise<void> {
+    await this.syncMessagesSafely(threadId);
+    await this.refreshThreadSummaries();
+    if (threadId === this.selectedThreadId) {
+      this.publish({
+        status: this.idleStatus(),
+        activeRun: null,
+        workbench: this.workbenchFromState(this.threadState, null),
+      });
     }
   }
 
@@ -1674,8 +1781,8 @@ export class TextRuntime {
           resourceId: RESOURCE_ID,
         });
         for (const toolName of [...INTERNAL_TOOL_GRANTS, ...PLAN_DRAFT_TOOL_GRANTS]) this.session.grantTool(toolName);
-        this.subscribeToController();
         await this.syncThreadState();
+        this.subscribeToController();
         await this.refreshCodexModels();
         await this.validateStoredCredential();
         return this.getSnapshot();
@@ -2025,66 +2132,27 @@ export class TextRuntime {
     if (!candidate) throw new Error("Message cannot be empty");
     if (candidate.length > MAX_INPUT_LENGTH) throw new Error(`Message must be ${MAX_INPUT_LENGTH} characters or fewer`);
     const messageId = clientMessageId?.trim() || randomUUID();
-    if (this.startingRun || this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
-    this.startingRun = true;
-    this.startingRunAbortRequested = false;
-    const targetThreadId = this.selectedThreadId ?? this.controllerThreadId ?? this.snapshot.activeThreadId;
-    const reservationId = !this.runId && targetThreadId ? `starting:${messageId}` : null;
-    this.startingRunId = reservationId;
-    if (reservationId && targetThreadId)
-      this.publish({
-        status: "running",
-        activeRun: {
-          runId: reservationId,
-          threadId: targetThreadId,
-          status: "running",
-        },
-        error: null,
-        retryMessageId: null,
-      });
-    return this.sendReserved(candidate, messageId, targetThreadId).finally(() => {
-      const abortedBeforeStart = this.startingRunAbortRequested;
-      this.startingRun = false;
-      this.startingRunAbortRequested = false;
-      if (this.startingRunId !== reservationId) return;
-      this.startingRunId = null;
-      if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
-        this.publish({
-          status: this.idleStatus(),
-          activeRun: null,
-          ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}),
-        });
-      }
-    });
-  }
-
-  private async sendReserved(candidate: string, messageId: string, reservedThreadId: string | null): Promise<{ runId: string }> {
+    if (this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
     await this.ensureInitialized();
     if (this.snapshot.selectedProviderId === "openrouter" && (!this.snapshot.credential.configured || !this.snapshot.credential.verified)) throw makeRuntimeError("invalid-credential");
     if (this.snapshot.selectedProviderId === "codex" && this.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
-    if (this.snapshot.selectedProviderId === "openrouter" && this.snapshot.status === "error" && this.snapshot.error?.code === "model-unavailable") throw makeRuntimeError("model-unavailable");
-    this.retryingText = null;
-    this.hideSingleRetry = false;
-
-    const session = this.requireSession();
-    if (this.runId) {
-      if (this.selectedThreadId !== this.controllerThreadId) throw makeRuntimeError("busy");
-      const threadId = this.controllerThreadId;
-      if (!threadId) throw makeRuntimeError("busy");
-      await session.followUp({ content: candidate });
-      return { runId: this.runId };
-    }
-
-    if (reservedThreadId && session.thread.getId() !== reservedThreadId) {
-      await session.thread.switch({ threadId: reservedThreadId });
-      await this.syncThreadState();
-    }
-    await restorePlanningMode(session);
-    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
-    return this.startRun(candidate, {
-      optimistic: true,
-      clientMessageId: messageId,
+    let threadId = this.selectedThreadId ?? this.controllerThreadId ?? this.snapshot.activeThreadId;
+    if (!threadId) threadId = await this.createThread("New chat");
+    const createdAt = new Date().toISOString();
+    this.optimisticUserMessages.set(messageId, {
+      threadId,
+      message: { id: messageId, role: "user", text: candidate, turnId: messageId, parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }], status: "complete", createdAt },
     });
+    this.runClientMessageId = messageId;
+    this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), error: null, retryMessageId: null });
+    const result = await this.nativeDriver.queue(threadId, candidate, { clientMessageId: messageId });
+    if (!result.queued) {
+      this.runId = result.runId;
+      this.publish({ status: "running", activeRun: { runId: result.runId, threadId, status: "running" } });
+    } else {
+      this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
+    }
+    return { runId: result.runId };
   }
 
   private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {
@@ -2244,7 +2312,11 @@ export class TextRuntime {
     if (!interaction) return this.interactionFailure({ code: "stale", message: "That request is no longer waiting for an answer.", retryable: false });
     if (interaction.status !== "pending") return this.interactionFailure({ code: "busy", message: "That request is already being resolved.", retryable: interaction.status === "failed" });
     if (this.resolvingInteractions.size > 0) return this.interactionFailure({ code: "busy", message: "Another response is already being resolved.", retryable: true });
-    if (!session.suspensions.has({ toolCallId })) return this.interactionFailure({ code: "stale", message: "This approval expired. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) });
+    const nativeThreadId = this.selectedThreadId ?? this.controllerThreadId;
+    const nativeSuspension = nativeThreadId
+      ? this.nativeSuspensions.get(toolCallId) ?? (await this.nativeDriver.findSuspension(nativeThreadId, toolCallId))
+      : null;
+    if (!nativeSuspension && !session.suspensions.has({ toolCallId })) return this.interactionFailure({ code: "stale", message: "This approval expired. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) });
     let resumeData: unknown;
     let nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">;
     let feedback: string | undefined;
@@ -2303,6 +2375,21 @@ export class TextRuntime {
     const threadId = this.controllerThreadId ?? this.selectedThreadId ?? undefined;
     const persistStartedAt = performance.now();
     try {
+      const nativeSuspension = threadId
+        ? this.nativeSuspensions.get(toolCallId) ?? (await this.nativeDriver.findSuspension(threadId, toolCallId))
+        : null;
+      if (threadId && nativeSuspension) {
+        const resumeStartedAt = performance.now();
+        await this.nativeDriver.resume(threadId, nativeSuspension.runId, toolCallId, resumeData);
+        this.nativeSuspensions.delete(toolCallId);
+        if (interaction.kind === "submit_plan") {
+          this.recordToolOutcome(toolCallId, submitPlanResolutionResult(nextStatus === "approved" ? "approved" : "rejected", feedback), false);
+        }
+        this.finalizeResolvingInteractions(toolCallId);
+        this.updateThreadActivity(threadId, "running", 0);
+        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: nativeSuspension.runId, toolCallId, durationMs: performance.now() - resumeStartedAt });
+        return;
+      }
       if (threadId) await this.persistThreadState(threadId, this.controllerThreadState);
       this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "state_persisted", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - persistStartedAt });
       if (interaction.kind === "submit_plan" && nextStatus === "approved") {
@@ -2372,15 +2459,15 @@ export class TextRuntime {
   }
 
   async respondToToolApproval(toolCallId: string, approved: boolean): Promise<void> {
-    const session = await this.ensureInitialized();
+    await this.ensureInitialized();
     const pending = this.snapshot.toolApproval;
     if (!pending || pending.toolCallId !== toolCallId) throw new Error("That tool approval is no longer available");
+    const threadId = this.selectedThreadId ?? this.controllerThreadId;
+    if (!threadId) throw new Error("No active conversation");
     try {
-      session.respondToToolApproval({
-        decision: approved ? "approve" : "decline",
-        toolCallId,
-      });
-      if (this.controllerThreadId) this.updateThreadActivity(this.controllerThreadId, "running", 0);
+      await this.nativeDriver.approve(threadId, toolCallId, approved);
+      this.publish({ toolApproval: null });
+      this.updateThreadActivity(threadId, "running", 0);
     } catch (error) {
       throw normalizeError(error);
     }
@@ -2585,7 +2672,8 @@ export class TextRuntime {
           workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
         });
     }
-    this.requireSession().abort();
+    const activeThreadId = this.selectedThreadId ?? this.controllerThreadId;
+    if (activeThreadId) this.nativeDriver.abort(activeThreadId);
     this.publish({
       activeRun: {
         runId: this.runId,

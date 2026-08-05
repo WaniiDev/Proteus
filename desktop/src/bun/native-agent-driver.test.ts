@@ -48,4 +48,22 @@ describe("native Mastra agent driver", () => {
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
     expect(await driver.resume("thread-1", "run-1", "call-1", { action: "approved" })).toEqual({ runId: "run-1" });
   });
+
+  test("rediscovers durable suspensions and uses native tool approval", async () => {
+    const approvals: unknown[] = [];
+    const agent: NativeQueueAgent = {
+      subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
+      queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+      listSuspendedRuns: async () => ({ runs: [{ runId: "run-durable", toolCalls: [{ toolCallId: "call-durable", requiresApproval: true }] }] }),
+      sendToolApproval: async (options) => {
+        approvals.push(options);
+        return { accepted: true, runId: "run-durable", toolCallId: options.toolCallId };
+      },
+    };
+    const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
+    expect(await driver.findSuspension("thread-1", "call-durable")).toEqual({ runId: "run-durable", requiresApproval: true });
+    expect(await driver.approve("thread-1", "call-durable", true)).toEqual({ runId: "run-durable" });
+    expect(approvals).toEqual([{ resourceId: "local-user", threadId: "thread-1", toolCallId: "call-durable", approved: true }]);
+  });
 });
