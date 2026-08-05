@@ -1638,9 +1638,9 @@ export class TextRuntime {
   async refreshModels(): Promise<void> {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+    await this.refreshCodexModels();
     const apiKey = await this.vault.get();
     if (!apiKey || !this.snapshot.credential.verified) {
-      this.publish({ error: makeRuntimeError("invalid-credential") });
       return;
     }
     this.publish({ status: "loading-models", error: null });

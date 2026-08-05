@@ -933,64 +933,49 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   );
 }
 
-function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onRefresh, onSelectModel }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: () => void; onRefresh: () => void; onSelectModel: (modelId: ProviderModel["id"]) => void }) {
+export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
+  const [tab, setTab] = useState<"providers" | "models">("providers");
+  const [modelSearch, setModelSearch] = useState("");
   const selected = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
   const price = (value: number | undefined) => (value === undefined ? "—" : `$${(value * 1_000_000).toFixed(2)}/M`);
+  const providerModels = snapshot.models.filter((model) => model.providerId === snapshot.selectedProviderId);
+  const displayedModels = providerModels.filter((model, index, all) => {
+    if (model.providerId === "codex" && all.findIndex((candidate) => candidate.baseModelId === model.baseModelId) !== index) return false;
+    const query = modelSearch.trim().toLowerCase();
+    return !query || `${model.name} ${model.baseModelId ?? model.rawId}`.toLowerCase().includes(query);
+  });
+  const chooseDisplayedModel = (model: ProviderModel) => {
+    if (model.providerId !== "codex") return onSelectModel(model.id);
+    const preferred = snapshot.models.find((candidate) => candidate.providerId === "codex" && candidate.baseModelId === model.baseModelId && candidate.reasoningEffort === snapshot.selectedReasoningEffort);
+    onSelectModel((preferred ?? model).id);
+  };
   return (
-    <section className="view active">
-      <div className="page-narrow">
-        <PageHeader kicker="Yours to control" title="Settings" subtitle="One provider, one secure key, and a live OpenRouter text-model catalog." />
-        <section className="card settings-card">
-          <h2 className="title-md">OpenRouter connection</h2>
-          <p className="settings-intro">Your key is checked before it is stored securely on this device.</p>
-          <form className="key-form" onSubmit={onConnect}>
-            <Icon name="key" size={18} />
-            <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.credential.configured ? "Enter a replacement key" : "sk-or-v1-…"} autoComplete="off" aria-label="OpenRouter API key" />
-            <button className="btn-primary sm" type="submit" disabled={!apiKey.trim() || snapshot.status === "validating-key"}>
-              {snapshot.status === "validating-key" ? "Checking…" : snapshot.credential.configured ? "Replace key" : "Connect key"}
-            </button>
-          </form>
-          <div className="connection-status">
-            <span className={`runtime-dot ${snapshot.credential.verified ? "ok" : "off"}`} />
-            {snapshot.credential.verified ? "Verified with OpenRouter" : snapshot.credential.configured ? "Key saved but not verified" : "No key connected"}
-            {snapshot.credential.configured && (
-              <button className="btn-danger-ghost" type="button" onClick={onDisconnect}>
-                Disconnect
-              </button>
-            )}
-          </div>
-          {errorForUi(snapshot.error)}
-        </section>
-        <section className="card settings-card">
-          <div className="settings-section-head">
-            <div>
-              <h2 className="title-md">Text model</h2>
-              <p className="settings-intro">Choose the text model used for new conversations.</p>
-            </div>
-            <button className="btn-outline sm" type="button" onClick={onRefresh} disabled={!snapshot.credential.verified || snapshot.status === "loading-models"}>
-              <Icon name="refresh" size={15} /> Refresh
-            </button>
-          </div>
-          <div className="model-picker">
-            <label htmlFor="model-select">Selected model</label>
-            <select id="model-select" className="settings-select model-select" value={snapshot.selectedModelId} onChange={(event) => onSelectModel(event.target.value as ProviderModel["id"])} disabled={snapshot.activeRun !== null}>
-              {snapshot.models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} · {model.id}
-                </option>
-              ))}
-            </select>
-          </div>
-          {selected && (
-            <div className="model-meta">
-              <span>{selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : "OpenRouter-managed context"}</span>
-              <span>Prompt {price(selected.promptPrice)}</span>
-              <span>Completion {price(selected.completionPrice)}</span>
-            </div>
-          )}
-        </section>
-      </div>
-    </section>
+    <section className="view active"><div className="page-narrow settings-page">
+      <PageHeader kicker="Yours to control" title="Settings" subtitle="Choose how PROTEUS connects, which model thinks, and how deeply it reasons." />
+      <nav className="settings-tabs" aria-label="Settings sections">
+        <button type="button" className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers</button>
+        <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}>Models & thinking</button>
+      </nav>
+      {tab === "providers" ? <div className="provider-grid">
+        {snapshot.providers.map((provider) => <section className={`card provider-card ${snapshot.selectedProviderId === provider.id ? "selected" : ""}`} key={provider.id}>
+          <div className="provider-card-head"><div><span className="settings-eyebrow">{provider.id === "codex" ? "Native ACP" : "Universal gateway"}</span><h2 className="title-md">{provider.name}</h2></div><span className={`provider-badge ${provider.availability}`}>{provider.availability.replace("-", " ")}</span></div>
+          <p className="settings-intro">{provider.id === "codex" ? "Uses your local Codex sign-in through Mastra ACP. No API key is copied into PROTEUS." : "Use one OpenRouter key to access your account's text-model catalog."}</p>
+          {provider.id === "openrouter" ? <>
+            <form className="key-form" onSubmit={onConnect}><Icon name="key" size={18} /><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.credential.configured ? "Enter a replacement key" : "sk-or-v1-…"} autoComplete="off" aria-label="OpenRouter API key" /><button className="btn-primary sm" type="submit" disabled={!apiKey.trim() || snapshot.status === "validating-key"}>{snapshot.status === "validating-key" ? "Checking…" : snapshot.credential.configured ? "Replace" : "Connect"}</button></form>
+            {snapshot.credential.configured && <button className="btn-danger-ghost" type="button" onClick={onDisconnect}>Disconnect key</button>}
+          </> : <p className="provider-detail">{provider.detail ?? "Checking the local Codex connection…"}</p>}
+          <button className={snapshot.selectedProviderId === provider.id ? "btn-primary sm" : "btn-outline sm"} type="button" disabled={!provider.verified || snapshot.activeRun !== null || snapshot.selectedProviderId === provider.id} onClick={() => onSelectProvider(provider.id)}>{snapshot.selectedProviderId === provider.id ? "Current provider" : `Use ${provider.name}`}</button>
+        </section>)}
+        <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
+      </div> : <section className="card settings-card model-settings-card">
+        <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection is saved for this conversation.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
+        <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}>{provider.name}</button>)}</div>
+        <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
+        <div className="model-card-list">{displayedModels.map((model) => { const isSelected = selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId); return <button type="button" className={`model-card ${isSelected ? "selected" : ""}`} key={model.id} onClick={() => chooseDisplayedModel(model)} disabled={snapshot.activeRun !== null}><span className="model-card-copy"><strong>{model.providerId === "codex" ? model.baseModelId : model.name}</strong><small>{model.description ?? model.rawId}</small></span>{isSelected && <Check size={17} />}</button>; })}</div>
+        {selected?.reasoningOptions?.length ? <div className="reasoning-control"><div><span className="settings-eyebrow">Thinking</span><strong>Reasoning effort</strong></div><div className="reasoning-options">{selected.reasoningOptions.map((effort) => <button type="button" key={effort} className={snapshot.selectedReasoningEffort === effort ? "active" : ""} onClick={() => onSelectReasoning(effort)} disabled={snapshot.activeRun !== null}>{effort}</button>)}</div></div> : <p className="settings-note">This model does not advertise adjustable reasoning.</p>}
+        {selected && <div className="model-meta"><span>{selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}</span>{selected.providerId === "openrouter" && <><span>Prompt {price(selected.promptPrice)}</span><span>Completion {price(selected.completionPrice)}</span></>}</div>}
+      </section>}
+    </div></section>
   );
 }
 
@@ -1211,7 +1196,7 @@ export default function App() {
           )}
           {view === "projects" && <Projects />}
           {view === "memory" && <Memory />}
-          {view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={() => ignoreRpc(rpc.request["credentials.disconnect"]())} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} />}
+          {view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={() => ignoreRpc(rpc.request["credentials.disconnect"]())} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
         </main>
       </div>
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}
