@@ -27,6 +27,7 @@ import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-
 import { reconcileProviderAuth } from "./provider-auth";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
 import { createProteusStorage } from "./mastra-foundation";
+import { NativeThreadRepository } from "./native-thread-repository";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -435,6 +436,7 @@ export class TextRuntime {
   private readonly listeners = new Set<SnapshotListener>();
   private readonly storage: MastraCompositeStore;
   private readonly memory: Memory;
+  private readonly threads: NativeThreadRepository;
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
   private readonly agent: Agent;
@@ -551,9 +553,10 @@ export class TextRuntime {
       options: {
         lastMessages: 20,
         semanticRecall: false,
-        generateTitle: false,
+        generateTitle: true,
       },
     });
+    this.threads = new NativeThreadRepository(this.memory, RESOURCE_ID);
     this.agent = new Agent({
       id: AGENT_ID,
       name: "PROTEUS",
@@ -941,9 +944,8 @@ export class TextRuntime {
   }
 
   private async publishSelectedThread(threadId: string, options: { clearError?: boolean } = {}, generation = this.threadSelectionGeneration): Promise<void> {
-    const session = this.requireSession();
     if (generation !== this.threadSelectionGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== threadId)) return;
-    const [rawMessages, state] = await Promise.all([session.thread.listMessages({ threadId }), this.loadThreadState(threadId)]);
+    const [rawMessages, state] = await Promise.all([this.threads.recall(threadId), this.loadThreadState(threadId)]);
     if (generation !== this.threadSelectionGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== threadId)) return;
     this.selectedThreadId = threadId;
     this.recordPersistedAssistantIds(threadId, rawMessages as MastraMessage[]);
@@ -1439,7 +1441,7 @@ export class TextRuntime {
   }
 
   private async refreshThreadSummaries(): Promise<void> {
-    const threads = (await this.requireSession().thread.list())
+    const threads = (await this.threads.list())
       .map((thread) => {
         const summary = mapThread(thread);
         const activity = this.threadActivity.get(summary.id);
@@ -1455,9 +1457,7 @@ export class TextRuntime {
       this.publish({ messages: [] });
       return true;
     }
-    const rawMessages = (await this.requireSession().thread.listMessages({
-      threadId,
-    })) as MastraMessage[];
+    const rawMessages = await this.threads.recall(threadId) as MastraMessage[];
     if (guard && ((guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration) || (guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration))) return false;
     this.recordPersistedAssistantIds(threadId, rawMessages);
     const persistedOutcomes = threadId === this.controllerThreadId ? this.controllerThreadState.toolOutcomes : threadId === this.selectedThreadId ? this.threadState.toolOutcomes : undefined;
@@ -1478,7 +1478,7 @@ export class TextRuntime {
   private async syncThreadState(options: { clearError?: boolean } = {}, selectionGeneration = this.threadSelectionGeneration): Promise<void> {
     const syncGeneration = ++this.threadStateSyncGeneration;
     const session = this.requireSession();
-    const threads = (await session.thread.list())
+    const threads = (await this.threads.list())
       .map((thread) => {
         const summary = mapThread(thread);
         const activity = this.threadActivity.get(summary.id);
@@ -1941,9 +1941,8 @@ export class TextRuntime {
   async createThread(title?: string): Promise<string> {
     const session = await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
-    const thread = await session.thread.create({
-      title: title?.trim() || "New chat",
-    });
+    const thread = await this.threads.create(title?.trim() || "New chat");
+    await session.thread.switch({ threadId: thread.id });
     await this.syncThreadState();
     return thread.id;
   }
@@ -1955,7 +1954,7 @@ export class TextRuntime {
     try {
       const session = await this.ensureInitialized();
       if (this.startingRun) throw makeRuntimeError("busy");
-      const thread = await session.thread.getById({ threadId });
+      const thread = await this.threads.get(threadId);
       if (!thread) throw new Error("Conversation not found");
       if (generation !== this.threadSelectionGeneration) return;
       if (this.startingRun) throw makeRuntimeError("busy");
@@ -1999,30 +1998,22 @@ export class TextRuntime {
   }
 
   async renameThread(threadId: string, title: string): Promise<void> {
-    const session = await this.ensureInitialized();
+    await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     const nextTitle = title.trim().slice(0, 80);
     if (!nextTitle) throw new Error("Conversation title cannot be empty");
-    const thread = await session.thread.getById({ threadId });
-    if (!thread) throw new Error("Conversation not found");
-    const currentThreadId = session.thread.getId();
-    if (currentThreadId !== threadId) await session.thread.switch({ threadId });
-    try {
-      await session.thread.rename({ title: nextTitle });
-    } finally {
-      if (currentThreadId && currentThreadId !== threadId) await session.thread.switch({ threadId: currentThreadId });
-    }
+    await this.threads.rename(threadId, nextTitle);
     await this.syncThreadState();
   }
 
   async deleteThread(threadId: string): Promise<void> {
     const session = await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
-    await session.thread.delete({ threadId });
-    const remaining = (await session.thread.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-    if (!session.thread.getId()) {
-      if (remaining[0]) await session.thread.switch({ threadId: remaining[0].id });
-      else await session.thread.create({ title: "New chat" });
+    await this.threads.delete(threadId);
+    const remaining = (await this.threads.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    if (session.thread.getId() === threadId || !session.thread.getId()) {
+      const next = remaining[0] ?? mapThread(await this.threads.create("New chat"));
+      await session.thread.switch({ threadId: next.id });
     }
     await this.syncThreadState();
   }
@@ -2087,16 +2078,6 @@ export class TextRuntime {
       await this.syncThreadState();
     }
     await restorePlanningMode(session);
-    const activeThreadId = session.thread.getId();
-    if (activeThreadId) {
-      const activeThread = await session.thread.getById({
-        threadId: activeThreadId,
-      });
-      if (activeThread?.title?.trim().toLowerCase() === "new chat") {
-        const title = candidate.replace(/\s+/g, " ").slice(0, 56).trim() || "New chat";
-        await session.thread.rename({ title });
-      }
-    }
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     return this.startRun(candidate, {
       optimistic: true,
@@ -2335,7 +2316,7 @@ export class TextRuntime {
       const expectedDecision = interaction.kind === "submit_plan" ? nextStatus : undefined;
       if ((!evidence || evidence.status !== "completed" || (expectedDecision && evidence.decision !== expectedDecision)) && interaction.kind === "submit_plan") {
         const persistedThreadId = session.thread.requireId();
-        const persisted = this.mapMessages(await session.thread.listMessages({ threadId: persistedThreadId }), this.controllerThreadState.toolOutcomes);
+        const persisted = this.mapMessages(await this.threads.recall(persistedThreadId), this.controllerThreadState.toolOutcomes);
         evidence = findInteractionToolOutcome(persisted, interaction, expectedDecision === "approved" || expectedDecision === "rejected" ? expectedDecision : undefined) ?? evidence;
       }
       if (!evidence && this.resolvingInteractions.has(toolCallId) && !session.suspensions.has({ toolCallId })) {
@@ -2444,11 +2425,8 @@ export class TextRuntime {
   private async retryReserved(messageId: string): Promise<{ runId: string }> {
     await this.ensureInitialized();
     if (this.runId) throw makeRuntimeError("busy");
-    const session = this.requireSession();
     const sourceThreadId = this.selectedThreadId ?? this.controllerThreadId ?? "";
-    const messages = (await session.thread.listMessages({
-      threadId: sourceThreadId,
-    })) as MastraMessage[];
+    const messages = await this.threads.recall(sourceThreadId) as MastraMessage[];
     const index = messages.findIndex((message) => message.id === messageId);
     let sourceIndex = -1;
     if (index >= 0) {
@@ -2472,11 +2450,9 @@ export class TextRuntime {
         clientMessageId: messageId,
       });
     }
-    const originalThread = await session.thread.getById({
-      threadId: sourceThreadId,
-    });
+    const originalThread = await this.threads.get(sourceThreadId);
     const sourceState = await this.loadThreadState(sourceThreadId);
-    const retryThread = await session.thread.clone({
+    const { thread: retryThread } = await this.memory.cloneThread({
       sourceThreadId,
       title: `${originalThread?.title?.trim() || "Conversation"} · retry`,
       resourceId: RESOURCE_ID,
@@ -2494,9 +2470,7 @@ export class TextRuntime {
       ],
     };
     await this.persistThreadState(retryThread.id, retryState);
-    const retryMessages = (await session.thread.listMessages({
-      threadId: retryThread.id,
-    })) as MastraMessage[];
+    const retryMessages = await this.threads.recall(retryThread.id) as MastraMessage[];
     const sourceUserOrdinal = messages.slice(0, sourceIndex + 1).filter((message) => chatRole(message) === "user" && extractText(message) === content).length - 1;
     let retrySourceIndex = -1;
     let seenMatchingUser = 0;
