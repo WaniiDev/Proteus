@@ -14,6 +14,7 @@ describe("native Mastra agent driver", () => {
         calls.push({ message, options });
         return { accepted: Promise.resolve({ action: "wake", runId: "run-1", output: { consumeStream: async () => { consumed = true; } } }) };
       },
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
     expect(await driver.queue("thread-1", "hello", { clientMessageId: "client-1" })).toEqual({ runId: "run-1", queued: false });
@@ -28,6 +29,7 @@ describe("native Mastra agent driver", () => {
     const agent: NativeQueueAgent = {
       subscribeToThread: async () => ({ stream: pendingChunks(), activeRunId: () => "run-active", abort: () => (aborted = true), unsubscribe: () => undefined }),
       queueMessage: () => ({ accepted: Promise.resolve({ action: "deliver", runId: "run-active" }) }),
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined, onQueueChanged: (_threadId, count) => counts.push(count) });
     expect(await driver.queue("thread-1", "next")).toEqual({ runId: "run-active", queued: true });
@@ -35,5 +37,15 @@ describe("native Mastra agent driver", () => {
     expect(driver.abort("thread-1")).toBeTrue();
     expect(aborted).toBeTrue();
     expect(counts).toEqual([1]);
+  });
+
+  test("acknowledges native suspension resumption without waiting for run completion", async () => {
+    const agent: NativeQueueAgent = {
+      subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
+      queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+    };
+    const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
+    expect(await driver.resume("thread-1", "run-1", "call-1", { action: "approved" })).toEqual({ runId: "run-1" });
   });
 });

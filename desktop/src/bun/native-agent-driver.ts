@@ -21,6 +21,7 @@ export type NativeQueueAgent = {
     message: { contents: string; metadata?: Record<string, unknown> },
     options: { resourceId: string; threadId: string },
   ): { accepted: Promise<NativeQueueAccepted> };
+  sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
 };
 
 export type NativeAgentDriverCallbacks = {
@@ -64,6 +65,13 @@ export class NativeAgentDriver {
 
   abort(threadId: string): boolean {
     return this.subscriptions.get(threadId)?.abort() ?? false;
+  }
+
+  async resume(threadId: string, runId: string, toolCallId: string, resumeData: unknown): Promise<{ runId: string }> {
+    await this.ensureSubscription(threadId);
+    const result = await this.agent.sendStreamResume({ resourceId: this.resourceId, threadId, runId, toolCallId, resumeData });
+    if (!result.accepted) throw new Error("Mastra did not accept the stream resume request.");
+    return { runId: result.runId };
   }
 
   queuedCount(threadId: string): number {

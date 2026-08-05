@@ -9,6 +9,7 @@ import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
 import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
+import { askUserTool, submitPlanTool } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
@@ -561,6 +562,7 @@ export class TextRuntime {
       id: AGENT_ID,
       name: "PROTEUS",
       instructions: AGENT_INSTRUCTIONS,
+      tools: { ask_user: askUserTool, submit_plan: submitPlanTool },
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
       defaultOptions: {
