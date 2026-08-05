@@ -2,11 +2,14 @@ import { describe, expect, it } from "bun:test";
 import type { OAuthCredentials } from "@mastra/code-sdk/auth/types";
 import { createCodexCredentialStore, createCredentialVault, type NamedSecretStore } from "./credentials";
 
-function memorySecrets(initial: Record<string, string> = {}) {
+function memorySecrets(initial: Record<string, string> = {}, maxValueLength = Number.POSITIVE_INFINITY) {
   const values = new Map(Object.entries(initial));
   const store: NamedSecretStore = {
     get: (account) => values.get(account) ?? null,
-    set: (account, value) => void values.set(account, value),
+    set: (account, value) => {
+      if (value.length > maxValueLength) throw new Error("credential exceeds platform limit");
+      values.set(account, value);
+    },
     delete: (account) => void values.delete(account),
   };
   return { store, values };
@@ -22,15 +25,50 @@ describe("secure provider credentials", () => {
     expect(secrets.values.has("openrouter")).toBe(false);
   });
 
-  it("stores ChatGPT OAuth in its named keyring account with environment fallback disabled", () => {
+  it("stores ChatGPT OAuth as an atomic chunk manifest with environment fallback disabled", () => {
     const secrets = memorySecrets();
     const store = createCodexCredentialStore(secrets.store);
     store.setOAuth({ access: "access-token", refresh: "refresh-token", expires: Date.now() + 120_000, accountId: "account-1" });
 
     expect(store.allowEnvironmentFallback).toBe(false);
     expect(store.get("openai-codex")).toMatchObject({ type: "oauth", access: "access-token", accountId: "account-1" });
-    expect(secrets.values.get("openai-codex.oauth")).toContain('"type":"oauth"');
+    expect(secrets.values.get("openai-codex.oauth")).toContain('"kind":"proteus-keyring-chunks"');
+    expect(secrets.values.get("openai-codex.oauth")).not.toContain("access-token");
     expect(store.get("openai")).toBeUndefined();
+  });
+
+  it("round-trips OAuth credentials larger than the Windows per-entry limit", () => {
+    const secrets = memorySecrets({}, 1_280);
+    const store = createCodexCredentialStore(secrets.store);
+    const access = `access-${"a".repeat(3_000)}`;
+    const refresh = `refresh-${"r".repeat(1_500)}`;
+
+    store.setOAuth({ access, refresh, expires: Date.now() + 120_000, accountId: "account-1" });
+
+    expect([...secrets.values.values()].every((value) => value.length <= 1_280)).toBe(true);
+    expect([...secrets.values.keys()].filter((account) => account.startsWith("openai-codex.oauth.chunk.")).length).toBeGreaterThan(1);
+    const reloaded = createCodexCredentialStore(secrets.store);
+    expect(reloaded.get("openai-codex")).toMatchObject({ access, refresh, accountId: "account-1" });
+  });
+
+  it("does not replace the in-memory credential when secure persistence fails", () => {
+    const legacy = JSON.stringify({ type: "oauth", access: "old", refresh: "old-refresh", expires: Date.now() + 120_000, accountId: "account-1" });
+    const secrets = memorySecrets({ "openai-codex.oauth": legacy }, 10);
+    const store = createCodexCredentialStore(secrets.store);
+
+    expect(() => store.setOAuth({ access: "new", refresh: "new-refresh", expires: Date.now() + 120_000, accountId: "account-1" })).toThrow();
+    expect(store.get("openai-codex")).toMatchObject({ access: "old", refresh: "old-refresh" });
+  });
+
+  it("removes the manifest and all live credential chunks on disconnect", () => {
+    const secrets = memorySecrets({}, 1_280);
+    const store = createCodexCredentialStore(secrets.store);
+    store.setOAuth({ access: "a".repeat(3_000), refresh: "r".repeat(1_500), expires: Date.now() + 120_000, accountId: "account-1" });
+
+    store.clear();
+
+    expect([...secrets.values.keys()].filter((account) => account.startsWith("openai-codex.oauth"))).toEqual([]);
+    expect(store.get("openai-codex")).toBeUndefined();
   });
 
   it("serializes concurrent refreshes and persists the upstream result once", async () => {
@@ -50,6 +88,6 @@ describe("secure provider credentials", () => {
 
     expect(await Promise.all([first, second])).toEqual(["new", "new"]);
     expect(refreshCalls).toBe(1);
-    expect(secrets.values.get("openai-codex.oauth")).toContain('"access":"new"');
+    expect(createCodexCredentialStore(secrets.store).get("openai-codex")).toMatchObject({ access: "new", refresh: "next" });
   });
 });

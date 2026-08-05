@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { refreshOpenAICodexToken } from "@mastra/code-sdk/auth/providers/openai-codex";
@@ -7,9 +8,24 @@ const SERVICE = "com.proteus.companion";
 const OPENROUTER_ACCOUNT = "openrouter.api-key";
 const LEGACY_OPENROUTER_ACCOUNT = "openrouter";
 const CODEX_ACCOUNT = "openai-codex.oauth";
+const CODEX_CHUNK_PREFIX = `${CODEX_ACCOUNT}.chunk`;
 const CODEX_PROVIDER = "openai-codex";
 const NATIVE_FILE = "keyring.win32-x64-msvc.node";
 const REFRESH_SKEW_MS = 60_000;
+// Windows Credential Manager accepts at most 2,560 bytes per generic
+// credential. The keyring binding stores strings as UTF-16, so leave ample
+// room below its effective 1,280-character ceiling.
+const SECRET_CHUNK_LENGTH = 1_000;
+const MAX_SECRET_CHUNKS = 64;
+
+type ChunkedSecretManifest = {
+  kind: "proteus-keyring-chunks";
+  version: 1;
+  generation: string;
+  chunks: number;
+  length: number;
+  sha256: string;
+};
 
 type NativeEntry = {
   new (service: string, username: string): {
@@ -111,6 +127,109 @@ export function createCredentialVault(secretStore: NamedSecretStore = createNati
   };
 }
 
+function chunkAccount(generation: string, index: number): string {
+  return `${CODEX_CHUNK_PREFIX}.${generation}.${index}`;
+}
+
+function parseChunkedSecretManifest(value: string | null): ChunkedSecretManifest | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<ChunkedSecretManifest>;
+    if (
+      parsed.kind !== "proteus-keyring-chunks"
+      || parsed.version !== 1
+      || typeof parsed.generation !== "string"
+      || !/^[0-9a-f-]{36}$/i.test(parsed.generation)
+      || !Number.isInteger(parsed.chunks)
+      || (parsed.chunks ?? 0) < 1
+      || (parsed.chunks ?? 0) > MAX_SECRET_CHUNKS
+      || !Number.isInteger(parsed.length)
+      || (parsed.length ?? -1) < 0
+      || typeof parsed.sha256 !== "string"
+      || !/^[0-9a-f]{64}$/i.test(parsed.sha256)
+    ) return undefined;
+    return parsed as ChunkedSecretManifest;
+  } catch {
+    return undefined;
+  }
+}
+
+function readCodexSecret(secretStore: NamedSecretStore): string | null {
+  const root = secretStore.get(CODEX_ACCOUNT);
+  const manifest = parseChunkedSecretManifest(root);
+  // Credentials written before chunked storage remain readable and migrate on
+  // the next successful OAuth login or token refresh.
+  if (!manifest) return root;
+
+  const chunks: string[] = [];
+  for (let index = 0; index < manifest.chunks; index += 1) {
+    const chunk = secretStore.get(chunkAccount(manifest.generation, index));
+    if (chunk === null) return null;
+    chunks.push(chunk);
+  }
+  const serialized = chunks.join("");
+  if (serialized.length !== manifest.length) return null;
+  if (createHash("sha256").update(serialized).digest("hex") !== manifest.sha256) return null;
+  return serialized;
+}
+
+function deleteManifestChunks(secretStore: NamedSecretStore, manifest: ChunkedSecretManifest | undefined): void {
+  if (!manifest) return;
+  for (let index = 0; index < manifest.chunks; index += 1) {
+    try {
+      secretStore.delete(chunkAccount(manifest.generation, index));
+    } catch {
+      // The root manifest determines which generation is live. An orphaned old
+      // chunk is unusable because no manifest can select it.
+    }
+  }
+}
+
+function writeCodexSecret(secretStore: NamedSecretStore, serialized: string): void {
+  const previousManifest = parseChunkedSecretManifest(secretStore.get(CODEX_ACCOUNT));
+  const chunks: string[] = [];
+  for (let offset = 0; offset < serialized.length; offset += SECRET_CHUNK_LENGTH) chunks.push(serialized.slice(offset, offset + SECRET_CHUNK_LENGTH));
+  if (chunks.length === 0) chunks.push("");
+  if (chunks.length > MAX_SECRET_CHUNKS) throw new SecureStoreUnavailableError();
+
+  const generation = randomUUID();
+  const writtenAccounts: string[] = [];
+  try {
+    for (const [index, chunk] of chunks.entries()) {
+      const account = chunkAccount(generation, index);
+      secretStore.set(account, chunk);
+      writtenAccounts.push(account);
+    }
+    const manifest: ChunkedSecretManifest = {
+      kind: "proteus-keyring-chunks",
+      version: 1,
+      generation,
+      chunks: chunks.length,
+      length: serialized.length,
+      sha256: createHash("sha256").update(serialized).digest("hex"),
+    };
+    // Commit the new generation only after every chunk is safely stored.
+    secretStore.set(CODEX_ACCOUNT, JSON.stringify(manifest));
+  } catch (error) {
+    for (const account of writtenAccounts) {
+      try {
+        secretStore.delete(account);
+      } catch {
+        // Preserve the original storage failure.
+      }
+    }
+    throw error;
+  }
+
+  deleteManifestChunks(secretStore, previousManifest);
+}
+
+function deleteCodexSecret(secretStore: NamedSecretStore): void {
+  const manifest = parseChunkedSecretManifest(secretStore.get(CODEX_ACCOUNT));
+  secretStore.delete(CODEX_ACCOUNT);
+  deleteManifestChunks(secretStore, manifest);
+}
+
 function parseOAuthCredential(value: string | null): OAuthCredential | undefined {
   if (!value) return undefined;
   try {
@@ -131,16 +250,16 @@ export function createCodexCredentialStore(
   secretStore: NamedSecretStore = createNativeSecretStore(),
   refresh: typeof refreshOpenAICodexToken = refreshOpenAICodexToken,
 ): CodexCredentialStore {
-  let credential = parseOAuthCredential(secretStore.get(CODEX_ACCOUNT));
+  let credential = parseOAuthCredential(readCodexSecret(secretStore));
   let refreshInFlight: Promise<string | undefined> | undefined;
   const persist = (next: OAuthCredential) => {
+    writeCodexSecret(secretStore, JSON.stringify(next));
     credential = next;
-    secretStore.set(CODEX_ACCOUNT, JSON.stringify(next));
   };
   return {
     allowEnvironmentFallback: false,
     reload() {
-      credential = parseOAuthCredential(secretStore.get(CODEX_ACCOUNT));
+      credential = parseOAuthCredential(readCodexSecret(secretStore));
     },
     get(provider) {
       return provider === CODEX_PROVIDER ? credential : undefined;
@@ -166,8 +285,8 @@ export function createCodexCredentialStore(
       persist({ type: "oauth", ...credentials });
     },
     clear() {
+      deleteCodexSecret(secretStore);
       credential = undefined;
-      secretStore.delete(CODEX_ACCOUNT);
     },
   };
 }

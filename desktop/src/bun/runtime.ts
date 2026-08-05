@@ -23,6 +23,7 @@ import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
 import { selectedModelMissingFromCatalog } from "./provider-readiness";
 import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection, resolveCodexGatewayModel } from "./codex-models";
+import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-oauth-failure";
 import { reconcileProviderAuth } from "./provider-auth";
 
 const CONTROLLER_ID = "proteus-text-controller";
@@ -1660,10 +1661,10 @@ export class TextRuntime {
       error: null,
     });
 
+    let failureStage: CodexOAuthFailureStage = "authorization";
     void loginOpenAICodex({
       mode,
       signal: abortController.signal,
-      originator: "proteus",
       onAuth: ({ url, instructions }) => {
         if (this.codexAuthAbortController !== abortController) return;
         const code = mode === "device" ? instructions?.match(/Enter code:\s*(\S+)/i)?.[1] : undefined;
@@ -1684,6 +1685,7 @@ export class TextRuntime {
     }).then(async (credentials) => {
       if (abortController.signal.aborted || this.codexAuthAbortController !== abortController) return;
       this.publish({ providerAuth: { providerId: "codex", mode, status: "completing", instructions: "Saving the authorization securely…" } });
+      failureStage = "persistence";
       this.codexCredentialStore.setOAuth(credentials);
       await this.refreshCodexModels();
       if (this.codexAuthAbortController !== abortController) return;
@@ -1694,15 +1696,16 @@ export class TextRuntime {
         this.publish({ providerAuth: null });
         return;
       }
+      const failure = describeCodexOAuthFailure(error, failureStage);
       this.publish({
         providerAuth: {
           providerId: "codex",
           mode,
           status: "failed",
-          error: "ChatGPT authorization did not complete. Try browser sign-in again or use device code.",
+          error: failure.message,
         },
       });
-      console.warn("Codex OAuth failed", error instanceof Error ? error.message : "Unknown OAuth error");
+      console.warn("Codex OAuth failed", { stage: failureStage, code: failure.code });
     }).finally(() => {
       if (this.codexAuthAbortController === abortController) this.codexAuthAbortController = null;
       this.codexManualInput = null;
