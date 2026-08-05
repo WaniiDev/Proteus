@@ -9,7 +9,7 @@ import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
 import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
-import { askUserTool, submitPlanTool } from "@mastra/core/tools";
+import { askUserTool, submitPlanTool, TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
@@ -36,7 +36,8 @@ const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
 const SESSION_ID = "proteus-desktop-session";
-const THREAD_METADATA_KEY = "proteus.workbench.v1";
+const THREAD_METADATA_KEY = "proteus.ui.v2";
+const LEGACY_THREAD_METADATA_KEY = "proteus.workbench.v1";
 const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
 const DEFAULT_PROVIDER_ID: ProviderId = "openrouter";
 const MAX_INPUT_LENGTH = 32_000;
@@ -737,17 +738,17 @@ export class TextRuntime {
 
   private async loadThreadState(threadId: string): Promise<PersistedThreadState> {
     const cached = this.threadStateCache.get(threadId);
-    if (cached) return this.reconcileNativeSuspensions(threadId, structuredClone(cached));
+    if (cached) return this.reconcileNativeThreadState(threadId, structuredClone(cached));
     try {
       const memoryStore = await this.storage.getStore("memory");
       const thread = await memoryStore?.getThreadById({
         threadId,
         resourceId: RESOURCE_ID,
       });
-      const value = thread?.metadata?.[THREAD_METADATA_KEY];
+      const value = thread?.metadata?.[THREAD_METADATA_KEY] ?? thread?.metadata?.[LEGACY_THREAD_METADATA_KEY];
       if (value && typeof value === "object" && !Array.isArray(value)) {
         const state = structuredClone(value as PersistedThreadState);
-        return this.reconcileNativeSuspensions(threadId, state);
+        return this.reconcileNativeThreadState(threadId, state);
       }
     } catch {
       // Metadata is optional; an empty state is a valid first-run state.
@@ -755,6 +756,20 @@ export class TextRuntime {
     const empty: PersistedThreadState = {};
     this.threadStateCache.set(threadId, empty);
     return {};
+  }
+
+  private async loadNativeTasks(threadId: string): Promise<WorkbenchTask[]> {
+    const store = await this.storage.getStore("threadState");
+    const state = await store?.getState<TaskItemSnapshot[]>({ threadId, type: TASK_STATE_TYPE });
+    return (state ?? []).map((task) => ({ id: task.id, content: task.content, activeForm: task.activeForm, status: task.status }));
+  }
+
+  private async reconcileNativeThreadState(threadId: string, state: PersistedThreadState): Promise<PersistedThreadState> {
+    const [tasks, suspensionState] = await Promise.all([
+      this.loadNativeTasks(threadId).catch(() => state.tasks ?? []),
+      this.reconcileNativeSuspensions(threadId, state),
+    ]);
+    return { ...suspensionState, tasks };
   }
 
   private async reconcileNativeSuspensions(threadId: string, state: PersistedThreadState): Promise<PersistedThreadState> {
@@ -794,7 +809,8 @@ export class TextRuntime {
 
   private async persistThreadState(threadId: string, state = this.threadState): Promise<void> {
     if (!threadId) return;
-    const next = structuredClone(state);
+    const { tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes, ...uiState } = state;
+    const next = structuredClone(uiState);
     this.threadStateCache.set(threadId, next);
     const queuedAt = performance.now();
     const previous = this.threadWriteQueues.get(threadId) ?? Promise.resolve();
@@ -810,11 +826,12 @@ export class TextRuntime {
             resourceId: RESOURCE_ID,
           });
           if (thread && memoryStore) {
+            const { [LEGACY_THREAD_METADATA_KEY]: _legacy, ...metadata } = thread.metadata ?? {};
             await memoryStore.updateThread({
               id: threadId,
               title: thread.title ?? "New chat",
               metadata: {
-                ...(thread.metadata ?? {}),
+                ...metadata,
                 [THREAD_METADATA_KEY]: next,
               },
             });
@@ -954,7 +971,7 @@ export class TextRuntime {
     if (generation !== this.threadSelectionGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== threadId)) return;
     this.selectedThreadId = threadId;
     this.recordPersistedAssistantIds(threadId, rawMessages as MastraMessage[]);
-    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages, state.toolOutcomes), true);
+    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
     if (this.reconcileHistoricalPlanInteractions(messages, state)) await this.persistThreadState(threadId, state);
     this.threadState = state;
     const displayState = this.displayStateForThread(threadId);
@@ -1090,7 +1107,7 @@ export class TextRuntime {
     const isCurrentRunMessage = !this.runStartedAt || !messageCreatedAt || messageCreatedAt >= this.runStartedAt || message.id === this.lastAssistantId;
     if (!isCurrentRunMessage) return;
     this.lastAssistantId = message.id;
-    const live = this.mapMessages([message], this.controllerThreadState.toolOutcomes)[0];
+    const live = this.mapMessages([message])[0];
     if (!live) return;
     this.updateAssistantProjection(threadId, live);
     this.publish({
@@ -1107,13 +1124,6 @@ export class TextRuntime {
       ...(isError ? { error: typeof content === "string" ? content.slice(0, 2_000) : "Tool failed." } : {}),
     };
     this.runToolOutcomes.set(toolCallId, outcome);
-    const toolOutcomes = Object.fromEntries(
-      Object.entries({ ...(this.controllerThreadState.toolOutcomes ?? {}), [toolCallId]: outcome }).slice(-250),
-    );
-    this.controllerThreadState = { ...this.controllerThreadState, toolOutcomes };
-    const threadId = this.controllerThreadId ?? this.selectedThreadId;
-    if (threadId) void this.persistThreadState(threadId, this.controllerThreadState);
-    if (this.selectedThreadId === this.controllerThreadId) this.threadState = this.controllerThreadState;
     const single = new Map([[toolCallId, outcome]]);
     for (const projection of this.assistantProjections.values()) {
       for (const [messageId, message] of projection.messages) projection.messages.set(messageId, applyToolOutcomes([message], single)[0]);
@@ -1169,6 +1179,7 @@ export class TextRuntime {
 
     if (chunk.type === "start") {
       this.taskToolPolicy.reset(threadId);
+      this.runToolOutcomes.clear();
       this.runId = runId;
       this.runOutcome = "streaming";
       this.runError = null;
@@ -1205,24 +1216,7 @@ export class TextRuntime {
       this.updateThreadActivity(threadId, "waiting", 1);
     }
 
-    if (chunk.type === "tool-result") {
-      const result = payload.result;
-      if (result && typeof result === "object" && Array.isArray((result as { tasks?: unknown }).tasks)) {
-        const tasks = ((result as { tasks: unknown[] }).tasks).flatMap((value): WorkbenchTask[] => {
-          if (!value || typeof value !== "object") return [];
-          const task = value as Record<string, unknown>;
-          if (typeof task.id !== "string" || typeof task.content !== "string" || typeof task.activeForm !== "string" || (task.status !== "pending" && task.status !== "in_progress" && task.status !== "completed")) return [];
-          return [{ id: task.id, content: task.content, activeForm: task.activeForm, status: task.status }];
-        });
-        if (tasks.length === (result as { tasks: unknown[] }).tasks.length) {
-          this.controllerThreadState = { ...this.controllerThreadState, tasks };
-          if (threadId === this.selectedThreadId) {
-            this.threadState = this.controllerThreadState;
-            this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
-          }
-        }
-      }
-    }
+    if (chunk.type === "tool-result") void this.refreshNativeTasks(threadId);
 
     if (threadId === this.selectedThreadId && projection.message.parts.length > 0) {
       this.lastAssistantId = projection.message.id;
@@ -1243,6 +1237,7 @@ export class TextRuntime {
   }
 
   private async settleNativeRun(threadId: string): Promise<void> {
+    await this.refreshNativeTasks(threadId);
     await this.syncMessagesSafely(threadId);
     await this.refreshThreadSummaries();
     if (threadId === this.selectedThreadId) {
@@ -1251,6 +1246,16 @@ export class TextRuntime {
         activeRun: null,
         workbench: this.workbenchFromState(this.threadState, null),
       });
+    }
+  }
+
+  private async refreshNativeTasks(threadId: string): Promise<void> {
+    const tasks = await this.loadNativeTasks(threadId).catch(() => null);
+    if (!tasks) return;
+    if (threadId === this.controllerThreadId) this.controllerThreadState = { ...this.controllerThreadState, tasks };
+    if (threadId === this.selectedThreadId) {
+      this.threadState = { ...this.threadState, tasks };
+      this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
     }
   }
 
@@ -1557,8 +1562,7 @@ export class TextRuntime {
     const rawMessages = await this.threads.recall(threadId) as MastraMessage[];
     if (guard && ((guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration) || (guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration))) return false;
     this.recordPersistedAssistantIds(threadId, rawMessages);
-    const persistedOutcomes = threadId === this.controllerThreadId ? this.controllerThreadState.toolOutcomes : threadId === this.selectedThreadId ? this.threadState.toolOutcomes : undefined;
-    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages, persistedOutcomes), true);
+    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
     if (threadId === this.controllerThreadId) {
       const restoredTasks = latestTaskSnapshot(messages);
       if (restoredTasks) {

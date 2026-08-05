@@ -29,6 +29,11 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("workspace: this.workspace");
     expect(runtime).not.toContain("session.subscribe((event)");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
+    expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.steer");
+    expect(runtime).toContain('getStore("threadState")');
+    expect(runtime).toContain("type: TASK_STATE_TYPE");
+    expect(runtime).toContain("proteus.ui.v2");
+    expect(runtime).toContain("tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes");
     expect(app.toLowerCase()).not.toContain("previous decisions");
     expect(app).not.toContain("TypingDots");
   });
