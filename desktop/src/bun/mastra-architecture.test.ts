@@ -23,7 +23,9 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).not.toContain('if (this.snapshot.selectedProviderId === "codex") return this.startCodexRun');
     expect(runtime).not.toContain("CodexProviderRuntime");
     expect(runtime).toContain("return resolveCodexGatewayModel(modelId");
-    expect(runtime).toContain("gateways: [openRouterGateway, this.codexGateway]");
+    expect(runtime).not.toContain("AgentController");
+    expect(runtime).not.toContain("agentControllers:");
+    expect(runtime).toContain("memory: this.memory");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
     expect(runtime).toContain("workspace: this.workspace");

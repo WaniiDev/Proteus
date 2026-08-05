@@ -1,33 +1,34 @@
-# PROTEUS text chat + Mastra Workbench
+# PROTEUS text chat + native Mastra runtime
 
-This is the durable implementation record for the first production slice: an OpenRouter-only text chat that is reliable end to end and uses Mastra Core for the run lifecycle.
+This is the implementation record for the native Mastra text-chat backbone.
 
-## Delivered contract
+## Runtime ownership
 
-- OpenRouter is the only model gateway exposed by the desktop runtime.
-- Mastra AgentController owns the active text run, streaming messages, token usage, task state, follow-up lifecycle, and native suspensions.
-- `ask_user` and task tools are enabled through the controller mode allowlist. `subagent`, workspace tools, and external action tools remain disabled.
-- `submit_plan` is a PROTEUS inline suspension adapter. It keeps the Mastra suspend/resume contract but does not grant the agent filesystem write access.
-- Human-in-the-loop cards render in the main transcript. The Workbench is a read-only operational ledger with links back to those cards.
-- One run may be active at a time. Follow-ups are an editable PROTEUS-owned FIFO queue; steering clears native/app follow-ups into a recoverable “Cleared by steering” list.
-- Retry, stop, continue, copy, Markdown/GFM rendering, smart latest-message scrolling, per-conversation Workbench state, and local first-message titles are part of the text-chat slice.
+- One retained `Mastra` application registers the PROTEUS `Agent`, `Memory`, contained plan `Workspace`, gateways, storage, and `TaskSignalProvider`.
+- The desktop shell shuts the retained Mastra application down on quit so workspace and LibSQL handles are released.
+- `NativeAgentDriver` is a thin UI adapter over `subscribeToThread`, `queueMessage`, `sendStreamResume`, `sendToolApproval`, `listSuspendedRuns`, and the subscription abort function.
+- Normal sends, queued sends, retries, and continuations all enter Mastra through `queueMessage`. Queue state comes from Mastra's accepted `wake` or `deliver` action.
+- There is no application-owned steering queue and no AgentController session in the live runtime.
 
-## Mastra adapter rules
+## Durable state rules
 
-1. Project `session.displayState` immediately into plain RPC data; Mastra reuses and mutates the same display-state object.
-2. Keep the UI-selected thread separate from the Mastra-bound run thread because `session.thread.switch()` aborts/rebinds the active subscription.
-3. Validate `ask_user` answers and `submit_plan` resume payloads before calling `session.respondToToolSuspension()`.
-4. Persist Workbench metadata per thread. Native pending suspensions cannot be resumed safely after a desktop restart; restored stale cards are marked cancelled.
-5. Keep the shared contracts as an explicit adapter boundary because AgentController is beta and the installed Mastra version is pinned.
+1. Mastra `Memory` owns threads and messages. The UI only projects those records.
+2. `TaskSignalProvider` owns tasks in Mastra's `threadState` domain; thread metadata never overwrites native task state.
+3. Persisted Mastra tool message parts own historical tool status and output. In-memory outcomes exist only to bridge an active stream until memory catches up.
+4. `listSuspendedRuns({ threadId, resourceId })` is the durable source for pending plan/question recovery after restart.
+5. Plan approval resumes with `sendStreamResume`. Approved plans pass `streamOptions.activeTools` without `submit_plan`, preventing approval loops in the resumed run.
+6. `proteus.ui.v2` metadata contains UI-only state. Legacy `proteus.workbench.v1` metadata is read during migration, while duplicated task/tool fields are stripped on write.
 
-## Backlog (do not forget)
+## Framework-first boundaries
 
-- Workspace write/edit tools and full tool approval/audit history.
-- External actions/connectors, notifications, and durable action receipts.
+- `submitPlanTool`, `askUserTool`, `TaskSignalProvider`, `Memory`, `Workspace`, `LibSQLStore`, and native Agent thread/message APIs come from the installed Mastra packages.
+- Shared RPC contracts remain a presentation boundary; they do not implement a second run, queue, task, or suspension engine.
+- Diagnostics are local and optional. No Mastra observability backend is configured.
+
+## Backlog
+
+- External actions/connectors and durable action receipts.
 - Subagent/delegation support.
 - Advanced memory controls and semantic recall UI.
-- Concurrent runs across multiple conversations.
-- Drag-reorder queued follow-ups; edit/resend/regenerate polish beyond retry.
-- Thumbs up/down feedback, read aloud, export, transcript search/virtualization.
-- Per-response token/cost details, richer evidence/surfaces, voice, image, and multimodal input.
-
+- Concurrent visible runs across multiple conversations.
+- Transcript search/virtualization, export, feedback, voice, image, and multimodal input.
