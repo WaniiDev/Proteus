@@ -19,6 +19,7 @@ import { PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, plan
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
 import { CodexProviderRuntime, emptyCodexProjection, projectCodexUpdate, type CodexProjection } from "./codex-provider";
+import { selectedModelMissingFromCatalog } from "./provider-readiness";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -629,6 +630,11 @@ export class TextRuntime {
 
   private mergeProviderModels(providerId: ProviderId, models: RuntimeSnapshot["models"]): RuntimeSnapshot["models"] {
     return [...this.snapshot.models.filter((model) => model.providerId !== providerId), ...models];
+  }
+
+  private idleStatus(providerId = this.snapshot.selectedProviderId): RuntimeSnapshot["status"] {
+    if (providerId === "codex") return this.snapshot.providers.find((provider) => provider.id === "codex")?.availability === "ready" ? "ready" : "error";
+    return this.snapshot.credential.verified ? "ready" : "needs-key";
   }
 
   private async refreshCodexModels(): Promise<void> {
@@ -1512,7 +1518,7 @@ export class TextRuntime {
     const apiKey = await this.vault.get();
     if (!apiKey) {
       this.publish({
-        status: "needs-key",
+        status: this.idleStatus(),
         credential: { configured: false, verified: false },
       });
       return;
@@ -1533,7 +1539,7 @@ export class TextRuntime {
         const models = await listOpenRouterTextModels(apiKey);
         this.publish({ models: this.mergeProviderModels("openrouter", models), status: "ready", error: null });
         await this.syncThreadState({ clearError: false });
-        if (this.snapshot.selectedModelId !== DEFAULT_MODEL_ID && !models.some((model) => model.id === this.snapshot.selectedModelId)) {
+        if (this.snapshot.selectedModelId !== DEFAULT_MODEL_ID && selectedModelMissingFromCatalog(this.snapshot.selectedProviderId, this.snapshot.selectedModelId, "openrouter", models)) {
           this.publish({
             status: "error",
             error: makeRuntimeError("model-unavailable"),
@@ -1549,10 +1555,11 @@ export class TextRuntime {
     } catch (error) {
       const normalized = normalizeError(error);
       const transient = normalized.code === "offline" || normalized.code === "timeout" || normalized.code === "rate-limited";
+      const codexSelected = this.snapshot.selectedProviderId === "codex";
       this.publish({
-        status: transient ? "offline" : normalized.code === "secure-store-unavailable" ? "error" : "needs-key",
+        status: codexSelected ? this.idleStatus("codex") : transient ? "offline" : normalized.code === "secure-store-unavailable" ? "error" : "needs-key",
         credential: { configured: true, verified: false },
-        error: transient || normalized.code === "secure-store-unavailable" ? normalized : makeRuntimeError("invalid-credential"),
+        error: codexSelected ? null : transient || normalized.code === "secure-store-unavailable" ? normalized : makeRuntimeError("invalid-credential"),
       });
     }
   }
@@ -1647,7 +1654,7 @@ export class TextRuntime {
     try {
       const models = await listOpenRouterTextModels(apiKey);
       this.publish({ models: this.mergeProviderModels("openrouter", models), status: "ready", error: null });
-      if (this.snapshot.selectedModelId !== DEFAULT_MODEL_ID && !models.some((model) => model.id === this.snapshot.selectedModelId)) {
+      if (this.snapshot.selectedModelId !== DEFAULT_MODEL_ID && selectedModelMissingFromCatalog(this.snapshot.selectedProviderId, this.snapshot.selectedModelId, "openrouter", models)) {
         this.publish({
           status: "error",
           error: makeRuntimeError("model-unavailable"),
@@ -1695,6 +1702,7 @@ export class TextRuntime {
       selectedProviderId: model.providerId,
       selectedModelId: modelId,
       selectedReasoningEffort: model.reasoningEffort ?? null,
+      status: this.idleStatus(model.providerId),
       error: null,
     });
   }
@@ -1845,7 +1853,7 @@ export class TextRuntime {
       this.startingRunId = null;
       if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
         this.publish({
-          status: this.snapshot.credential.verified ? "ready" : "needs-key",
+          status: this.idleStatus(),
           activeRun: null,
           ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}),
         });
@@ -1857,7 +1865,7 @@ export class TextRuntime {
     await this.ensureInitialized();
     if (this.snapshot.selectedProviderId === "openrouter" && (!this.snapshot.credential.configured || !this.snapshot.credential.verified)) throw makeRuntimeError("invalid-credential");
     if (this.snapshot.selectedProviderId === "codex" && this.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
-    if (this.snapshot.status === "error" && this.snapshot.error?.code === "model-unavailable") throw makeRuntimeError("model-unavailable");
+    if (this.snapshot.selectedProviderId === "openrouter" && this.snapshot.status === "error" && this.snapshot.error?.code === "model-unavailable") throw makeRuntimeError("model-unavailable");
     this.retryingText = null;
     this.hideSingleRetry = false;
 
@@ -2310,7 +2318,7 @@ export class TextRuntime {
         this.startingRunId = null;
         if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
           this.publish({
-            status: this.snapshot.credential.verified ? "ready" : "needs-key",
+            status: this.idleStatus(),
             activeRun: null,
             ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}),
           });
@@ -2427,7 +2435,7 @@ export class TextRuntime {
         this.startingRunId = null;
         if (reservationId && this.runId === null && this.snapshot.activeRun?.runId === reservationId) {
           this.publish({
-            status: this.snapshot.credential.verified ? "ready" : "needs-key",
+            status: this.idleStatus(),
             activeRun: null,
             ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}),
           });

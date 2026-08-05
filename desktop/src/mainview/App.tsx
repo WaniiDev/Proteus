@@ -13,7 +13,7 @@ import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { Workbench } from "./Workbench";
-import { composerAction, composerLineCount, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -733,8 +733,9 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
-  const selectedProvider = snapshot.providers.find((provider) => provider.id === snapshot.selectedProviderId);
-  const canChat = selectedProvider?.verified === true && snapshot.activeThreadId !== null && snapshot.status !== "error" && !runningElsewhere;
+  const effectiveProviderId = selectedModel?.providerId ?? snapshot.selectedProviderId;
+  const selectedProvider = snapshot.providers.find((provider) => provider.id === effectiveProviderId);
+  const canChat = selectedProviderCanChat(snapshot) && snapshot.activeThreadId !== null && !runningElsewhere;
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
@@ -885,7 +886,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                   setInput(event.target.value);
                   orbRef.current?.nudge();
                 }}
-                placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message PROTEUS…" : "Connect OpenRouter in Settings to chat"}
+                placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message PROTEUS…" : `Configure ${selectedProvider?.name ?? "a provider"} in Settings to chat`}
                 aria-label="Message PROTEUS"
                 disabled={!canChat}
                 maxLength={32_000}

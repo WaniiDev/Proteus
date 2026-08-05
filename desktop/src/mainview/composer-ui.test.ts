@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { ChatMessage } from "../shared/contracts";
-import { composerAction, composerLineCount, reconcileQueuedDrafts, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import type { ChatMessage, RuntimeSnapshot } from "../shared/contracts";
+import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const draft = (id: string, text = `Message ${id}`): QueuedDraft => ({ id, threadId: "thread-1", text, createdAt: `2026-08-04T00:00:0${id}.000Z`, state: "queued" });
 const user = (id: string, text: string, createdAt: string): ChatMessage => ({ id, role: "user", text, turnId: id, status: "complete", createdAt, parts: [{ type: "text", id: `${id}:text`, text }] });
@@ -10,6 +10,29 @@ describe("composer UI policy", () => {
     expect(composerAction(false, true)).toBe("send");
     expect(composerAction(true, false)).toBe("stop");
     expect(composerAction(true, true)).toBe("queue");
+  });
+
+  it("allows a ready Codex model without an OpenRouter credential or OpenRouter runtime status", () => {
+    const snapshot = {
+      revision: 1,
+      status: "error",
+      credential: { configured: false, verified: false },
+      providers: [
+        { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
+        { id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" },
+      ],
+      models: [{ id: "codex/gpt-5.3-codex-spark[xhigh]", providerId: "codex", rawId: "gpt-5.3-codex-spark[xhigh]", name: "GPT-5.3 Codex Spark (xhigh)", inputModalities: ["text"], outputModalities: ["text"] }],
+      selectedProviderId: "codex",
+      selectedModelId: "codex/gpt-5.3-codex-spark[xhigh]",
+      selectedReasoningEffort: "xhigh",
+      threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [], toolApproval: null,
+      workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
+      activeRun: null,
+      error: { code: "model-unavailable", message: "Stale OpenRouter error", retryable: true },
+    } satisfies RuntimeSnapshot;
+
+    expect(selectedProviderCanChat(snapshot)).toBe(true);
+    expect(selectedProviderCanChat({ ...snapshot, selectedProviderId: "openrouter", selectedModelId: "openrouter/auto", models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] }] })).toBe(false);
   });
 
   it("submits Enter but preserves Shift+Enter and IME composition", () => {

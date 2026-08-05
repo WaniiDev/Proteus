@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../shared/contracts";
+import type { ChatMessage, RuntimeSnapshot } from "../shared/contracts";
 
 export type ComposerAction = "send" | "queue" | "stop";
 
@@ -9,6 +9,14 @@ export type QueuedDraft = {
   createdAt: string;
   state: "queued" | "sending";
 };
+
+export function selectedProviderCanChat(snapshot: RuntimeSnapshot): boolean {
+  const model = snapshot.models.find((candidate) => candidate.id === snapshot.selectedModelId);
+  const providerId = model?.providerId ?? snapshot.selectedProviderId;
+  const provider = snapshot.providers.find((candidate) => candidate.id === providerId);
+  if (!provider?.verified || provider.availability !== "ready") return false;
+  return providerId === "codex" || snapshot.credential.verified;
+}
 
 export function composerAction(running: boolean, hasDraft: boolean): ComposerAction {
   if (!running) return "send";
