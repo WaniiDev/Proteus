@@ -3,20 +3,21 @@ import type { PendingInteraction } from "../shared/contracts";
 export type InteractionSubmissionAction = "approve" | "reject" | "answer" | null;
 
 export function interactionSubmissionUi(status: PendingInteraction["status"], action: InteractionSubmissionAction) {
-  const resolving = status === "resolving" || action !== null;
+  const activeAction = status === "pending" ? action : null;
+  const resolving = status === "resolving" || activeAction !== null;
   return {
     resolving,
     kicker:
-      action === "approve"
+      activeAction === "approve"
         ? "Approving plan…"
-        : action === "reject"
+        : activeAction === "reject"
           ? "Sending requested changes…"
-          : action === "answer"
+          : activeAction === "answer"
             ? "Sending answer…"
             : status === "resolving"
               ? "Sending response…"
               : null,
-    approveLabel: action === "approve" ? "Approving…" : "Approve plan",
-    rejectLabel: action === "reject" ? "Sending changes…" : "Request changes",
+    approveLabel: activeAction === "approve" ? "Approving…" : "Approve plan",
+    rejectLabel: activeAction === "reject" ? "Sending changes…" : "Request changes",
   };
 }

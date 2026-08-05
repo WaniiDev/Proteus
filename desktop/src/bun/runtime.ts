@@ -7,13 +7,14 @@ import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
+import { MastraStorageExporter, Observability, SensitiveDataFilter } from "@mastra/observability";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
@@ -25,6 +26,7 @@ import { selectedModelMissingFromCatalog } from "./provider-readiness";
 import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection, resolveCodexGatewayModel } from "./codex-models";
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-oauth-failure";
 import { reconcileProviderAuth } from "./provider-auth";
+import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -121,6 +123,7 @@ type PersistedThreadState = {
   resolvedInteractions?: PendingInteraction[];
   events?: ChatEvent[];
   tokenUsage?: TokenUsage;
+  toolOutcomes?: Record<string, ProjectedToolOutcome>;
   modelSelection?: {
     providerId: ProviderId;
     modelId: ProviderModelId;
@@ -439,6 +442,7 @@ export class TextRuntime {
   private readonly codexGateway: MastraCodeGateway;
   private readonly codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>;
   private readonly codexCredentialStore: CodexCredentialStore;
+  private readonly diagnostics: RuntimeDiagnostics;
   private codexAuthAbortController: AbortController | null = null;
   private codexManualInput: { resolve: (value: string) => void; reject: (error: Error) => void } | null = null;
   private readonly taskToolPolicy = new TaskToolPolicy();
@@ -517,6 +521,7 @@ export class TextRuntime {
   constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore()) {
     this.vault = vault;
     this.codexCredentialStore = codexCredentialStore;
+    this.diagnostics = new RuntimeDiagnostics(Utils.paths.userData);
     this.codexGateway = new MastraCodeGateway({
       mastraGatewayBaseUrl: "https://gateway-api.mastra.ai",
       routeThroughMastraGateway: false,
@@ -606,8 +611,39 @@ export class TextRuntime {
       agents: { proteus: this.agent },
       agentControllers: { proteus: this.controller },
       gateways: { "models.dev": openRouterGateway, mastracode: this.codexGateway },
+      observability: new Observability({
+        configs: {
+          default: {
+            serviceName: "proteus-desktop",
+            exporters: [new MastraStorageExporter({ maxBatchWaitMs: 250, maxBatchSize: 50 })],
+            spanOutputProcessors: [new SensitiveDataFilter()],
+            includeInternalSpans: true,
+            serializationOptions: { maxStringLength: 8_000, maxDepth: 7, maxArrayLength: 80, maxObjectKeys: 100 },
+          },
+        },
+      }),
       logger: false,
     });
+  }
+
+  getDiagnostics(limit?: number): DiagnosticsSnapshot {
+    return this.diagnostics.snapshot(limit);
+  }
+
+  setDiagnosticsEnabled(enabled: boolean): DiagnosticsSnapshot {
+    return this.diagnostics.setEnabled(enabled);
+  }
+
+  clearDiagnostics(): Promise<DiagnosticsSnapshot> {
+    return this.diagnostics.clear();
+  }
+
+  async exportDiagnostics(): Promise<{ path: string }> {
+    return { path: await this.diagnostics.export() };
+  }
+
+  traceDiagnostic(input: DiagnosticInput): void {
+    this.diagnostics.record(input);
   }
 
   onSnapshot(listener: SnapshotListener): () => void {
@@ -727,12 +763,16 @@ export class TextRuntime {
   }
 
   private async persistThreadState(threadId: string, state = this.threadState): Promise<void> {
+    if (!threadId) return;
     const next = structuredClone(state);
     this.threadStateCache.set(threadId, next);
+    const queuedAt = performance.now();
     const previous = this.threadWriteQueues.get(threadId) ?? Promise.resolve();
     const write = previous
       .catch(() => undefined)
       .then(async () => {
+        const startedAt = performance.now();
+        this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "start", threadId, durationMs: startedAt - queuedAt });
         try {
           const memoryStore = await this.storage.getStore("memory");
           const thread = await memoryStore?.getThreadById({
@@ -749,7 +789,9 @@ export class TextRuntime {
               },
             });
           }
-        } catch {
+          this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "end", threadId, durationMs: performance.now() - startedAt });
+        } catch (error) {
+          this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "error", threadId, durationMs: performance.now() - startedAt, payload: error });
           // Workbench metadata must never make text chat fail.
         }
       });
@@ -917,7 +959,7 @@ export class TextRuntime {
     if (generation !== this.threadSelectionGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== threadId)) return;
     this.selectedThreadId = threadId;
     this.recordPersistedAssistantIds(threadId, rawMessages as MastraMessage[]);
-    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
+    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages, state.toolOutcomes), true);
     if (this.reconcileHistoricalPlanInteractions(messages, state)) await this.persistThreadState(threadId, state);
     this.threadState = state;
     const displayState = this.displayStateForThread(threadId);
@@ -945,7 +987,7 @@ export class TextRuntime {
     });
   }
 
-  private mapMessages(rawMessages: MastraMessage[]): ChatMessage[] {
+  private mapMessages(rawMessages: MastraMessage[], persistedOutcomes?: Record<string, ProjectedToolOutcome>): ChatMessage[] {
     const retryMatches = this.retryingText ? rawMessages.map((message, index) => (chatRole(message) === "user" && extractText(message) === this.retryingText ? index : -1)).filter((index) => index >= 0) : [];
     const hiddenRetryIndex = retryMatches.length >= 2 || (this.hideSingleRetry && retryMatches.length >= 1) ? retryMatches[retryMatches.length - 1] : -1;
     const hiddenRetryId = hiddenRetryIndex >= 0 ? rawMessages[hiddenRetryIndex]?.id : undefined;
@@ -990,6 +1032,7 @@ export class TextRuntime {
       })
       .filter((message) => message.parts.length > 0);
     const outcomes = historicalTaskToolOutcomes(rawMessages);
+    for (const [toolCallId, outcome] of Object.entries(persistedOutcomes ?? {})) outcomes.set(toolCallId, outcome);
     for (const [toolCallId, outcome] of this.runToolOutcomes) outcomes.set(toolCallId, outcome);
     return normalizeLegacyTaskToolArtifacts(applyToolOutcomes(projected, outcomes));
   }
@@ -1044,7 +1087,7 @@ export class TextRuntime {
     const isCurrentRunMessage = !this.runStartedAt || !messageCreatedAt || messageCreatedAt >= this.runStartedAt || message.id === this.lastAssistantId;
     if (!isCurrentRunMessage) return;
     this.lastAssistantId = message.id;
-    const live = this.mapMessages([message])[0];
+    const live = this.mapMessages([message], this.controllerThreadState.toolOutcomes)[0];
     if (!live) return;
     this.updateAssistantProjection(threadId, live);
     this.publish({
@@ -1061,6 +1104,13 @@ export class TextRuntime {
       ...(isError ? { error: typeof content === "string" ? content.slice(0, 2_000) : "Tool failed." } : {}),
     };
     this.runToolOutcomes.set(toolCallId, outcome);
+    const toolOutcomes = Object.fromEntries(
+      Object.entries({ ...(this.controllerThreadState.toolOutcomes ?? {}), [toolCallId]: outcome }).slice(-250),
+    );
+    this.controllerThreadState = { ...this.controllerThreadState, toolOutcomes };
+    const threadId = this.controllerThreadId ?? this.selectedThreadId;
+    if (threadId) void this.persistThreadState(threadId, this.controllerThreadState);
+    if (this.selectedThreadId === this.controllerThreadId) this.threadState = this.controllerThreadState;
     const single = new Map([[toolCallId, outcome]]);
     for (const projection of this.assistantProjections.values()) {
       for (const [messageId, message] of projection.messages) projection.messages.set(messageId, applyToolOutcomes([message], single)[0]);
@@ -1109,6 +1159,15 @@ export class TextRuntime {
   }
 
   private handleControllerEvent(event: AgentControllerEvent): void {
+    const eventRecord = event as unknown as { toolCallId?: unknown };
+    this.diagnostics.record({
+      source: "mastra",
+      type: event.type,
+      threadId: this.controllerThreadId,
+      runId: this.runId,
+      toolCallId: typeof eventRecord.toolCallId === "string" ? eventRecord.toolCallId : undefined,
+      payload: event,
+    });
     if (event.type === "display_state_changed") {
       this.displayState = event.displayState;
       if (event.displayState.currentMessage) this.publishLiveMessage(event.displayState.currentMessage as MastraMessage);
@@ -1413,7 +1472,8 @@ export class TextRuntime {
     })) as MastraMessage[];
     if (guard && ((guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration) || (guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration))) return false;
     this.recordPersistedAssistantIds(threadId, rawMessages);
-    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages), true);
+    const persistedOutcomes = threadId === this.controllerThreadId ? this.controllerThreadState.toolOutcomes : threadId === this.selectedThreadId ? this.threadState.toolOutcomes : undefined;
+    const messages = this.mergeTransientMessages(threadId, this.mapMessages(rawMessages, persistedOutcomes), true);
     if (threadId === this.controllerThreadId) {
       const restoredTasks = latestTaskSnapshot(messages);
       if (restoredTasks) {
@@ -1615,6 +1675,7 @@ export class TextRuntime {
     this.initializePromise ??= (async () => {
       try {
         await ensureUserDataDirectory();
+        await this.diagnostics.initialize();
         await cutOverLegacyRuntimeData(Utils.paths.userData);
         await this.controller.init();
         this.session = await this.controller.createSession({
@@ -2205,7 +2266,9 @@ export class TextRuntime {
   }
 
   async respondToInteraction(toolCallId: string, response: unknown): Promise<InteractionResponseResult> {
+    const requestStartedAt = performance.now();
     const session = await this.ensureInitialized();
+    this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "received", threadId: this.controllerThreadId, runId: this.runId, toolCallId, payload: { response } });
     const interaction = this.controllerThreadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
     if (!interaction) return this.interactionFailure({ code: "stale", message: "That request is no longer waiting for an answer.", retryable: false });
     if (interaction.status !== "pending") return this.interactionFailure({ code: "busy", message: "That request is already being resolved.", retryable: interaction.status === "failed" });
@@ -2252,7 +2315,6 @@ export class TextRuntime {
       ...this.controllerThreadState,
       pendingInteractions: (this.controllerThreadState.pendingInteractions ?? []).map((item) => (item.toolCallId === toolCallId ? resolving : item)),
     };
-    await this.persistThreadState(this.controllerThreadId ?? this.selectedThreadId ?? "", this.controllerThreadState);
     if (this.selectedThreadId === this.controllerThreadId) {
       this.threadState = this.controllerThreadState;
       this.publish({
@@ -2260,15 +2322,32 @@ export class TextRuntime {
         workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
       });
     }
+    this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "ui_resolving", threadId: this.controllerThreadId, runId: this.runId, toolCallId, durationMs: performance.now() - requestStartedAt });
+    void this.completeInteractionResponse(toolCallId, resumeData, interaction, nextStatus, feedback);
+    return { accepted: true };
+  }
+
+  private async completeInteractionResponse(toolCallId: string, resumeData: unknown, interaction: PendingInteraction, nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">, feedback?: string): Promise<void> {
+    const session = this.requireSession();
+    const threadId = this.controllerThreadId ?? this.selectedThreadId ?? undefined;
+    const persistStartedAt = performance.now();
     try {
-      if (interaction.kind === "submit_plan" && nextStatus === "approved") await syncPlanWorkflowModel(session);
+      if (threadId) await this.persistThreadState(threadId, this.controllerThreadState);
+      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "state_persisted", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - persistStartedAt });
+      if (interaction.kind === "submit_plan" && nextStatus === "approved") {
+        const modelStartedAt = performance.now();
+        await syncPlanWorkflowModel(session);
+        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "plan_model_synced", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - modelStartedAt, payload: { modelId: session.model.get(), modeId: session.mode.get() } });
+      }
+      const resumeStartedAt = performance.now();
       await session.respondToToolSuspension({ toolCallId, resumeData });
+      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - resumeStartedAt, payload: { suspensionRemaining: session.suspensions.has({ toolCallId }) } });
       const completed = this.resolvingInteractions.get(toolCallId);
       let evidence = completed?.terminalEvidence;
       const expectedDecision = interaction.kind === "submit_plan" ? nextStatus : undefined;
       if ((!evidence || evidence.status !== "completed" || (expectedDecision && evidence.decision !== expectedDecision)) && interaction.kind === "submit_plan") {
-        const threadId = session.thread.requireId();
-        const persisted = this.mapMessages(await session.thread.listMessages({ threadId }));
+        const persistedThreadId = session.thread.requireId();
+        const persisted = this.mapMessages(await session.thread.listMessages({ threadId: persistedThreadId }), this.controllerThreadState.toolOutcomes);
         evidence = findInteractionToolOutcome(persisted, interaction, expectedDecision === "approved" || expectedDecision === "rejected" ? expectedDecision : undefined) ?? evidence;
       }
       if (!evidence && this.resolvingInteractions.has(toolCallId) && !session.suspensions.has({ toolCallId })) {
@@ -2285,17 +2364,21 @@ export class TextRuntime {
           this.recordToolOutcome(toolCallId, submitPlanResolutionResult(nextStatus === "approved" ? "approved" : "rejected", feedback), false);
         }
         this.finalizeResolvingInteractions(toolCallId);
-        return { accepted: true };
+        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "completed", threadId, runId: this.runId, toolCallId, payload: evidence });
+        return;
       }
       const failed = this.controllerThreadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId && item.status === "failed");
-      if (failed?.error) return this.interactionFailure(failed.error);
+      if (failed?.error) {
+        this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "failed", threadId, runId: this.runId, toolCallId, payload: failed.error });
+        return;
+      }
       const failure: InteractionError = { code: "resume-failed", message: "Mastra did not confirm the response with a terminal tool result. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
       this.markInteractionFailed(toolCallId, failure);
-      return this.interactionFailure(failure);
+      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "failed", threadId, runId: this.runId, toolCallId, payload: failure });
     } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not resume this request. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
       this.markInteractionFailed(toolCallId, failure);
-      return this.interactionFailure(failure);
+      this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "error", threadId, runId: this.runId, toolCallId, payload: error });
     }
   }
 

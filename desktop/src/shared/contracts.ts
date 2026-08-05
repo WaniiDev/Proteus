@@ -234,6 +234,30 @@ export const toolApprovalSchema = z.object({
 });
 export type ToolApproval = z.infer<typeof toolApprovalSchema>;
 
+export const diagnosticSourceSchema = z.enum(["mastra", "runtime", "rpc", "storage"]);
+export type DiagnosticSource = z.infer<typeof diagnosticSourceSchema>;
+
+export const diagnosticEntrySchema = z.object({
+  sequence: z.number().int().nonnegative(),
+  timestamp: z.string(),
+  source: diagnosticSourceSchema,
+  type: z.string().min(1),
+  phase: z.string().optional(),
+  threadId: z.string().optional(),
+  runId: z.string().optional(),
+  toolCallId: z.string().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  payload: z.unknown().optional(),
+});
+export type DiagnosticEntry = z.infer<typeof diagnosticEntrySchema>;
+
+export const diagnosticsSnapshotSchema = z.object({
+  enabled: z.boolean(),
+  filePath: z.string(),
+  entries: z.array(diagnosticEntrySchema),
+});
+export type DiagnosticsSnapshot = z.infer<typeof diagnosticsSnapshotSchema>;
+
 export const runtimeSnapshotSchema = z.object({
   revision: z.number().int().nonnegative().default(0),
   status: runtimeStatusSchema,
@@ -363,6 +387,22 @@ export const proteusRpcSchema = {
       "chat.abort": {
         params: undefined as undefined,
         response: {} as { accepted: boolean },
+      },
+      "diagnostics.get": {
+        params: {} as { limit?: number } | undefined,
+        response: {} as DiagnosticsSnapshot,
+      },
+      "diagnostics.set-enabled": {
+        params: {} as { enabled: boolean },
+        response: {} as DiagnosticsSnapshot,
+      },
+      "diagnostics.clear": {
+        params: undefined as undefined,
+        response: {} as DiagnosticsSnapshot,
+      },
+      "diagnostics.export": {
+        params: undefined as undefined,
+        response: {} as { path: string },
       },
     },
     messages: {},

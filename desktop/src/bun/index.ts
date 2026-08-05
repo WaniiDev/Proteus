@@ -209,9 +209,14 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         }
       },
       "chat.interaction.respond": async ({ toolCallId, response }) => {
+        const startedAt = performance.now();
+        runtime.traceDiagnostic({ source: "rpc", type: "chat.interaction.respond", phase: "start", toolCallId, payload: { response } });
         try {
-          return await runtime.respondToInteraction(toolCallId, response);
+          const result = await runtime.respondToInteraction(toolCallId, response);
+          runtime.traceDiagnostic({ source: "rpc", type: "chat.interaction.respond", phase: "end", toolCallId, durationMs: performance.now() - startedAt, payload: result });
+          return result;
         } catch (error) {
+          runtime.traceDiagnostic({ source: "rpc", type: "chat.interaction.respond", phase: "error", toolCallId, durationMs: performance.now() - startedAt, payload: error });
           runtime.reportError(error);
           return { accepted: false, code: "resume-failed" as const, message: "The interaction could not be processed.", retryable: true };
         }
@@ -237,6 +242,10 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         runtime.abort();
         return { accepted: true };
       },
+      "diagnostics.get": async (params) => runtime.getDiagnostics(params?.limit),
+      "diagnostics.set-enabled": async ({ enabled }) => runtime.setDiagnosticsEnabled(enabled),
+      "diagnostics.clear": async () => runtime.clearDiagnostics(),
+      "diagnostics.export": async () => runtime.exportDiagnostics(),
     },
     messages: {},
   },

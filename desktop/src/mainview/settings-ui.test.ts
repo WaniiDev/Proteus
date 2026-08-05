@@ -8,6 +8,8 @@ const cssSource = readFileSync(join(import.meta.dir, "index.css"), "utf8");
 describe("Settings provider and model UI", () => {
   it("uses tabbed provider/model sections and a custom model list", () => {
     expect(appSource).toContain('className="settings-tabs"');
+    expect(appSource).toContain('>Developer</button>');
+    expect(appSource).toContain('Runtime diagnostics');
     expect(appSource).toContain("Models & thinking");
     expect(appSource).toContain('className="provider-grid"');
     expect(appSource).toContain('className="model-card-list"');

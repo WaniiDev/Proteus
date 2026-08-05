@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, ChatToolPart, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
@@ -935,8 +935,55 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   );
 }
 
+function diagnosticText(entry: DiagnosticEntry): string {
+  return [entry.type, entry.phase, entry.threadId, entry.runId, entry.toolCallId, entry.payload === undefined ? "" : JSON.stringify(entry.payload)].filter(Boolean).join(" ").toLowerCase();
+}
+
+function DiagnosticsPanel() {
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState<"all" | DiagnosticEntry["source"]>("all");
+  const [exportPath, setExportPath] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = () => rpc.request["diagnostics.get"]({ limit: 1_000 }).then((value) => { setDiagnostics(value); setError(null); }).catch(() => setError("Diagnostics could not be loaded."));
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const entries = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return [...(diagnostics?.entries ?? [])].reverse().filter((entry) => (source === "all" || entry.source === source) && (!needle || diagnosticText(entry).includes(needle)));
+  }, [diagnostics?.entries, query, source]);
+  const copyReport = () => {
+    if (!diagnostics) return;
+    void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+  };
+  return <section className="card settings-card diagnostics-card">
+    <div className="settings-section-head"><div><span className="settings-eyebrow">Developer tools</span><h2 className="title-md">Runtime diagnostics</h2><p className="settings-intro">Captures emitted Mastra lifecycle events, tool inputs and outputs, RPC timing, storage timing, and provider-emitted reasoning. Private chain-of-thought is never exposed.</p></div><label className="diagnostics-toggle"><input type="checkbox" checked={diagnostics?.enabled ?? true} onChange={(event) => rpc.request["diagnostics.set-enabled"]({ enabled: event.target.checked }).then(setDiagnostics)} /><span>Capture</span></label></div>
+    <div className="diagnostics-toolbar">
+      <div className="model-search diagnostics-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter events, IDs, or payloads" aria-label="Filter diagnostics" /></div>
+      <select value={source} onChange={(event) => setSource(event.target.value as typeof source)} aria-label="Diagnostic source"><option value="all">All sources</option><option value="mastra">Mastra</option><option value="runtime">Runtime</option><option value="rpc">RPC</option><option value="storage">Storage</option></select>
+      <button className="btn-outline sm" type="button" onClick={refresh}><Icon name="refresh" size={15} /> Refresh</button>
+      <button className="btn-outline sm" type="button" onClick={copyReport}><Icon name="copy" size={15} /> Copy report</button>
+      <button className="btn-outline sm" type="button" onClick={() => rpc.request["diagnostics.export"]().then((result) => setExportPath(result.path))}>Export</button>
+      <button className="btn-danger-ghost" type="button" onClick={() => rpc.request["diagnostics.clear"]().then(setDiagnostics)}>Clear</button>
+    </div>
+    <div className="diagnostics-meta"><span>{entries.length.toLocaleString()} visible events</span>{diagnostics?.filePath && <code>{diagnostics.filePath}</code>}{exportPath && <span>Exported to <code>{exportPath}</code></span>}</div>
+    {error && <p className="settings-note error">{error}</p>}
+    <div className="diagnostics-list" aria-live="polite">
+      {entries.map((entry) => <details className={`diagnostic-entry source-${entry.source}`} key={entry.sequence}>
+        <summary><span className="diagnostic-sequence">#{entry.sequence}</span><span className="diagnostic-source">{entry.source}</span><strong>{entry.type}</strong>{entry.phase && <span>{entry.phase}</span>}{entry.durationMs !== undefined && <time>{entry.durationMs.toFixed(1)} ms</time>}<time>{new Date(entry.timestamp).toLocaleTimeString()}</time></summary>
+        <div className="diagnostic-identifiers">{entry.threadId && <code>thread {entry.threadId}</code>}{entry.runId && <code>run {entry.runId}</code>}{entry.toolCallId && <code>tool {entry.toolCallId}</code>}</div>
+        {entry.payload !== undefined && <pre>{JSON.stringify(entry.payload, null, 2)}</pre>}
+      </details>)}
+      {entries.length === 0 && <p className="diagnostics-empty">No matching events yet. Reproduce the plan approval bug, then inspect the latest events here.</p>}
+    </div>
+  </section>;
+}
+
 export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: (providerId: "openrouter" | "codex") => void; onStartCodexAuth: (mode: "browser" | "device") => void; onSubmitCodexAuth: (value: string) => void; onCancelCodexAuth: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
-  const [tab, setTab] = useState<"providers" | "models">("providers");
+  const [tab, setTab] = useState<"providers" | "models" | "developer">("providers");
   const [modelSearch, setModelSearch] = useState("");
   const [authorizationCode, setAuthorizationCode] = useState("");
   const selected = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -958,6 +1005,7 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
       <nav className="settings-tabs" aria-label="Settings sections">
         <button type="button" className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers</button>
         <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}>Models & thinking</button>
+        <button type="button" className={tab === "developer" ? "active" : ""} onClick={() => setTab("developer")}>Developer</button>
       </nav>
       {tab === "providers" ? <div className="provider-grid">
         {snapshot.providers.map((provider) => <section className={`card provider-card ${snapshot.selectedProviderId === provider.id ? "selected" : ""}`} key={provider.id}>
@@ -982,14 +1030,14 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
           <button className={snapshot.selectedProviderId === provider.id ? "btn-primary sm" : "btn-outline sm"} type="button" disabled={!provider.verified || snapshot.activeRun !== null || snapshot.selectedProviderId === provider.id} onClick={() => onSelectProvider(provider.id)}>{snapshot.selectedProviderId === provider.id ? "Current provider" : `Use ${provider.name}`}</button>
         </section>)}
         <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
-      </div> : <section className="card settings-card model-settings-card">
+      </div> : tab === "models" ? <section className="card settings-card model-settings-card">
         <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection is saved for this conversation.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
         <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}>{provider.name}</button>)}</div>
         <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
         <div className="model-card-list">{displayedModels.map((model) => { const isSelected = selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId); return <button type="button" className={`model-card ${isSelected ? "selected" : ""}`} key={model.id} onClick={() => chooseDisplayedModel(model)} disabled={snapshot.activeRun !== null}><span className="model-card-copy"><strong>{model.providerId === "codex" ? model.baseModelId : model.name}</strong><small>{model.description ?? model.rawId}</small></span>{isSelected && <Check size={17} />}</button>; })}</div>
         {selected?.reasoningOptions?.length ? <div className="reasoning-control"><div><span className="settings-eyebrow">Thinking</span><strong>Reasoning effort</strong></div><div className="reasoning-options">{selected.reasoningOptions.map((effort) => <button type="button" key={effort} className={snapshot.selectedReasoningEffort === effort ? "active" : ""} onClick={() => onSelectReasoning(effort)} disabled={snapshot.activeRun !== null}>{effort}</button>)}</div></div> : <p className="settings-note">This model does not advertise adjustable reasoning.</p>}
         {selected && <div className="model-meta"><span>{selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}</span>{selected.providerId === "openrouter" && <><span>Prompt {price(selected.promptPrice)}</span><span>Completion {price(selected.completionPrice)}</span></>}</div>}
-      </section>}
+      </section> : <DiagnosticsPanel />}
     </div></section>
   );
 }

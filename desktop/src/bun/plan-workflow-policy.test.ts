@@ -18,6 +18,22 @@ afterEach(async () => {
 });
 
 describe("native Mastra plan workflow policy", () => {
+  it("does not rewrite already-aligned per-mode model settings during approval", async () => {
+    const calls: string[] = [];
+    const session = {
+      mode: { get: () => PLANNING_MODE_ID, switch: async () => undefined },
+      model: {
+        get: () => "openrouter/openai/test-model",
+        switch: async () => { calls.push("switch"); },
+        saveForMode: async ({ modeId }: { modeId: string }) => { calls.push(`save:${modeId}`); },
+        resolveForMode: async () => "openrouter/openai/test-model",
+      },
+    };
+
+    await syncPlanWorkflowModel(session);
+    expect(calls).toEqual([]);
+  });
+
   it("transitions approved plans to a mode where planning tools are unavailable", () => {
     const modes = planWorkflowModes("openrouter/auto");
     const planning = modes.find((mode) => mode.id === PLANNING_MODE_ID);

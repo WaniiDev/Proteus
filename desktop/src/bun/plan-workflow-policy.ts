@@ -34,14 +34,25 @@ type PlanWorkflowSession = {
   model: {
     get(): string;
     switch(input: { modelId: string; scope: "thread"; modeId?: string }): Promise<void>;
+    saveForMode(input: { modeId: string; modelId: string }): Promise<void>;
+    resolveForMode(input: { modeId: string; defaultModelId?: string }): Promise<string | null>;
   };
 };
 
 /** Keep the product's single selected model aligned across Mastra's internal modes. */
 export async function syncPlanWorkflowModel(session: PlanWorkflowSession, modelId = session.model.get()): Promise<void> {
   if (!modelId) return;
-  await session.model.switch({ modelId, scope: "thread", modeId: PLANNING_MODE_ID });
-  await session.model.switch({ modelId, scope: "thread", modeId: APPROVED_PLAN_MODE_ID });
+  const activeModeId = session.mode.get();
+  if (session.model.get() !== modelId) await session.model.switch({ modelId, scope: "thread", modeId: activeModeId });
+  for (const modeId of [PLANNING_MODE_ID, APPROVED_PLAN_MODE_ID]) {
+    if (modeId === activeModeId && session.model.get() === modelId) {
+      const persisted = await session.model.resolveForMode({ modeId });
+      if (persisted !== modelId) await session.model.saveForMode({ modeId, modelId });
+      continue;
+    }
+    const persisted = await session.model.resolveForMode({ modeId });
+    if (persisted !== modelId) await session.model.saveForMode({ modeId, modelId });
+  }
 }
 
 /** Restore the user-facing conversation mode and let Mastra load its saved model. */
