@@ -1,5 +1,5 @@
 import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater } from "electrobun/bun";
-import type { OpenRouterModelId, ProteusRPCSchema } from "../shared/contracts";
+import type { ProviderId, ProviderModelId, ProteusRPCSchema } from "../shared/contracts";
 import { encodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { TextRuntime } from "./runtime";
 
@@ -84,7 +84,16 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       },
       "models.select": async ({ modelId }) => {
         try {
-          await runtime.selectModel(modelId as OpenRouterModelId);
+          await runtime.selectModel(modelId as ProviderModelId);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "providers.select": async ({ providerId }) => {
+        try {
+          await runtime.selectProvider(providerId as ProviderId);
           return { accepted: true };
         } catch (error) {
           runtime.reportError(error);

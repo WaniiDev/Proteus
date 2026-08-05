@@ -93,6 +93,7 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
 
   return {
     id: canonicalizeOpenRouterModelId(raw.id),
+    providerId: "openrouter",
     rawId: raw.id,
     name: typeof raw.name === "string" && raw.name.trim() ? raw.name : raw.id,
     description: typeof raw.description === "string" ? raw.description : undefined,
@@ -113,6 +114,7 @@ export async function listOpenRouterTextModels(apiKey: string): Promise<OpenRout
 
   const autoRouter: OpenRouterModel = {
     id: "openrouter/auto",
+    providerId: "openrouter",
     rawId: "auto",
     name: "Auto Router",
     description: "Let OpenRouter choose a suitable text model for each request.",

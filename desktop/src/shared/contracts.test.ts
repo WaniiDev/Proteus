@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { openRouterModelIdSchema, pendingInteractionSchema, runtimeSnapshotSchema } from "./contracts";
+import { openRouterModelIdSchema, pendingInteractionSchema, providerModelSchema, runtimeSnapshotSchema } from "./contracts";
 
 describe("OpenRouter contracts", () => {
   it("accepts only OpenRouter model IDs", () => {
@@ -11,8 +11,11 @@ describe("OpenRouter contracts", () => {
     const snapshot = runtimeSnapshotSchema.parse({
       status: "ready",
       credential: { configured: true, verified: true },
-      models: [{ id: "openrouter/auto", rawId: "auto", name: "Auto Router" }],
+      providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" }],
+      models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router" }],
+      selectedProviderId: "openrouter",
       selectedModelId: "openrouter/auto",
+      selectedReasoningEffort: null,
       threads: [],
       activeThreadId: null,
       messages: [],
@@ -60,5 +63,22 @@ describe("OpenRouter contracts", () => {
     expect(interaction.originMessageId).toBe("user-turn-1");
     expect(interaction.error?.code).toBe("resume-denied");
     expect(interaction.plan?.raw).toContain("Do the work");
+  });
+});
+
+describe("provider-neutral model contracts", () => {
+  it("accepts Codex ACP model and reasoning metadata", () => {
+    const model = providerModelSchema.parse({
+      id: "codex/gpt-5.6-sol[high]",
+      providerId: "codex",
+      rawId: "gpt-5.6-sol[high]",
+      baseModelId: "gpt-5.6-sol",
+      name: "GPT-5.6 Sol",
+      reasoningEffort: "high",
+      reasoningOptions: ["low", "medium", "high"],
+    });
+
+    expect(model.providerId).toBe("codex");
+    expect(model.reasoningEffort).toBe("high");
   });
 });

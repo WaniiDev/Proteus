@@ -13,6 +13,24 @@ export const credentialStatusSchema = z.object({
 });
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 
+export const providerIds = ["openrouter", "codex"] as const;
+export const providerIdSchema = z.enum(providerIds);
+export type ProviderId = z.infer<typeof providerIdSchema>;
+
+export const reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
+export const reasoningEffortSchema = z.enum(reasoningEfforts);
+export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+
+export const providerStatusSchema = z.object({
+  id: providerIdSchema,
+  name: z.string().min(1),
+  configured: z.boolean(),
+  verified: z.boolean(),
+  availability: z.enum(["ready", "needs-configuration", "checking", "unavailable"]),
+  detail: z.string().optional(),
+});
+export type ProviderStatus = z.infer<typeof providerStatusSchema>;
+
 export const providerErrorCodeSchema = z.enum(["invalid-credential", "insufficient-credits", "forbidden", "model-unavailable", "context-too-large", "rate-limited", "timeout", "offline", "aborted", "busy", "secure-store-unavailable", "catalog-unavailable", "unknown"]);
 export type ProviderErrorCode = z.infer<typeof providerErrorCodeSchema>;
 
@@ -25,17 +43,30 @@ export type RuntimeError = z.infer<typeof runtimeErrorSchema>;
 
 export type OpenRouterModelId = `openrouter/${string}`;
 export const openRouterModelIdSchema = z.string().regex(/^openrouter\/.+$/, "Model must be routed through OpenRouter") as z.ZodType<OpenRouterModelId>;
+export type CodexModelId = `codex/${string}`;
+export type ProviderModelId = `${ProviderId}/${string}`;
+export const providerModelIdSchema = z.string().regex(/^(?:openrouter|codex)\/.+$/, "Model must belong to a supported provider") as z.ZodType<ProviderModelId>;
 
-export const openRouterModelSchema = z.object({
-  id: openRouterModelIdSchema,
+export const providerModelSchema = z.object({
+  id: providerModelIdSchema,
+  providerId: providerIdSchema,
   rawId: z.string().min(1),
   name: z.string().min(1),
+  baseModelId: z.string().min(1).optional(),
+  reasoningEffort: reasoningEffortSchema.optional(),
+  reasoningOptions: z.array(reasoningEffortSchema).optional(),
   contextLength: z.number().int().positive().optional(),
   promptPrice: z.number().nonnegative().optional(),
   completionPrice: z.number().nonnegative().optional(),
   inputModalities: z.array(z.string()).default(["text"]),
   outputModalities: z.array(z.string()).default(["text"]),
   description: z.string().optional(),
+});
+export type ProviderModel = z.infer<typeof providerModelSchema>;
+
+export const openRouterModelSchema = providerModelSchema.extend({
+  id: openRouterModelIdSchema,
+  providerId: z.literal("openrouter"),
 });
 export type OpenRouterModel = z.infer<typeof openRouterModelSchema>;
 
@@ -196,8 +227,11 @@ export const runtimeSnapshotSchema = z.object({
   revision: z.number().int().nonnegative().default(0),
   status: runtimeStatusSchema,
   credential: credentialStatusSchema,
-  models: z.array(openRouterModelSchema),
-  selectedModelId: openRouterModelIdSchema,
+  providers: z.array(providerStatusSchema),
+  models: z.array(providerModelSchema),
+  selectedProviderId: providerIdSchema,
+  selectedModelId: providerModelIdSchema,
+  selectedReasoningEffort: reasoningEffortSchema.nullable(),
   threads: z.array(threadSummarySchema),
   activeThreadId: z.string().nullable(),
   retryMessageId: z.string().min(1).nullable().default(null),
@@ -247,7 +281,11 @@ export const proteusRpcSchema = {
         response: {} as { accepted: boolean },
       },
       "models.select": {
-        params: {} as { modelId: OpenRouterModelId },
+        params: {} as { modelId: ProviderModelId },
+        response: {} as { accepted: boolean },
+      },
+      "providers.select": {
+        params: {} as { providerId: ProviderId },
         response: {} as { accepted: boolean },
       },
       "threads.create": {

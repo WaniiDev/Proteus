@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, OpenRouterModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, ChatToolPart, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
@@ -19,16 +19,23 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
   status: "booting",
   credential: { configured: false, verified: false },
+  providers: [
+    { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
+    { id: "codex", name: "Codex", configured: true, verified: false, availability: "checking" },
+  ],
   models: [
     {
       id: "openrouter/auto",
+      providerId: "openrouter",
       rawId: "auto",
       name: "Auto Router",
       inputModalities: ["text"],
       outputModalities: ["text"],
     },
   ],
+  selectedProviderId: "openrouter",
   selectedModelId: "openrouter/auto",
+  selectedReasoningEffort: null,
   threads: [],
   activeThreadId: null,
   retryMessageId: null,
@@ -925,7 +932,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   );
 }
 
-function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onRefresh, onSelectModel }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: () => void; onRefresh: () => void; onSelectModel: (modelId: OpenRouterModel["id"]) => void }) {
+function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onRefresh, onSelectModel }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: () => void; onRefresh: () => void; onSelectModel: (modelId: ProviderModel["id"]) => void }) {
   const selected = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
   const price = (value: number | undefined) => (value === undefined ? "—" : `$${(value * 1_000_000).toFixed(2)}/M`);
   return (
@@ -965,7 +972,7 @@ function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, on
           </div>
           <div className="model-picker">
             <label htmlFor="model-select">Selected model</label>
-            <select id="model-select" className="settings-select model-select" value={snapshot.selectedModelId} onChange={(event) => onSelectModel(event.target.value as OpenRouterModel["id"])} disabled={!snapshot.credential.verified || snapshot.activeRun !== null}>
+            <select id="model-select" className="settings-select model-select" value={snapshot.selectedModelId} onChange={(event) => onSelectModel(event.target.value as ProviderModel["id"])} disabled={!snapshot.credential.verified || snapshot.activeRun !== null}>
               {snapshot.models.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.name} · {model.id}

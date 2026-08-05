@@ -7,8 +7,11 @@ const unicodeMarkdown = ["It looks like “awd” may have been a typo.", "That�
 const snapshot = runtimeSnapshotSchema.parse({
   status: "running",
   credential: { configured: true, verified: true },
-  models: [{ id: "openrouter/auto", rawId: "auto", name: "Auto Router" }],
+  providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" }],
+  models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router" }],
+  selectedProviderId: "openrouter",
   selectedModelId: "openrouter/auto",
+  selectedReasoningEffort: null,
   threads: [
     {
       id: "thread-1",

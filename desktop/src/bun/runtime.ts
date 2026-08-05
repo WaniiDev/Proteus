@@ -10,7 +10,7 @@ import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
@@ -25,6 +25,7 @@ const RESOURCE_ID = "local-user";
 const SESSION_ID = "proteus-desktop-session";
 const THREAD_METADATA_KEY = "proteus.workbench.v1";
 const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
+const DEFAULT_PROVIDER_ID: ProviderId = "openrouter";
 const MAX_INPUT_LENGTH = 32_000;
 const INTERNAL_TOOL_GRANTS = ["ask_user", "submit_plan", "task_write", "task_update", "task_complete", "task_check"] as const;
 
@@ -113,6 +114,11 @@ type PersistedThreadState = {
   resolvedInteractions?: PendingInteraction[];
   events?: ChatEvent[];
   tokenUsage?: TokenUsage;
+  modelSelection?: {
+    providerId: ProviderId;
+    modelId: ProviderModelId;
+    reasoningEffort?: ReasoningEffort;
+  };
 };
 
 type InteractionResolution = {
@@ -429,9 +435,14 @@ export class TextRuntime {
   private snapshot: RuntimeSnapshot = {
     status: "booting",
     credential: { configured: false, verified: false },
+    providers: [
+      { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
+      { id: "codex", name: "Codex", configured: true, verified: false, availability: "checking", detail: "Uses your local Codex sign-in." },
+    ],
     models: [
       {
         id: DEFAULT_MODEL_ID,
+        providerId: "openrouter",
         rawId: "auto",
         name: "Auto Router",
         description: "Let OpenRouter choose a suitable text model for each request.",
@@ -439,7 +450,9 @@ export class TextRuntime {
         outputModalities: ["text"],
       },
     ],
+    selectedProviderId: DEFAULT_PROVIDER_ID,
     selectedModelId: DEFAULT_MODEL_ID,
+    selectedReasoningEffort: null,
     threads: [],
     activeThreadId: null,
     retryMessageId: null,
@@ -579,9 +592,22 @@ export class TextRuntime {
   }
 
   private publish(next: Partial<RuntimeSnapshot>): void {
+    const providers = next.credential
+      ? this.snapshot.providers.map((provider) =>
+          provider.id === "openrouter"
+            ? {
+                ...provider,
+                configured: next.credential!.configured,
+                verified: next.credential!.verified,
+                availability: next.credential!.verified ? "ready" as const : next.credential!.configured ? "checking" as const : "needs-configuration" as const,
+              }
+            : provider,
+        )
+      : next.providers;
     this.snapshot = {
       ...this.snapshot,
       ...next,
+      ...(providers ? { providers } : {}),
       revision: this.snapshot.revision + 1,
     };
     const snapshot = this.getSnapshot();
@@ -1343,7 +1369,6 @@ export class TextRuntime {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     const activeThreadId = session.thread.getId();
     if (selectionGeneration !== this.threadSelectionGeneration || syncGeneration !== this.threadStateSyncGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)) return;
-    const selectedModelId = modelFromSession(session.model.get());
     const nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
     if (selectionGeneration !== this.threadSelectionGeneration || syncGeneration !== this.threadStateSyncGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)) return;
     const previousControllerThreadId = this.controllerThreadId;
@@ -1356,10 +1381,16 @@ export class TextRuntime {
     this.selectedThreadId = activeThreadId;
     this.threadState = nextThreadState;
     this.controllerThreadState = nextThreadState;
+    const modelSelection = nextThreadState.modelSelection ?? {
+      providerId: DEFAULT_PROVIDER_ID,
+      modelId: modelFromSession(session.model.get()),
+    };
     const nextSnapshot: Partial<RuntimeSnapshot> = {
       threads,
       activeThreadId,
-      selectedModelId,
+      selectedProviderId: modelSelection.providerId,
+      selectedModelId: modelSelection.modelId,
+      selectedReasoningEffort: modelSelection.reasoningEffort ?? null,
       messages: [],
       events: nextThreadState.events ?? [],
       interactions: nextThreadState.pendingInteractions ?? [],
@@ -1603,14 +1634,41 @@ export class TextRuntime {
     }
   }
 
-  async selectModel(modelId: OpenRouterModelId): Promise<void> {
-    const session = await this.ensureInitialized();
-    if (!isOpenRouterModelId(modelId)) throw makeRuntimeError("model-unavailable");
+  async selectProvider(providerId: ProviderId): Promise<void> {
+    await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
-    if (modelId !== DEFAULT_MODEL_ID && !this.snapshot.models.some((model) => model.id === modelId)) throw makeRuntimeError("model-unavailable");
-    await restorePlanningMode(session);
-    await syncPlanWorkflowModel(session, modelId);
-    await this.syncThreadState();
+    const model = this.snapshot.models.find((candidate) => candidate.providerId === providerId);
+    if (!model) throw makeRuntimeError("model-unavailable");
+    await this.selectModel(model.id);
+  }
+
+  async selectModel(modelId: ProviderModelId): Promise<void> {
+    const session = await this.ensureInitialized();
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+    const model = this.snapshot.models.find((candidate) => candidate.id === modelId);
+    if (!model) throw makeRuntimeError("model-unavailable");
+    if (isOpenRouterModelId(modelId)) {
+      await restorePlanningMode(session);
+      await syncPlanWorkflowModel(session, modelId);
+    }
+    if (this.selectedThreadId) {
+      this.threadState = {
+        ...this.threadState,
+        modelSelection: {
+          providerId: model.providerId,
+          modelId,
+          ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
+        },
+      };
+      this.controllerThreadState = this.threadState;
+      await this.persistThreadState(this.selectedThreadId);
+    }
+    this.publish({
+      selectedProviderId: model.providerId,
+      selectedModelId: modelId,
+      selectedReasoningEffort: model.reasoningEffort ?? null,
+      error: null,
+    });
   }
 
   async createThread(title?: string): Promise<string> {
