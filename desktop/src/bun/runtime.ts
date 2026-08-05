@@ -445,6 +445,7 @@ export class TextRuntime {
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
   private readonly agent: Agent;
+  private readonly mastra: Mastra;
   private readonly controller: AgentController;
   private readonly codexGateway: MastraCodeGateway;
   private readonly codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>;
@@ -524,6 +525,7 @@ export class TextRuntime {
   private threadSelectionGeneration = 0;
   private threadStateSyncGeneration = 0;
   private pendingThreadSelectionId: string | null = null;
+  private shutdownPromise: Promise<void> | null = null;
 
   constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore()) {
     this.vault = vault;
@@ -622,13 +624,19 @@ export class TextRuntime {
       disableBuiltinTools: ["subagent"],
     });
 
-    new Mastra({
+    this.mastra = new Mastra({
       storage: this.storage,
       agents: { proteus: this.agent },
       agentControllers: { proteus: this.controller },
       gateways: { "models.dev": openRouterGateway, mastracode: this.codexGateway },
       logger: false,
     });
+  }
+
+  /** Release the Mastra-owned workspace, event engine, and storage handles once. */
+  shutdown(): Promise<void> {
+    this.shutdownPromise ??= this.mastra.shutdown();
+    return this.shutdownPromise;
   }
 
   getDiagnostics(limit?: number): DiagnosticsSnapshot {

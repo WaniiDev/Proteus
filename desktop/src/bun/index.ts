@@ -1,4 +1,4 @@
-import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater } from "electrobun/bun";
+import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater, app } from "electrobun/bun";
 import type { ProviderId, ProviderModelId, ProteusRPCSchema } from "../shared/contracts";
 import { encodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { TextRuntime } from "./runtime";
@@ -13,6 +13,13 @@ const DEFAULT_WINDOW_FRAME = {
   y: 40,
 };
 const runtime = new TextRuntime();
+
+app.on("before-quit", () => {
+  // Electrobun's event is synchronous. Start Mastra's documented shutdown
+  // immediately so its workspace and LibSQL handles close during the native
+  // shutdown grace window.
+  void runtime.shutdown().catch((error) => console.error("Mastra shutdown failed", error));
+});
 
 function getInitialWindowFrame() {
   try {
@@ -272,9 +279,10 @@ tray.setMenu([
   { type: "normal", label: "Show PROTEUS", action: "show" },
   { type: "normal", label: "Quit", action: "quit" },
 ]);
-tray.on("tray-clicked", (event) => {
+tray.on("tray-clicked", async (event) => {
   const action = ((event as unknown as { data?: unknown }).data as { action?: string } | undefined)?.action;
   if (action === "quit") {
+    await runtime.shutdown();
     mainWindow.close();
     return;
   }
