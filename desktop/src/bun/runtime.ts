@@ -26,10 +26,12 @@ import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteus
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-oauth-failure";
 import { reconcileProviderAuth } from "./provider-auth";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage, type ProteusStorageFoundation } from "./mastra-foundation";
+import { resolveRememberedModelSelection, type AppModelSelection, type ModelPreferencesStorage } from "./model-preferences";
 import { NativeThreadRepository } from "./native-thread-repository";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
 import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
+import { NativeToolCallGuard } from "./native-tool-call-guard";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -37,6 +39,7 @@ const THREAD_METADATA_KEY = "proteus.ui.v2";
 const LEGACY_THREAD_METADATA_KEY = "proteus.workbench.v1";
 const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
 const DEFAULT_PROVIDER_ID: ProviderId = "openrouter";
+const DEFAULT_MODEL_SELECTION: AppModelSelection = { providerId: DEFAULT_PROVIDER_ID, modelId: DEFAULT_MODEL_ID };
 const MAX_INPUT_LENGTH = 32_000;
 
 const OPENROUTER_PROVIDER_CONFIG: ProviderConfig = {
@@ -94,7 +97,7 @@ const USER_FACING_ERRORS: Record<ProviderErrorCode, { message: string; retryable
   aborted: { message: "The response was stopped.", retryable: true },
   busy: { message: "A response is already running.", retryable: true },
   "secure-store-unavailable": {
-    message: "Windows Credential Manager is unavailable, so PROTEUS cannot use a key safely.",
+    message: "Windows Credential Manager is unavailable, so Proteus cannot use a key safely.",
     retryable: false,
   },
   "catalog-unavailable": {
@@ -125,11 +128,7 @@ type PersistedThreadState = {
   events?: ChatEvent[];
   tokenUsage?: TokenUsage;
   toolOutcomes?: Record<string, ProjectedToolOutcome>;
-  modelSelection?: {
-    providerId: ProviderId;
-    modelId: ProviderModelId;
-    reasoningEffort?: ReasoningEffort;
-  };
+  modelSelection?: AppModelSelection;
 };
 
 type InteractionResolution = {
@@ -388,6 +387,8 @@ export class TextRuntime {
   private readonly vault: CredentialVault;
   private readonly listeners = new Set<SnapshotListener>();
   private readonly storage: MastraCompositeStore;
+  private readonly appStorage: ProteusStorageFoundation["appStorage"];
+  private readonly modelPreferences: ModelPreferencesStorage;
   private readonly memory: Memory;
   private readonly threads: NativeThreadRepository;
   private readonly nativeDriver: NativeAgentDriver;
@@ -403,6 +404,7 @@ export class TextRuntime {
   private codexAuthAbortController: AbortController | null = null;
   private codexManualInput: { resolve: (value: string) => void; reject: (error: Error) => void } | null = null;
   private readonly taskToolPolicy = new TaskToolPolicy();
+  private preferredModelSelection: AppModelSelection | null = null;
   private selectedThreadId: string | null = null;
   private threadState: PersistedThreadState = {};
   private readonly threadStateCache = new Map<string, PersistedThreadState>();
@@ -477,15 +479,18 @@ export class TextRuntime {
       credentialStore: this.codexCredentialStore,
     });
     this.codexCatalogProvider = createProteusCodexCatalogProvider(this.codexGateway);
-    this.storage = createProteusStorage(Utils.paths.userData).storage;
+    const storageFoundation = createProteusStorage(Utils.paths.userData);
+    this.storage = storageFoundation.storage;
+    this.appStorage = storageFoundation.appStorage;
+    this.modelPreferences = storageFoundation.modelPreferences;
     this.planFilesystem = new LocalFilesystem({
       basePath: join(Utils.paths.userData, "proteus-plans-v2"),
       contained: true,
-      instructions: "Plan files are private PROTEUS Markdown drafts. Use relative .md paths only.",
+      instructions: "Plan files are private Proteus Markdown drafts. Use relative .md paths only.",
     });
     this.workspace = new Workspace({
       id: "proteus-plan-workspace",
-      name: "PROTEUS plan drafts",
+      name: "Proteus plan drafts",
       filesystem: this.planFilesystem,
       tools: {
         enabled: false,
@@ -503,18 +508,29 @@ export class TextRuntime {
       },
     });
     this.threads = new NativeThreadRepository(this.memory, RESOURCE_ID);
+    const nativeToolCallGuard = new NativeToolCallGuard();
+    nativeToolCallGuard.onViolation = (violation) => {
+      this.diagnostics.record({ source: "runtime", type: "tool_call_integrity_violation", payload: violation });
+    };
     this.agent = new Agent({
       id: AGENT_ID,
-      name: "PROTEUS",
+      name: "Proteus",
       instructions: AGENT_INSTRUCTIONS,
       memory: this.memory,
       workspace: this.workspace,
       tools: { ask_user: askUserTool, submit_plan: submitPlanTool },
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
+      inputProcessors: [nativeToolCallGuard],
+      outputProcessors: [nativeToolCallGuard],
+      maxProcessorRetries: 1,
       defaultOptions: {
         maxSteps: 100,
-        autoResumeSuspendedTools: true,
+        // Proteus renders explicit approval/input controls and resumes their
+        // native Mastra runs through sendStreamResume. Automatic resumption is
+        // for free-form follow-up messages and would let an old suspension
+        // consume a later, unrelated user turn.
+        autoResumeSuspendedTools: false,
         prepareStep: (args) => ({
           ...this.taskToolPolicy.prepareStep(args),
         }),
@@ -559,7 +575,13 @@ export class TextRuntime {
 
   /** Release the Mastra-owned workspace, event engine, and storage handles once. */
   shutdown(): Promise<void> {
-    this.shutdownPromise ??= this.mastra.shutdown();
+    this.shutdownPromise ??= (async () => {
+      try {
+        await this.mastra.shutdown();
+      } finally {
+        await this.appStorage.close();
+      }
+    })();
     return this.shutdownPromise;
   }
 
@@ -956,7 +978,6 @@ export class TextRuntime {
     this.diagnostics.record({ source: "mastra", type: chunk.type, threadId, runId, toolCallId, payload: chunk });
 
     if (chunk.type === "start") {
-      this.taskToolPolicy.reset(threadId);
       this.runToolOutcomes.clear();
       this.runId = runId;
       this.runOutcome = "streaming";
@@ -1091,17 +1112,24 @@ export class TextRuntime {
     }
     this.selectedThreadId = activeThreadId;
     this.threadState = nextThreadState;
-    let modelSelection = nextThreadState.modelSelection ?? {
-      providerId: DEFAULT_PROVIDER_ID,
-      modelId: DEFAULT_MODEL_ID,
-    };
+    let modelSelection = resolveRememberedModelSelection(
+      this.preferredModelSelection,
+      nextThreadState.modelSelection,
+      DEFAULT_MODEL_SELECTION,
+    );
     if (modelSelection.providerId === "codex") {
       const migrated = migrateCodexSelection(modelSelection.modelId, modelSelection.reasoningEffort);
-      if (migrated.modelId !== modelSelection.modelId || migrated.reasoningEffort !== modelSelection.reasoningEffort) {
-        modelSelection = { providerId: "codex", ...migrated };
-        nextThreadState.modelSelection = modelSelection;
-        await this.persistThreadState(activeThreadId!, nextThreadState);
-      }
+      modelSelection = { providerId: "codex", ...migrated };
+    }
+    const preferredModelSelection = this.preferredModelSelection;
+    if (
+      !preferredModelSelection
+      || preferredModelSelection.providerId !== modelSelection.providerId
+      || preferredModelSelection.modelId !== modelSelection.modelId
+      || preferredModelSelection.reasoningEffort !== modelSelection.reasoningEffort
+    ) {
+      await this.modelPreferences.save(modelSelection);
+      this.preferredModelSelection = modelSelection;
     }
     const nextSnapshot: Partial<RuntimeSnapshot> = {
       threads,
@@ -1251,6 +1279,8 @@ export class TextRuntime {
     this.initializePromise ??= (async () => {
       try {
         await ensureUserDataDirectory();
+        await this.appStorage.init();
+        this.preferredModelSelection = await this.modelPreferences.load();
         await this.diagnostics.initialize();
         await cutOverLegacyRuntimeData(Utils.paths.userData);
         await this.syncThreadState();
@@ -1466,6 +1496,14 @@ export class TextRuntime {
     await this.selectModel(model.id);
   }
 
+  private async persistModelSelection(selection: AppModelSelection): Promise<void> {
+    await this.modelPreferences.save(selection);
+    this.preferredModelSelection = selection;
+    if (!this.selectedThreadId) return;
+    this.threadState = { ...this.threadState, modelSelection: selection };
+    await this.persistThreadState(this.selectedThreadId);
+  }
+
   async selectModel(modelId: ProviderModelId): Promise<void> {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
@@ -1474,17 +1512,11 @@ export class TextRuntime {
     const selectedReasoningEffort = model.providerId === "codex"
       ? (model.reasoningOptions?.includes(this.snapshot.selectedReasoningEffort as ReasoningEffort) ? this.snapshot.selectedReasoningEffort! : DEFAULT_CODEX_REASONING)
       : model.reasoningEffort ?? null;
-    if (this.selectedThreadId) {
-      this.threadState = {
-        ...this.threadState,
-        modelSelection: {
-          providerId: model.providerId,
-          modelId,
-          ...(selectedReasoningEffort ? { reasoningEffort: selectedReasoningEffort } : {}),
-        },
-      };
-      await this.persistThreadState(this.selectedThreadId);
-    }
+    await this.persistModelSelection({
+      providerId: model.providerId,
+      modelId,
+      ...(selectedReasoningEffort ? { reasoningEffort: selectedReasoningEffort } : {}),
+    });
     this.publish({
       selectedProviderId: model.providerId,
       selectedModelId: modelId,
@@ -1501,17 +1533,11 @@ export class TextRuntime {
     if (!selected) throw makeRuntimeError("model-unavailable");
     if (reasoningEffort && !selected.reasoningOptions?.includes(reasoningEffort)) throw makeRuntimeError("model-unavailable");
     const nextReasoningEffort = selected.providerId === "codex" ? reasoningEffort ?? DEFAULT_CODEX_REASONING : reasoningEffort;
-    if (this.selectedThreadId) {
-      this.threadState = {
-        ...this.threadState,
-        modelSelection: {
-          providerId: selected.providerId,
-          modelId: selected.id,
-          ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
-        },
-      };
-      await this.persistThreadState(this.selectedThreadId);
-    }
+    await this.persistModelSelection({
+      providerId: selected.providerId,
+      modelId: selected.id,
+      ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
+    });
     this.publish({ selectedReasoningEffort: nextReasoningEffort, error: null });
   }
 
@@ -1562,6 +1588,7 @@ export class TextRuntime {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     await this.threads.delete(threadId);
+    this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
     const remaining = (await this.threads.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     if (this.selectedThreadId === threadId || !this.selectedThreadId) {

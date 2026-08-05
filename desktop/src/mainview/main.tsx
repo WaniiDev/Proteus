@@ -6,7 +6,7 @@ import App from "./App";
 const root = document.getElementById("root");
 
 if (!root) {
-  throw new Error("PROTEUS root element was not found");
+  throw new Error("Proteus root element was not found");
 }
 
 createRoot(root).render(

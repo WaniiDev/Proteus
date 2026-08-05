@@ -5,7 +5,7 @@ describe("Codex OAuth failure messages", () => {
   it("distinguishes secure persistence from ChatGPT authorization", () => {
     expect(describeCodexOAuthFailure(new Error("platform detail"), "persistence")).toEqual({
       code: "secure-store",
-      message: "ChatGPT signed in, but PROTEUS could not save the credential in Windows Credential Manager. Restart PROTEUS and try again.",
+      message: "ChatGPT signed in, but Proteus could not save the credential in Windows Credential Manager. Restart Proteus and try again.",
     });
   });
 

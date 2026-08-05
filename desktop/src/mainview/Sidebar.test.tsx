@@ -20,9 +20,11 @@ describe("Sidebar", () => {
     expect(html).toContain("lucide-sliders-horizontal");
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('aria-label="New chat"');
+    expect(html).toContain("proteus-orb-256.png");
+    expect(html).toContain('class="app-nav__orb-image"');
   });
 
-  it("styles the selected icon with a restrained PROTEUS pastel halo", async () => {
+  it("styles the selected icon with a restrained Proteus pastel halo", async () => {
     const css = await Bun.file(new URL("./sidebar.css", import.meta.url)).text();
 
     expect(css).toContain(".app-nav__icon-track::before");

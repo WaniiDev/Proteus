@@ -1,10 +1,10 @@
 /* ============================================================
-   PROTEUS — Proof-of-concept prototype
+   Proteus — Proof-of-concept prototype
    Plain HTML + CSS + JS. No dependencies.
    The "intelligence" here is a scripted local simulation:
    it demonstrates the interaction model (orb states, visible
    work, adaptive surfaces, approval gates, memory consent)
-   without any backend. See PROTEUS-HANDOFF.md for how to
+   without any backend. See Proteus-HANDOFF.md for how to
    replace the simulation with a real orchestrator.
    ============================================================ */
 'use strict';
@@ -108,7 +108,7 @@ const orb = (() => {
 
 /* ============================================================
    ORB DOCKING — the generative-UI move.
-   At rest the orb holds the center of the stage. When PROTEUS
+   At rest the orb holds the center of the stage. When Proteus
    starts generating, content pops in from the center and the orb
    is pushed into a persistent bottom dock (FLIP-animated).
    ============================================================ */
@@ -282,7 +282,7 @@ const genUI = (() => {
     const card = el(`<div class="reply-card">
       <div class="reply-card-head">
         <button class="replay-btn" aria-label="Replay">${ICONS.play}</button>
-        <span class="reply-card-label">PROTEUS · voice reply</span>
+        <span class="reply-card-label">Proteus · voice reply</span>
         <span class="voice-bars" hidden><i></i><i></i><i></i><i></i><i></i></span>
       </div>
       <p>${escapeHtml(text)}</p>
@@ -617,7 +617,7 @@ function endRun() {
 /* ============================================================
    CONTROL MOMENTS — decision / approval / memory consent.
    All three materialize in the center (generative UI) and can
-   be snoozed with "Not now" — PROTEUS waits without judgment.
+   be snoozed with "Not now" — Proteus waits without judgment.
    The right panel mirrors the request state.
    ============================================================ */
 function presentAction({ label, waitDesc, card }) {
@@ -1302,7 +1302,7 @@ function openProject(id) {
       <section class="pd-section"><h3>What changed</h3><ul>${p.changed.map(c => li(ICONS.change, c)).join('')}</ul></section>
       <section class="pd-section"><h3>What remains open</h3><ul>${p.open.map(o => li(ICONS.open, o)).join('')}</ul></section>
       <section class="pd-section"><h3>Story you approved</h3><ul>
-        ${keptMemories.filter(m => m.project === p.name).map(m => `<li>${ICONS.checkBig}<span>${m.text}<span class="li-meta">Kept by you · ${m.date}</span></span></li>`).join('') || '<li><span style="color:var(--muted-soft)">No reviewed memory yet — PROTEUS will propose items after work sessions.</span></li>'}
+        ${keptMemories.filter(m => m.project === p.name).map(m => `<li>${ICONS.checkBig}<span>${m.text}<span class="li-meta">Kept by you · ${m.date}</span></span></li>`).join('') || '<li><span style="color:var(--muted-soft)">No reviewed memory yet — Proteus will propose items after work sessions.</span></li>'}
       </ul></section>
     </div>
     <div class="pd-continue">
@@ -1310,7 +1310,7 @@ function openProject(id) {
         <h3>Where to continue</h3>
         <p>${p.continueText}</p>
       </div>
-      <button class="btn-primary" id="pdAsk">Ask PROTEUS about this</button>
+      <button class="btn-primary" id="pdAsk">Ask Proteus about this</button>
     </div>
     <div class="pd-log">
       <p class="caption-uppercase" style="margin-bottom:8px">Session log</p>
@@ -1331,7 +1331,7 @@ function renderMemory() {
   const proposed = $('#proposedMemories');
   const kept = $('#keptMemories');
 
-  proposed.innerHTML = proposedMemories.length ? '' : '<p class="memory-empty">Nothing waiting for review. After a work session, PROTEUS proposes what to keep — you decide.</p>';
+  proposed.innerHTML = proposedMemories.length ? '' : '<p class="memory-empty">Nothing waiting for review. After a work session, Proteus proposes what to keep — you decide.</p>';
   proposedMemories.forEach((m, i) => {
     const item = el(`<div class="memory-item">
       <p>${m.text}</p>

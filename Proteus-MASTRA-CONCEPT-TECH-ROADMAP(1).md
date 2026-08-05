@@ -1,4 +1,4 @@
-# PROTEUS — Product Concept, Locked Technology Stack, and Product Roadmap
+# Proteus — Product Concept, Locked Technology Stack, and Product Roadmap
 
 **Document date:** 2 August 2026  
 **Product type:** Personal AI companion for Windows  
@@ -8,11 +8,11 @@
 
 ## 1. Product Concept
 
-PROTEUS is a personal AI companion that can be summoned at any time while the user is working on a Windows computer.
+Proteus is a personal AI companion that can be summoned at any time while the user is working on a Windows computer.
 
 Its purpose is to help one person think, investigate, decide, organize, create, code, and complete meaningful work without repeatedly reconstructing context after interruptions or across different days.
 
-PROTEUS is not only a conversational assistant. It is a persistent personal work environment where voice or text conversations can become visible plans, evidence, decisions, approvals, actions, artifacts, code changes, and reusable Project context.
+Proteus is not only a conversational assistant. It is a persistent personal work environment where voice or text conversations can become visible plans, evidence, decisions, approvals, actions, artifacts, code changes, and reusable Project context.
 
 The product should feel like one continuous intelligence even when different model providers, agents, workflows, tools, Skills, MCP servers, voice services, or specialist harnesses are operating behind the scenes.
 
@@ -20,12 +20,12 @@ The product should feel like one continuous intelligence even when different mod
 
 The primary interaction is natural voice conversation in realtime or near-realtime. Text remains a complete alternative and can be used interchangeably with voice within the same session.
 
-The user can summon PROTEUS from anywhere on the computer, describe an outcome in ordinary language, interrupt or redirect the assistant, review what it is doing, approve consequential actions, and return to the same work later.
+The user can summon Proteus from anywhere on the computer, describe an outcome in ordinary language, interrupt or redirect the assistant, review what it is doing, approve consequential actions, and return to the same work later.
 
-PROTEUS should support personal work patterns similar in spirit to Claude Cowork and ChatGPT Work:
+Proteus should support personal work patterns similar in spirit to Claude Cowork and ChatGPT Work:
 
 - The user expresses the intended outcome rather than a sequence of technical commands.
-- PROTEUS interprets the request and makes the work visible.
+- Proteus interprets the request and makes the work visible.
 - Relevant context, files, models, tools, Skills, and Projects are brought together.
 - Longer work remains observable, interruptible, and recoverable.
 - Consequential actions stop for human approval.
@@ -33,7 +33,7 @@ PROTEUS should support personal work patterns similar in spirit to Claude Cowork
 
 ### 1.2 Core capabilities
 
-PROTEUS includes the following product capabilities:
+Proteus includes the following product capabilities:
 
 - Realtime or near-realtime voice conversation
 - Text conversation with streaming responses
@@ -73,7 +73,7 @@ The UI is generated from controlled structures and approved application componen
 
 ### 1.4 Human-in-the-loop approval
 
-Human approval is a core operating principle of PROTEUS.
+Human approval is a core operating principle of Proteus.
 
 Approval may be required before actions such as:
 
@@ -117,7 +117,7 @@ Memory remains under user control and is separated into clear categories:
 - **Personal memory:** User-approved preferences or facts that may be used across Projects
 - **Operational history:** Records of runs, tools, approvals, failures, and results
 
-PROTEUS should not silently convert every conversation into permanent memory. Long-term memories must remain reviewable, correctable, removable, and traceable to their origin.
+Proteus should not silently convert every conversation into permanent memory. Long-term memories must remain reviewable, correctable, removable, and traceable to their origin.
 
 ### 1.7 Skills and MCP
 
@@ -125,11 +125,11 @@ Skills provide reusable domain capabilities, operating knowledge, instructions, 
 
 MCP provides a standardized connection layer for external tools, applications, resources, and data sources.
 
-Skills and MCP extend PROTEUS without placing every capability directly inside the core product.
+Skills and MCP extend Proteus without placing every capability directly inside the core product.
 
 ### 1.8 Coding Harness
 
-Coding is a specialist capability within PROTEUS rather than the identity of the entire product.
+Coding is a specialist capability within Proteus rather than the identity of the entire product.
 
 The Coding Harness supports:
 
@@ -145,12 +145,12 @@ The Coding Harness supports:
 - Coding Skills and extensions
 - Streaming coding activity
 
-Coding activity remains governed by PROTEUS permissions, workspace boundaries, approval policies, Project continuity, and memory controls.
+Coding activity remains governed by Proteus permissions, workspace boundaries, approval policies, Project continuity, and memory controls.
 
 ### 1.9 Product principles
 
 1. **Personal** — The user's context belongs to the user.
-2. **Present** — PROTEUS can be summoned during real work.
+2. **Present** — Proteus can be summoned during real work.
 3. **Conversational** — Voice and text are natural and interruptible interfaces.
 4. **Visible** — Goals, progress, evidence, uncertainty, and pending decisions remain understandable.
 5. **Controlled** — Consequential actions and long-term memory remain subject to user approval.
@@ -158,11 +158,11 @@ Coding activity remains governed by PROTEUS permissions, workspace boundaries, a
 7. **Continuous** — Projects can continue across interruptions and days.
 8. **Extensible** — Models, Skills, MCP servers, tools, and specialist harnesses can evolve independently.
 9. **Calm** — The product reduces cognitive load rather than creating more noise.
-10. **Honest** — PROTEUS distinguishes facts, inferences, actions, failures, and uncertainty.
+10. **Honest** — Proteus distinguishes facts, inferences, actions, failures, and uncertainty.
 
 ### 1.10 Product boundaries
 
-PROTEUS is not initially intended to be:
+Proteus is not initially intended to be:
 
 - A multi-user collaboration platform
 - A social network
@@ -179,17 +179,17 @@ PROTEUS is not initially intended to be:
 
 The central technology decision is locked as follows:
 
-> **Mastra is the AI Core, primary Agent Harness, workflow engine, memory layer, Skills layer, MCP layer, model orchestration layer, voice orchestration layer, and AI observability foundation of PROTEUS.**
+> **Mastra is the AI Core, primary Agent Harness, workflow engine, memory layer, Skills layer, MCP layer, model orchestration layer, voice orchestration layer, and AI observability foundation of Proteus.**
 
 Mastra Voice is the common voice integration layer attached to the same Mastra agents used by text, tools, memory, workflows, MCP, and approvals. It is not a standalone Voice Model; realtime or cascaded speech still depends on external voice and speech providers.
 
-PROTEUS should not maintain a second competing AI Core or general-purpose agent framework alongside Mastra.
+Proteus should not maintain a second competing AI Core or general-purpose agent framework alongside Mastra.
 
-Specialist systems may operate beneath Mastra, but product-level control remains with PROTEUS and Mastra.
+Specialist systems may operate beneath Mastra, but product-level control remains with Proteus and Mastra.
 
 ### 2.1 Selected technology stack
 
-| Layer | Selected technology | Role in PROTEUS |
+| Layer | Selected technology | Role in Proteus |
 |---|---|---|
 | Desktop application shell | **Electrobun** | Windows desktop runtime, application presence, native integration, packaging, and updates |
 | Runtime and toolchain | **Bun** | TypeScript runtime, package management, scripts, bundling, and testing |
@@ -199,11 +199,11 @@ Specialist systems may operate beneath Mastra, but product-level control remains
 | Main Agent Harness | **Mastra AgentController** | Persistent interactive sessions, modes, model selection, tools, permissions, subagents, state, and event streams |
 | Agent runtime | **Mastra Agents** | General conversational, reasoning, research, work, and specialist agents |
 | Durable work | **Mastra Workflows** | Multi-step work, persistence, suspension, resumption, recovery, and human checkpoints |
-| Human approval | **Mastra approval capabilities with PROTEUS policy controls** | Approval requests, suspended actions, decisions, and continuation |
+| Human approval | **Mastra approval capabilities with Proteus policy controls** | Approval requests, suspended actions, decisions, and continuation |
 | Tools | **Mastra Tools** | Structured capabilities and controlled action execution |
 | Skills | **Mastra Skills and Workspace capabilities** | Reusable task knowledge, operating instructions, and specialist capabilities |
 | MCP | **Mastra MCP** | Connections to MCP tools, resources, applications, and services |
-| Memory | **Mastra Memory with PROTEUS memory governance** | Session, Project, and personal context under user-controlled retention rules |
+| Memory | **Mastra Memory with Proteus memory governance** | Session, Project, and personal context under user-controlled retention rules |
 | Model-provider orchestration | **Mastra model-provider layer** | Selection and use of multiple hosted, gateway, compatible, and local model providers |
 | Generative UI data layer | **Mastra state, structured outputs, and event streams** | Structured information for adaptive work surfaces and live activity |
 | Coding Harness | **Pi Coding Agent under Mastra supervision** | Specialist repository, coding, command, test, extension, and compaction capabilities |
@@ -221,7 +221,7 @@ Specialist systems may operate beneath Mastra, but product-level control remains
 
 ### 2.2 Mastra responsibilities
 
-Mastra is responsible for the principal AI operating capabilities of PROTEUS:
+Mastra is responsible for the principal AI operating capabilities of Proteus:
 
 - Agent lifecycle
 - Persistent interactive sessions
@@ -244,9 +244,9 @@ Mastra is responsible for the principal AI operating capabilities of PROTEUS:
 
 Mastra is the shared control plane across voice, text, Cowork-style tasks, Projects, Skills, MCP, and specialist harnesses.
 
-### 2.3 PROTEUS responsibilities
+### 2.3 Proteus responsibilities
 
-PROTEUS remains responsible for product-level meaning and user control:
+Proteus remains responsible for product-level meaning and user control:
 
 - Product identity and personal companion behavior
 - Project continuity
@@ -260,11 +260,11 @@ PROTEUS remains responsible for product-level meaning and user control:
 - Local privacy and deletion controls
 - Boundaries applied to Skills, MCP, tools, and Coding Harnesses
 
-Mastra supplies the AI operating foundation. PROTEUS defines the trusted personal product built on top of that foundation.
+Mastra supplies the AI operating foundation. Proteus defines the trusted personal product built on top of that foundation.
 
 ### 2.4 Voice architecture
 
-Mastra Voice is the locked voice orchestration layer of PROTEUS.
+Mastra Voice is the locked voice orchestration layer of Proteus.
 
 It attaches speech capabilities to the same Mastra agents that already hold instructions, tools, memory access, workflows, Skills, MCP connections, and Project context. Voice does not create a second assistant, a separate AI Core, or an independent source of truth.
 
@@ -273,9 +273,9 @@ Mastra Voice remains distinct from the external provider that recognizes or gene
 - **Mastra AgentController and Mastra Agents** retain session continuity, reasoning context, tools, memory, workflows, and approval state.
 - **Mastra Voice** manages the common voice interface, provider connection, audio streams, transcripts, speech events, and voice interaction lifecycle.
 - **Voice and speech providers** perform speech recognition, speech synthesis, or direct speech-to-speech processing.
-- **PROTEUS Desktop** manages microphone and speaker access, summon behavior, interruption controls, and user-visible voice state.
+- **Proteus Desktop** manages microphone and speaker access, summon behavior, interruption controls, and user-visible voice state.
 
-PROTEUS supports two complementary voice paths.
+Proteus supports two complementary voice paths.
 
 #### Realtime speech-to-speech
 
@@ -301,7 +301,7 @@ Microphone
 
 This path preserves independent selection of speech recognition, reasoning model, and speech synthesis providers. It is suitable when provider flexibility, deeper work, explicit transcripts, durable workflows, or controlled approval transitions matter more than direct speech-to-speech latency.
 
-Both paths remain part of the same PROTEUS session and Project. Voice interactions therefore retain the same model visibility, memory rules, permission boundaries, Human-in-the-loop approval, operational history, interruption, and continuation behavior as text interactions.
+Both paths remain part of the same Proteus session and Project. Voice interactions therefore retain the same model visibility, memory rules, permission boundaries, Human-in-the-loop approval, operational history, interruption, and continuation behavior as text interactions.
 
 ### 2.5 Coding Harness relationship
 
@@ -310,7 +310,7 @@ Pi Coding Agent is a delegated specialist beneath Mastra rather than a second ge
 The relationship is defined as:
 
 ```text
-PROTEUS
+Proteus
 └── Mastra AgentController
     ├── General Agents
     ├── Workflows
@@ -322,11 +322,11 @@ PROTEUS
         └── Pi Coding Agent
 ```
 
-Mastra coordinates the user session, Project, permissions, approvals, model context, and overall work state. Pi provides coding-specific capabilities within the boundaries established by PROTEUS and Mastra.
+Mastra coordinates the user session, Project, permissions, approvals, model context, and overall work state. Pi provides coding-specific capabilities within the boundaries established by Proteus and Mastra.
 
 ### 2.6 Model-provider strategy
 
-PROTEUS is model-provider independent at the product level.
+Proteus is model-provider independent at the product level.
 
 Mastra is the common orchestration layer across provider categories such as:
 
@@ -352,11 +352,11 @@ Provider and model choice may differ by workload:
 - Coding
 - Vision and document understanding
 
-The selected provider and model remain visible to the user without changing the identity of PROTEUS or the continuity of a Project.
+The selected provider and model remain visible to the user without changing the identity of Proteus or the continuity of a Project.
 
 ### 2.7 Logical product architecture
 
-PROTEUS is organized into the following logical layers:
+Proteus is organized into the following logical layers:
 
 1. **Desktop Presence Layer**  
    Application lifecycle, summon behavior, microphone access, notifications, and Windows integration.
@@ -377,7 +377,7 @@ PROTEUS is organized into the following logical layers:
    Tools, Skills, MCP, memory services, and specialist agents.
 
 7. **Coding Harness Layer**  
-   Pi-based coding sessions governed by Mastra and PROTEUS permissions.
+   Pi-based coding sessions governed by Mastra and Proteus permissions.
 
 8. **Project and Memory Layer**  
    Projects, reviewed memory, evidence, decisions, artifacts, unresolved work, and continuation state.
@@ -396,7 +396,7 @@ The roadmap is organized by product capability and user outcome. Each phase expa
 
 ### Phase 1 — Personal Companion Foundation
 
-**Goal:** Establish PROTEUS as a summonable and persistent personal AI companion on Windows.
+**Goal:** Establish Proteus as a summonable and persistent personal AI companion on Windows.
 
 **Scope:**
 
@@ -415,7 +415,7 @@ The roadmap is organized by product capability and user outcome. Each phase expa
 
 **Phase outcome:**
 
-The user can summon PROTEUS, speak or type naturally, select a model provider, interrupt the assistant, and return to an existing conversation or Project.
+The user can summon Proteus, speak or type naturally, select a model provider, interrupt the assistant, and return to an existing conversation or Project.
 
 ---
 
@@ -460,13 +460,13 @@ A conversation can become an understandable work surface that communicates the g
 
 **Phase outcome:**
 
-PROTEUS can perform meaningful Cowork-style tasks, remain visible while working, stop before consequential actions, and resume after user input or interruption.
+Proteus can perform meaningful Cowork-style tasks, remain visible while working, stop before consequential actions, and resume after user input or interruption.
 
 ---
 
 ### Phase 4 — Projects, Memory, Skills, and MCP
 
-**Goal:** Make PROTEUS increasingly useful across days without silently accumulating uncontrolled context.
+**Goal:** Make Proteus increasingly useful across days without silently accumulating uncontrolled context.
 
 **Scope:**
 
@@ -491,7 +491,7 @@ The user can return to important work without reconstructing the full story whil
 
 ### Phase 5 — Coding Harness
 
-**Goal:** Add a first-class software-development capability without turning PROTEUS into a coding-only product.
+**Goal:** Add a first-class software-development capability without turning Proteus into a coding-only product.
 
 **Scope:**
 
@@ -510,13 +510,13 @@ The user can return to important work without reconstructing the full story whil
 
 **Phase outcome:**
 
-PROTEUS can delegate software-development work to a specialist Coding Harness while retaining the same conversation, permissions, approvals, memory rules, and Project continuity.
+Proteus can delegate software-development work to a specialist Coding Harness while retaining the same conversation, permissions, approvals, memory rules, and Project continuity.
 
 ---
 
 ### Phase 6 — Reliability and Daily Operating Layer
 
-**Goal:** Mature PROTEUS from a capable personal system into a dependable daily work companion.
+**Goal:** Mature Proteus from a capable personal system into a dependable daily work companion.
 
 **Scope:**
 
@@ -536,7 +536,7 @@ PROTEUS can delegate software-development work to a specialist Coding Harness wh
 
 **Phase outcome:**
 
-PROTEUS becomes reliable enough for recurring real work with predictable recovery, understandable costs, controlled memory, trustworthy approvals, and stable Project continuity.
+Proteus becomes reliable enough for recurring real work with predictable recovery, understandable costs, controlled memory, trustworthy approvals, and stable Project continuity.
 
 ---
 
@@ -559,23 +559,23 @@ PROTEUS becomes reliable enough for recurring real work with predictable recover
 
 **Phase outcome:**
 
-PROTEUS becomes a flexible personal work environment across multiple responsibilities while remaining personal, visible, correctable, and controlled.
+Proteus becomes a flexible personal work environment across multiple responsibilities while remaining personal, visible, correctable, and controlled.
 
 ---
 
 ## 4. Locked Product Definition
 
-PROTEUS is a Windows-first personal AI companion centered on realtime or near-realtime voice, text conversation, Generative UI, visible Cowork-style work, human approval, persistent Projects, user-controlled memory, Skills, MCP, multiple model providers, and a specialist Coding Harness.
+Proteus is a Windows-first personal AI companion centered on realtime or near-realtime voice, text conversation, Generative UI, visible Cowork-style work, human approval, persistent Projects, user-controlled memory, Skills, MCP, multiple model providers, and a specialist Coding Harness.
 
 Mastra is the single primary AI Core and Agent Harness of the product.
 
 Mastra AgentController coordinates interactive sessions, modes, agents, model selection, tools, permissions, subagents, and live product state. Mastra Workflows govern durable multi-step work and human checkpoints. Mastra Memory, Skills, MCP, model integrations, and observability form the common AI capability layer.
 
-Mastra Voice is the common voice orchestration layer attached to those same agents. It is not a Voice Model of its own. PROTEUS uses external realtime or speech providers beneath Mastra Voice and supports both direct realtime speech-to-speech and cascaded speech-to-text, agent, and text-to-speech interaction paths. Both paths remain governed by the same Project context, tools, memory rules, permissions, approvals, and operational history.
+Mastra Voice is the common voice orchestration layer attached to those same agents. It is not a Voice Model of its own. Proteus uses external realtime or speech providers beneath Mastra Voice and supports both direct realtime speech-to-speech and cascaded speech-to-text, agent, and text-to-speech interaction paths. Both paths remain governed by the same Project context, tools, memory rules, permissions, approvals, and operational history.
 
 Pi Coding Agent operates as a specialist Coding Harness beneath Mastra. It does not replace Mastra and does not independently control Project continuity, permissions, approvals, or long-term memory.
 
-PROTEUS is successful when the user can summon one personal intelligence from anywhere on the computer, speak naturally, see the work take shape, select the model and capabilities being used, approve meaningful actions, return to important Projects without reconstructing context, and perform coding work without leaving the continuity and control of the main companion.
+Proteus is successful when the user can summon one personal intelligence from anywhere on the computer, speak naturally, see the work take shape, select the model and capabilities being used, approve meaningful actions, return to important Projects without reconstructing context, and perform coding work without leaving the continuity and control of the main companion.
 
 The central daily loop remains:
 

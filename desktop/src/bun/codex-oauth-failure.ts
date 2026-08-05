@@ -9,7 +9,7 @@ export function describeCodexOAuthFailure(error: unknown, stage: CodexOAuthFailu
   if (stage === "persistence") {
     return {
       code: "secure-store",
-      message: "ChatGPT signed in, but PROTEUS could not save the credential in Windows Credential Manager. Restart PROTEUS and try again.",
+      message: "ChatGPT signed in, but Proteus could not save the credential in Windows Credential Manager. Restart Proteus and try again.",
     };
   }
 
@@ -23,7 +23,7 @@ export function describeCodexOAuthFailure(error: unknown, stage: CodexOAuthFailu
   if (/missing authorization code|state mismatch/i.test(detail)) {
     return {
       code: "callback-missing",
-      message: "ChatGPT accepted the sign-in, but the localhost callback did not reach PROTEUS. Try again or use device code.",
+      message: "ChatGPT accepted the sign-in, but the localhost callback did not reach Proteus. Try again or use device code.",
     };
   }
   if (/failed to extract chatgpt account id/i.test(detail)) {

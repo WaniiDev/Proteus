@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PROTEUS — Personal AI Companion</title>
-<meta name="description" content="PROTEUS — a personal AI companion for meaningful work. One intelligence. Any form." />
+<title>Proteus — Personal AI Companion</title>
+<meta name="description" content="Proteus — a personal AI companion for meaningful work. One intelligence. Any form." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -27,9 +27,9 @@
   <!-- ============ SIDEBAR (collapsible) ============ -->
   <aside class="sidebar" id="sidebar">
     <div class="sb-top">
-      <button class="brand" data-view="companion" aria-label="PROTEUS home">
+      <button class="brand" data-view="companion" aria-label="Proteus home">
         <span class="brand-orb" aria-hidden="true"></span>
-        <span class="brand-word sb-label">PROTEUS</span>
+        <span class="brand-word sb-label">Proteus</span>
       </button>
       <button class="sb-toggle" id="sbToggle" aria-label="Collapse sidebar" aria-expanded="true">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
@@ -54,7 +54,7 @@
       </button>
     </nav>
     <div class="sb-bottom">
-      <span class="presence" id="presence" title="PROTEUS status">
+      <span class="presence" id="presence" title="Proteus status">
         <span class="presence-dot" id="presenceDot"></span><span class="sb-label" id="presenceLabel">At rest</span>
       </span>
     </div>
@@ -126,11 +126,11 @@
           </div>
 
           <form class="composer" id="composer" autocomplete="off" hidden>
-            <button type="button" class="mic-btn" id="micBtn" aria-label="Speak" title="Speak to PROTEUS">
+            <button type="button" class="mic-btn" id="micBtn" aria-label="Speak" title="Speak to Proteus">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
             </button>
             <input class="composer-input" id="composerInput" type="text"
-                   placeholder="Message PROTEUS — English or Thai…" aria-label="Message PROTEUS" />
+                   placeholder="Message Proteus — English or Thai…" aria-label="Message Proteus" />
             <button type="button" class="stop-btn" id="stopBtnChat" hidden>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
               Stop
@@ -139,7 +139,7 @@
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
             </button>
           </form>
-          <p class="composer-note">PROTEUS asks before anything consequential. Press Esc to interrupt at any time.</p>
+          <p class="composer-note">Proteus asks before anything consequential. Press Esc to interrupt at any time.</p>
         </div>
 
         <!-- Workbench: visible work + adaptive surface -->
@@ -205,7 +205,7 @@
         <div class="page-head">
           <p class="caption-uppercase">You decide what stays</p>
           <h1 class="display-lg">Memory</h1>
-          <p class="page-sub">PROTEUS remembers only what you choose to keep. Proposed items wait for your review; delete anything at any time.</p>
+          <p class="page-sub">Proteus remembers only what you choose to keep. Proposed items wait for your review; delete anything at any time.</p>
         </div>
         <div class="memory-cols">
           <section class="card memory-card">
@@ -226,17 +226,17 @@
         <div class="page-head">
           <p class="caption-uppercase">Yours to control</p>
           <h1 class="display-lg">Settings</h1>
-          <p class="page-sub">Permissions default to ask-first. PROTEUS explains what it knows, what it inferred, and what it could not verify.</p>
+          <p class="page-sub">Permissions default to ask-first. Proteus explains what it knows, what it inferred, and what it could not verify.</p>
         </div>
 
         <section class="card settings-card">
           <h2 class="title-md">Voice &amp; language</h2>
           <div class="setting-row">
-            <div><p class="setting-name">Voice input</p><p class="setting-desc">Speak to PROTEUS with your microphone — the Orb listens and responds.</p></div>
+            <div><p class="setting-name">Voice input</p><p class="setting-desc">Speak to Proteus with your microphone — the Orb listens and responds.</p></div>
             <button class="toggle on" id="toggleVoice" role="switch" aria-checked="true" aria-label="Voice input"></button>
           </div>
           <div class="setting-row">
-            <div><p class="setting-name">Preferred language</p><p class="setting-desc">PROTEUS understands English and Thai, and replies in the language you use.</p></div>
+            <div><p class="setting-name">Preferred language</p><p class="setting-desc">Proteus understands English and Thai, and replies in the language you use.</p></div>
             <div class="seg" id="langSeg">
               <button class="seg-btn active" data-lang="en">English</button>
               <button class="seg-btn" data-lang="th">ไทย</button>

@@ -13,6 +13,7 @@ describe("Settings provider and model UI", () => {
     expect(appSource).toContain("Models & thinking");
     expect(appSource).toContain('className="provider-grid"');
     expect(appSource).toContain('className="model-card-list"');
+    expect(appSource).toContain("Selection is remembered across conversations and app restarts.");
     expect(appSource).not.toContain('id="model-select"');
   });
 

@@ -110,7 +110,16 @@ export class TaskToolPolicy {
   };
 
   readonly prepareStep = (args: ProcessInputStepArgs): ProcessInputStepResult | undefined => {
-    if (this.runs.get(threadIdFromContext(args))?.textOnly || terminalTaskCheck(args.steps)) return { toolChoice: "none" };
+    const threadId = threadIdFromContext(args);
+    // Mastra calls step zero synchronously before it assembles the provider
+    // request. This is the authoritative new-run boundary. Resetting from the
+    // asynchronously projected `start` chunk races with request assembly and
+    // can leak a completed task run's text-only state into the next user turn.
+    if (args.stepNumber === 0) {
+      this.runs.delete(threadId);
+      return undefined;
+    }
+    if (this.runs.get(threadId)?.textOnly || terminalTaskCheck(args.steps)) return { toolChoice: "none" };
     return undefined;
   };
 

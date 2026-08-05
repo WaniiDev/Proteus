@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ThreadSummary, WorkbenchState } from "../shared/contracts";
-import { conversationGroupForDate, goalFromMessages, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
+import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 const thread = (id: string, title: string, updatedAt: string): ThreadSummary => ({
@@ -55,7 +55,7 @@ describe("conversation helpers", () => {
     ).toBe("Make the Workbench feel quieter.");
   });
 
-  it("keeps all assistant text segments and collapses repeated tool updates by call id", () => {
+  it("keeps assistant text and tools chronological while collapsing repeated tool updates by call id", () => {
     const base = {
       role: "assistant" as const,
       turnId: "user-1",
@@ -100,9 +100,31 @@ describe("conversation helpers", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       type: "assistant",
-      textParts: [{ text: "First" }, { text: "Second" }],
-      tools: [{ toolCallId: "call-1", status: "completed" }],
+      parts: [
+        { type: "text", text: "First" },
+        { type: "tool", toolCallId: "call-1", status: "completed" },
+        { type: "text", text: "Second" },
+      ],
     });
+  });
+
+  it("creates tool runs before the terminal assistant message", () => {
+    const runs = groupAssistantPartRuns([
+      { type: "tool", id: "tool-1", toolCallId: "call-1", name: "task_write", label: "Created task list", status: "completed" },
+      { type: "tool", id: "tool-2", toolCallId: "call-2", name: "task_complete", label: "Completed task", status: "completed" },
+      { type: "text", id: "final", text: "All tasks are complete." },
+    ]);
+
+    expect(runs).toEqual([
+      {
+        type: "tools",
+        tools: [
+          { type: "tool", id: "tool-1", toolCallId: "call-1", name: "task_write", label: "Created task list", status: "completed" },
+          { type: "tool", id: "tool-2", toolCallId: "call-2", name: "task_complete", label: "Completed task", status: "completed" },
+        ],
+      },
+      { type: "text", part: { type: "text", id: "final", text: "All tasks are complete." } },
+    ]);
   });
 });
 

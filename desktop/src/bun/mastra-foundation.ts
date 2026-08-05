@@ -1,12 +1,15 @@
 import { join } from "node:path";
 import { MastraCompositeStore } from "@mastra/core/storage";
-import { LibSQLStore } from "@mastra/libsql";
+import { LibSQLFactoryStorage } from "@mastra/libsql";
+import { ModelPreferencesStorage } from "./model-preferences";
 
-export const PROTEUS_RUNTIME_VERSION = "v3" as const;
+export const Proteus_RUNTIME_VERSION = "v3" as const;
 
 export type ProteusStorageFoundation = {
   storage: MastraCompositeStore;
-  primary: LibSQLStore;
+  primary: MastraCompositeStore;
+  appStorage: LibSQLFactoryStorage;
+  modelPreferences: ModelPreferencesStorage;
   paths: {
     primary: string;
   };
@@ -17,16 +20,18 @@ export type ProteusStorageFoundation = {
  */
 export function createProteusStorage(userDataPath: string, options: { inMemory?: boolean } = {}): ProteusStorageFoundation {
   const paths = {
-    primary: join(userDataPath, `proteus-${PROTEUS_RUNTIME_VERSION}.db`),
+    primary: join(userDataPath, `proteus-${Proteus_RUNTIME_VERSION}.db`),
   };
-  const primary = new LibSQLStore({
-    id: `proteus-primary-${PROTEUS_RUNTIME_VERSION}`,
+  const appStorage = new LibSQLFactoryStorage({
+    id: `proteus-primary-${Proteus_RUNTIME_VERSION}`,
     url: options.inMemory ? ":memory:" : `file:${paths.primary}`,
   });
+  const modelPreferences = appStorage.registerDomain(new ModelPreferencesStorage());
+  const primary = appStorage.getMastraStorage();
   const storage = new MastraCompositeStore({
-    id: `proteus-storage-${PROTEUS_RUNTIME_VERSION}`,
+    id: `proteus-storage-${Proteus_RUNTIME_VERSION}`,
     default: primary,
     domains: { observability: false },
   });
-  return { storage, primary, paths };
+  return { storage, primary, appStorage, modelPreferences, paths };
 }

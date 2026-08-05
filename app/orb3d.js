@@ -1,5 +1,5 @@
 /* ============================================================
-   PROTEUS — Liquid Orb (Three.js / WebGL)
+   Proteus — Liquid Orb (Three.js / WebGL)
    A simplex-noise displaced sphere driven by state "FX targets":
    amplitude, speed, frequency, scale and palette all ease toward
    the current orb state, so the orb feels liquid and adaptive

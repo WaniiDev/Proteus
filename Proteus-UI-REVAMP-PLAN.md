@@ -1,4 +1,4 @@
-# PROTEUS Companion UI Revamp Plan
+# Proteus Companion UI Revamp Plan
 
 Status: implementation in progress; shell and interaction surfaces are implemented, with final brand asset selection pending.
 
@@ -14,14 +14,14 @@ The finished desktop UI must provide:
 - a Workbench that appears only for real structured work and visually matches
   the prototype;
 - an icon-first main sidebar that does not resize the Companion when expanded;
-- one coherent PROTEUS brand mark for the interface and packaged application;
+- one coherent Proteus brand mark for the interface and packaged application;
 - reliable keyboard, responsive, and Windows display-scaling behavior.
 
 ## Visual source of truth
 
 `app/index.html` and `app/styles.css` remain the visual source of truth for the
 Companion content, Orb, and Workbench. The sidebar is now an intentional
-production-owned exception: it reuses the PROTEUS typography, colors, borders,
+production-owned exception: it reuses the Proteus typography, colors, borders,
 surfaces, and quiet interaction tone, but owns a new soft-glass rail/overlay
 composition in `desktop/src/mainview/sidebar.css` rather than copying the
 prototype sidebar geometry.
@@ -82,7 +82,7 @@ The popover contains:
 - Replace `window.prompt` with the inline editor.
 - Adjust the rename RPC to accept `{ threadId, title }` instead of operating only
   on the selected thread.
-- Delete opens a PROTEUS-styled modal containing the conversation name, an
+- Delete opens a Proteus-styled modal containing the conversation name, an
   irreversible-action warning, Cancel, and destructive Delete.
 - Escape and the safe initial focus cancel the modal; focus is trapped while it
   is open and restored afterward.
@@ -161,13 +161,13 @@ and restrained animation. Do not render loose floating cards on the page.
 - Open by explicit toggle, not hover. Close on navigation, Escape, or outside
   click.
 - Remove Presence/status from the footer entirely.
-- Keep the existing `PROTEUS` uppercase wordmark and letter spacing in expanded
+- Keep the existing `Proteus` uppercase wordmark and letter spacing in expanded
   mode.
 - Add accessible tooltips and labels for every collapsed icon.
 
 Order:
 
-1. PROTEUS brand/home.
+1. Proteus brand/home.
 2. Distinct New Chat quick action.
 3. Companion.
 4. Projects.
@@ -184,19 +184,19 @@ label.
 - Add `lucide-react` and remove the general-purpose inline SVG icon map.
 - Import icons individually so the production bundle can tree-shake unused
   glyphs.
-- Keep a small typed PROTEUS icon wrapper that normalizes size, stroke width,
+- Keep a small typed Proteus icon wrapper that normalizes size, stroke width,
   alignment, and accessibility defaults.
 - Use Lucide for navigation, title bar, popover, Workbench, modal, message
   actions, and settings controls.
-- Keep the custom PROTEUS brand mark outside the icon library.
+- Keep the custom Proteus brand mark outside the icon library.
 
-## 6. Create the new PROTEUS brand and packaged app icon
+## 6. Create the new Proteus brand and packaged app icon
 
 Visual direction:
 
 - distinctive liquid-orb silhouette with a subtle negative-space `P` or orbital
   cut;
-- mint-to-lavender PROTEUS palette;
+- mint-to-lavender Proteus palette;
 - recognizable at 16px without becoming a generic gradient circle;
 - in-app mark without a container tile;
 - Windows executable/taskbar mark on a deep-ink rounded-square tile;

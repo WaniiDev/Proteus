@@ -21,6 +21,8 @@ type SidebarProps = {
 
 type PrimaryView = Exclude<View, "settings">;
 
+const proteusOrbIconUrl = new URL("./assets/proteus-orb-256.png", import.meta.url).href;
+
 const PRIMARY_LINKS: ReadonlyArray<{ view: PrimaryView; label: string; icon: LucideIcon }> = [
   { view: "companion", label: "Companion", icon: MessagesSquare },
   { view: "projects", label: "Projects", icon: PanelsTopLeft },
@@ -32,7 +34,9 @@ function NavIcon({ icon: Glyph }: { icon: LucideIcon }) {
 }
 
 function BrandMark() {
-  return <span className="app-nav__orb-mark" aria-hidden="true"><span className="app-nav__orb-core" /></span>;
+  return <span className="app-nav__orb-mark" aria-hidden="true">
+    <img className="app-nav__orb-image" src={proteusOrbIconUrl} alt="" />
+  </span>;
 }
 
 export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: SidebarProps) {

@@ -259,7 +259,7 @@ export function projectTasks(displayState: AgentControllerDisplayState, fallback
 
 function parsePlanText(value: string | undefined): { title: string; summary: string; steps: string[]; raw?: string } {
   const text = value?.trim() ?? "";
-  if (!text) return { title: "Plan review", summary: "PROTEUS submitted a plan for review.", steps: [] };
+  if (!text) return { title: "Plan review", summary: "Proteus submitted a plan for review.", steps: [] };
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const title = lines[0]?.replace(/^#+\s*/, "").trim() || "Plan review";
   const steps = lines.filter((line) => /^([-*]|\d+[.)])\s+/.test(line)).map((line) => line.replace(/^([-*]|\d+[.)])\s+/, "").trim());
@@ -281,8 +281,8 @@ export function parseSuspendedInteraction(input: SuspendedToolLike, version: num
       id: input.toolCallId,
       toolCallId: input.toolCallId,
       kind: "ask_user",
-      title: "PROTEUS has a question",
-      question: typeof payload.question === "string" ? payload.question : "What would you like PROTEUS to do next?",
+      title: "Proteus has a question",
+      question: typeof payload.question === "string" ? payload.question : "What would you like Proteus to do next?",
       options,
       selectionMode: payload.selectionMode === "multi_select" ? "multi_select" : options.length > 0 ? "single_select" : undefined,
       status: "pending",

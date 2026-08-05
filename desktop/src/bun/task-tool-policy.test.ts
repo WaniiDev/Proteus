@@ -5,7 +5,7 @@ import { TaskToolPolicy } from "./task-tool-policy";
 
 const tasks: TaskItemSnapshot[] = [{ id: "one", content: "Complete one", activeForm: "Completing one", status: "completed" }];
 const context = (threadId = "thread-1") => ({ agent: { threadId } });
-const stepArgs = (steps: unknown[] = [], threadId = "thread-1") => ({ steps, requestContext: { get: (key: string) => key === "controller" ? { threadId } : undefined } }) as unknown as ProcessInputStepArgs;
+const stepArgs = (steps: unknown[] = [], threadId = "thread-1", stepNumber = 1) => ({ stepNumber, steps, requestContext: { get: (key: string) => key === "controller" ? { threadId } : undefined } }) as unknown as ProcessInputStepArgs;
 
 describe("TaskToolPolicy", () => {
   it("returns the last native snapshot for an exact repeated call and ends the tool loop", async () => {
@@ -35,5 +35,14 @@ describe("TaskToolPolicy", () => {
     await policy.hooks.afterToolCall?.({ toolName: "task_complete", input: { id: "one" }, output: { content: "Done", tasks, isError: false }, context: context() });
     policy.reset("thread-1");
     expect(await policy.hooks.beforeToolCall?.({ toolName: "task_complete", input: { id: "one" }, context: context() })).toBeUndefined();
+  });
+
+  it("clears a completed run synchronously at Mastra step zero", async () => {
+    const policy = new TaskToolPolicy();
+    await policy.hooks.afterToolCall?.({ toolName: "task_check", input: {}, output: { content: "Done", tasks, isError: false, summary: { allCompleted: true } }, context: context() });
+    expect(policy.prepareStep(stepArgs())).toEqual({ toolChoice: "none" });
+
+    expect(policy.prepareStep(stepArgs([], "thread-1", 0))).toBeUndefined();
+    expect(policy.prepareStep(stepArgs([], "thread-1", 1))).toBeUndefined();
   });
 });

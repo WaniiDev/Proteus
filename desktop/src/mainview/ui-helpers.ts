@@ -1,4 +1,10 @@
-import type { ChatMessage, ChatToolPart, ThreadSummary, WorkbenchState } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, WorkbenchState } from "../shared/contracts";
+
+type ChatTextPart = Extract<ChatMessagePart, { type: "text" }>;
+
+export type AssistantPartRun =
+  | { type: "text"; part: ChatTextPart }
+  | { type: "tools"; tools: ChatToolPart[] };
 
 export type ConversationItem =
   | { type: "user"; message: ChatMessage }
@@ -6,9 +12,22 @@ export type ConversationItem =
       type: "assistant";
       id: string;
       messages: ChatMessage[];
-      textParts: Extract<ChatMessage["parts"][number], { type: "text" }>[];
-      tools: ChatToolPart[];
+      parts: ChatMessagePart[];
     };
+
+export function groupAssistantPartRuns(parts: ChatMessagePart[]): AssistantPartRun[] {
+  const runs: AssistantPartRun[] = [];
+  for (const part of parts) {
+    if (part.type === "text") {
+      runs.push({ type: "text", part });
+      continue;
+    }
+    const previous = runs.at(-1);
+    if (previous?.type === "tools") previous.tools.push(part);
+    else runs.push({ type: "tools", tools: [part] });
+  }
+  return runs;
+}
 
 export function groupConversationItems(messages: ChatMessage[]): ConversationItem[] {
   const items: ConversationItem[] = [];
@@ -25,16 +44,18 @@ export function groupConversationItems(messages: ChatMessage[]): ConversationIte
             type: "assistant" as const,
             id: message.turnId,
             messages: [],
-            textParts: [],
-            tools: [],
+            parts: [],
           };
     if (group !== previous) items.push(group);
     group.messages.push(message);
-    group.textParts.push(...message.parts.filter((part): part is Extract<ChatMessage["parts"][number], { type: "text" }> => part.type === "text"));
-    for (const tool of message.parts.filter((part): part is ChatToolPart => part.type === "tool")) {
-      const index = group.tools.findIndex((item) => item.toolCallId === tool.toolCallId);
-      if (index >= 0) group.tools[index] = tool;
-      else group.tools.push(tool);
+    for (const part of message.parts) {
+      if (part.type === "text") {
+        group.parts.push(part);
+        continue;
+      }
+      const index = group.parts.findIndex((item) => item.type === "tool" && item.toolCallId === part.toolCallId);
+      if (index >= 0) group.parts[index] = part;
+      else group.parts.push(part);
     }
   }
   return items;

@@ -353,6 +353,15 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-timeline { margin-top: 10px; border-top: 1px solid var(--hairline); color: var(--muted); font-size: 12px; }
 .tool-timeline-head { display: flex; align-items: center; gap: 7px; padding: 9px 0; font-weight: 600; }
 .tool-timeline-head small { color: var(--muted-soft); font-weight: 500; }
+.tool-timeline-disclosure > summary { display: grid; grid-template-columns: auto minmax(0,1fr) 18px; align-items: center; gap: 12px; min-height: 42px; cursor: pointer; list-style: none; }
+.tool-timeline-disclosure > summary::-webkit-details-marker { display: none; }
+.tool-timeline-disclosure > summary:focus-visible { outline: 2px solid color-mix(in srgb, var(--g-mint) 62%, transparent); outline-offset: 3px; border-radius: var(--r-sm); }
+.tool-group-summary { display: flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--muted-soft); white-space: nowrap; }
+.tool-group-label { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tool-group-label + .tool-group-label::before { content: "·"; margin-right: 3px; color: var(--hairline-strong); }
+.tool-group-label small { color: var(--muted); font-size: 10px; font-weight: 650; }
+.tool-disclosure-chevron { width: 7px; height: 7px; justify-self: center; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-1px,-1px); transition: transform .18s ease; }
+.tool-timeline-disclosure[open] .tool-disclosure-chevron { transform: rotate(225deg) translate(-1px,-1px); }
 .tool-list { border-bottom: 1px solid var(--hairline); }
 .tool-row { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 0; border-top: 1px solid var(--hairline-soft); }
 .tool-timeline-live .tool-row { animation: toolRowArrive 180ms ease-out both; }
@@ -627,7 +636,7 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  min-height: 70px;
+  min-height: 105px;
   max-height: 154px;
   padding: 10px 60px 9px 12px;
   border: 1px solid var(--hairline-strong);

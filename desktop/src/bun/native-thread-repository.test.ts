@@ -18,7 +18,7 @@ describe("native Mastra thread repository", () => {
       expect(await threads.get(created.id)).toBeNull();
       expect((await threads.list()).map((thread) => thread.id)).not.toContain(created.id);
     } finally {
-      await foundation.primary.close();
+      await foundation.appStorage.close();
     }
   });
 
@@ -33,7 +33,7 @@ describe("native Mastra thread repository", () => {
       await other.create("Other");
       expect((await local.list()).map((thread) => thread.title)).toEqual(["Local"]);
     } finally {
-      await foundation.primary.close();
+      await foundation.appStorage.close();
     }
   });
 });

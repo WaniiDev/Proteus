@@ -1,5 +1,5 @@
 /* The production navigation is intentionally independent from the prototype
-   sidebar. It reuses PROTEUS tokens, but owns its geometry and interaction. */
+   sidebar. It reuses Proteus tokens, but owns its geometry and interaction. */
 .app-nav {
   position: relative;
   width: 72px;
@@ -75,28 +75,19 @@
 
 .app-nav__orb-mark {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
   display: block;
-  overflow: hidden;
-  border-radius: 48% 52% 56% 44% / 52% 44% 56% 48%;
-  background: radial-gradient(circle at 34% 28%, var(--g-mint), var(--g-sky) 44%, var(--g-lavender) 92%);
-  box-shadow: 0 3px 10px rgba(200, 184, 224, .45);
+  overflow: visible;
   transition: transform .18s ease, filter .18s ease;
 }
 
-.app-nav__orb-mark::after {
-  content: "";
-  position: absolute;
-  inset: 3px 7px 5px 6px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .56), rgba(255, 255, 255, 0) 72%);
-  opacity: .7;
-}
-
-.app-nav__orb-core {
-  position: absolute;
-  inset: 0;
+.app-nav__orb-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 8px rgba(111, 93, 163, .24));
 }
 
 .app-nav__item {

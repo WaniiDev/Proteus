@@ -1,10 +1,10 @@
-# PROTEUS — Implementation Handoff
+# Proteus — Implementation Handoff
 
 **Audience:** the coding agent / engineering team building the real product.
-**Source materials:** `PROTEUS-CONCEPT.md` (product concept), `DESIGN-elevenlabs.md` (design system), and the working proof-of-concept prototype this document ships with (`/app`).
+**Source materials:** `Proteus-CONCEPT.md` (product concept), `DESIGN-elevenlabs.md` (design system), and the working proof-of-concept prototype this document ships with (`/app`).
 **Version:** v4 (voice-first + generative center) · **Date:** 2026-08-02
 
-> **Platform note (important):** PROTEUS is a **Windows desktop app (packaged `.exe`), not a web app.** The prototype uses HTML/CSS/JS purely as the UI layer — the same stack a Tauri or Electron shell renders. All layout decisions (collapsible sidebar, edge-to-edge workbench, window-level scrolling, local data copy) are made for a desktop window, not a browser page. Do not introduce browser chrome assumptions, URL routing, or web hosting into the implementation.
+> **Platform note (important):** Proteus is a **Windows desktop app (packaged `.exe`), not a web app.** The prototype uses HTML/CSS/JS purely as the UI layer — the same stack a Tauri or Electron shell renders. All layout decisions (collapsible sidebar, edge-to-edge workbench, window-level scrolling, local data copy) are made for a desktop window, not a browser page. Do not introduce browser chrome assumptions, URL routing, or web hosting into the implementation.
 
 ---
 
@@ -17,14 +17,14 @@ The prototype (`/app` — HTML + CSS + JS, one vendored library, no build step) 
 Proven interactions:
 
 1. **Liquid Orb as the product's presence** — a WebGL (Three.js) simplex-noise shader sphere with 9 states (idle, listening, thinking, working, waiting, speaking, done, interrupted, recovery). States don't switch animations: amplitude, flow speed, frequency, scale, and palette *ease* toward per-state targets every frame, so transitions melt. Listening/speaking add voice-like surface modulation; the orb leans toward the pointer and nudges while the user types.
-2. **Center → dock layout contract** — at rest the Orb holds the center of the stage. When PROTEUS starts generating, the center hero collapses, generated UI pops in from the center, and the orb FLIP-animates into a persistent bottom dock beside its state label. It never disappears during work.
+2. **Center → dock layout contract** — at rest the Orb holds the center of the stage. When Proteus starts generating, the center hero collapses, generated UI pops in from the center, and the orb FLIP-animates into a persistent bottom dock beside its state label. It never disappears during work.
 3. **Desktop app shell** — collapsible left sidebar (240px ⇄ 68px icon rail, animated, persisted) with brand, icon menu, and an orb-presence chip; no top navigation bar. The window scrolls as one surface; the workbench goes edge-to-edge.
 4. **Two interaction modes, one toggle** — a segmented Voice / Chat control (persisted per device) swaps the input surface: a mic-first **voice bar** (big mic, live transcript, contextual status line) or a classic text composer with an inline mic. Voice is the default and the natural front door; chat is a complete, equal path — every scenario works in both.
 5. **Generative center (the big v4 change)** — everything that matters now materializes **in the center thread**, not the right panel: adaptive surfaces (comparison, milestones, trade-offs), the decision card, the approval gate, memory consent, and the end-of-session **Project brief**. The workbench demotes itself to a quiet ledger (§3).
 6. **Voice replies as artifacts** — in voice mode, key spoken answers also land as transcript cards with a replay button, so voice leaves a scannable record. Spoken output is on by default in voice mode, always off in chat mode.
 7. **Snooze everywhere ("Not now")** — every control card offers a low-key "Not now" alongside its primary actions. Snoozing parks the request without judgment: the scenario closes gracefully, nothing is sent or saved, and the cards stay readable in the thread.
 8. **Visible work** — goal, plan steps with live status, evidence list with confidence levels (`verified` / `inferred` / `unverified`).
-9. **User decision card** — options with a marked recommendation; the user decides, PROTEUS organizes.
+9. **User decision card** — options with a marked recommendation; the user decides, Proteus organizes.
 10. **Approval gate** — consequential action (draft email in the user's name) requires explicit Approve / Edit / Decline. Nothing is sent — the draft artifact is clearly marked "Not sent".
 11. **Memory consent** — proposed memory items require per-item opt-in; "discard all" is always offered. Kept items persist (localStorage in the prototype) and shape the next session's greeting.
 12. **Interrupt & recovery** — Stop button / Esc at any point (the Stop control lives in whichever input surface is active); orb contracts, states "Nothing was sent or saved", recovers calmly.
@@ -257,7 +257,7 @@ Voice is the **default mode** (v4): the voice bar — one big mic, a status line
 - **TTS:** any neural voice; **on by default in voice mode, always off in chat mode** (the mode toggle is the spoken-output switch — there is no separate TTS preference). Voice responses must be interruptible by simply starting to speak (barge-in), mirroring the prototype's Stop.
 - **Voice leaves a record:** every spoken answer also renders as a transcript card with replay (`genUI.voiceReply`) — voice mode never becomes an ephemeral black box.
 - **Orb–voice coupling:** feed mic RMS (Web Audio `AnalyserNode`) into `orbFX`-equivalent `uVoice` during listening, and TTS playback level during speaking — the prototype's pseudo-voice modulation is the placeholder for exactly this.
-- **Summon:** explicit only (hotkey, tray, button). PROTEUS is **not** always-listening — a stated product boundary.
+- **Summon:** explicit only (hotkey, tray, button). Proteus is **not** always-listening — a stated product boundary.
 
 ---
 
@@ -273,7 +273,7 @@ Voice is the **default mode** (v4): the voice bar — one big mic, a status line
 | Canned evidence items | Connector reads (notes, email RO, calendar) with provenance |
 | Canned surface payloads | Surface renderers driven by `surface.render` payloads |
 | localStorage (memories, sidebar state, **mode preference**) | SQLite + app config store (Tauri/Electron store) |
-| Canned draft email | Draft service; user sends from their own client — PROTEUS never sends |
+| Canned draft email | Draft service; user sends from their own client — Proteus never sends |
 | Web Speech API | Whisper + neural TTS (§8) |
 | Pseudo-voice `uVoice` in `orb3d.js` | Real mic/TTS amplitude feed |
 | Simulated mic transcript (voice bar + composer mic) | Real STT stream feeding the same transcript UI |

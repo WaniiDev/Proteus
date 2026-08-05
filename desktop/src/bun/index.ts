@@ -250,7 +250,7 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
 });
 
 const mainWindow = new BrowserWindow({
-  title: "PROTEUS",
+  title: "Proteus",
   url: await getMainViewUrl(),
   // Keep the initial window inside the OS work area, including scaled Windows
   // displays where a fixed frame can otherwise extend behind the taskbar.
@@ -265,9 +265,15 @@ runtime.onSnapshot((snapshot) => {
 
 let windowVisible = true;
 
-const tray = new Tray({ title: "PROTEUS" });
+const tray = new Tray({
+  title: "Proteus",
+  image: "views://mainview/assets/proteus-orb-32.png",
+  template: false,
+  width: 20,
+  height: 20,
+});
 tray.setMenu([
-  { type: "normal", label: "Show PROTEUS", action: "show" },
+  { type: "normal", label: "Show Proteus", action: "show" },
   { type: "normal", label: "Quit", action: "quit" },
 ]);
 tray.on("tray-clicked", async (event) => {
@@ -291,4 +297,4 @@ GlobalShortcut.register("Super+Shift+P", () => {
   }
 });
 
-console.info("PROTEUS desktop shell started", { tray, mainWindow });
+console.info("Proteus desktop shell started", { tray, mainWindow });

@@ -1,10 +1,10 @@
-# PROTEUS text chat + native Mastra runtime
+# Proteus text chat + native Mastra runtime
 
 This is the implementation record for the native Mastra text-chat backbone.
 
 ## Runtime ownership
 
-- One retained `Mastra` application registers the PROTEUS `Agent`, `Memory`, contained plan `Workspace`, gateways, storage, and `TaskSignalProvider`.
+- One retained `Mastra` application registers the Proteus `Agent`, `Memory`, contained plan `Workspace`, gateways, storage, and `TaskSignalProvider`.
 - The desktop shell shuts the retained Mastra application down on quit so workspace and LibSQL handles are released.
 - `NativeAgentDriver` is a thin UI adapter over `subscribeToThread`, `queueMessage`, `sendStreamResume`, `sendToolApproval`, `listSuspendedRuns`, and the subscription abort function.
 - Normal sends, queued sends, retries, and continuations all enter Mastra through `queueMessage`. Queue state comes from Mastra's accepted `wake` or `deliver` action.

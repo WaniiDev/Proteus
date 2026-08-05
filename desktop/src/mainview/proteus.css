@@ -1,5 +1,5 @@
 /* ============================================================
-   PROTEUS — Prototype stylesheet
+   Proteus — Prototype stylesheet
    Design system: ElevenLabs editorial (see DESIGN-elevenlabs.md)
    Display: EB Garamond 300 (substitute for Waldenburg Light)
    Body: Inter 400/500/600
@@ -265,7 +265,7 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 .thread { flex: 1 1 auto; }
 
 /* ---------- The Orb (WebGL liquid + CSS fallback) ---------- */
-/* The orb holds the center of the stage at rest. When PROTEUS starts
+/* The orb holds the center of the stage at rest. When Proteus starts
    generating UI, the content pops in from the center and the orb is
    pushed down into a persistent bottom dock (see app.js dockOrb). */
 .stage-center {

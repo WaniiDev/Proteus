@@ -2,12 +2,12 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, ChatToolPart, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
 import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
-import { groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
+import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
 import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
@@ -601,23 +601,25 @@ const markdownComponents = {
   },
 };
 
-function AssistantTurn({ messages, textParts, tools, pendingIds, onRetry, onContinue }: { messages: ChatMessage[]; textParts: Extract<ChatMessage["parts"][number], { type: "text" }>[]; tools: ChatToolPart[]; pendingIds: Set<string>; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
+function AssistantTurn({ messages, parts, pendingIds, onRetry, onContinue }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
   const terminal = messages.at(-1)!;
+  const runs = groupAssistantPartRuns(parts);
   const actionMessage = {
     ...terminal,
-    text: textParts.map((part) => part.text).join("\n\n"),
+    text: parts.filter((part): part is Extract<ChatMessage["parts"][number], { type: "text" }> => part.type === "text").map((part) => part.text).join("\n\n"),
   };
   return (
     <div className={`msg ai message-${terminal.status}`}>
       <div className="msg-body">
-        {textParts.map((part) => (
-          <div className="msg-text markdown-body" key={part.id}>
+        {runs.map((run) => run.type === "text" ? (
+          <div className="msg-text markdown-body" key={run.part.id}>
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {part.text}
+              {run.part.text}
             </ReactMarkdown>
           </div>
+        ) : (
+          <ToolTimeline key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`} tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} />
         ))}
-        <ToolTimeline tools={tools} live={terminal.status === "streaming"} pendingIds={pendingIds} />
         {(terminal.status === "interrupted" || terminal.status === "error") && <span className="message-status">{terminal.status === "interrupted" ? "Stopped" : "Response failed"}</span>}
         <MessageActions message={actionMessage} onRetry={terminal.status === "error" ? () => onRetry(terminal.id) : undefined} onContinue={terminal.status === "interrupted" ? () => onContinue(terminal.id) : undefined} />
       </div>
@@ -845,7 +847,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                     <MessageActions message={item.message} />
                   </div>
                 ) : (
-                  <AssistantTurn key={item.id} messages={item.messages} textParts={item.textParts} tools={item.tools} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
+                  <AssistantTurn key={item.id} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
                 ),
               )}
               {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} />)}
@@ -886,8 +888,8 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                   setInput(event.target.value);
                   orbRef.current?.nudge();
                 }}
-                placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message PROTEUS…" : `Configure ${selectedProvider?.name ?? "a provider"} in Settings to chat`}
-                aria-label="Message PROTEUS"
+                placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message Proteus…" : `Configure ${selectedProvider?.name ?? "a provider"} in Settings to chat`}
+                aria-label="Message Proteus"
                 disabled={!canChat}
                 maxLength={32_000}
                 rows={inputLineCount}
@@ -1000,7 +1002,7 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
   };
   return (
     <section className="view active"><div className="page-narrow settings-page">
-      <PageHeader kicker="Yours to control" title="Settings" subtitle="Choose how PROTEUS connects, which model thinks, and how deeply it reasons." />
+      <PageHeader kicker="Yours to control" title="Settings" subtitle="Choose how Proteus connects, which model thinks, and how deeply it reasons." />
       <nav className="settings-tabs" aria-label="Settings sections">
         <button type="button" className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers</button>
         <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}>Models & thinking</button>
@@ -1030,7 +1032,7 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
         </section>)}
         <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
       </div> : tab === "models" ? <section className="card settings-card model-settings-card">
-        <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection is saved for this conversation.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
+        <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection is remembered across conversations and app restarts.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
         <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}>{provider.name}</button>)}</div>
         <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
         <div className="model-card-list">{displayedModels.map((model) => { const isSelected = selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId); return <button type="button" className={`model-card ${isSelected ? "selected" : ""}`} key={model.id} onClick={() => chooseDisplayedModel(model)} disabled={snapshot.activeRun !== null}><span className="model-card-copy"><strong>{model.providerId === "codex" ? model.baseModelId : model.name}</strong><small>{model.description ?? model.rawId}</small></span>{isSelected && <Check size={17} />}</button>; })}</div>
@@ -1090,7 +1092,7 @@ export default function App() {
           status: "error",
           error: {
             code: "unknown",
-            message: "A runtime update could not be decoded. Restart PROTEUS and try again.",
+            message: "A runtime update could not be decoded. Restart Proteus and try again.",
             retryable: true,
           },
         }));
@@ -1282,7 +1284,7 @@ function ToolApprovalCard({ approval, onRespond }: { approval: ToolApproval; onR
     <article className={`interaction-card tool-approval-card${resolving ? " resolving" : ""}`} id={`tool-approval-${approval.toolCallId}`}>
       <div className="interaction-kicker">{decision === "approve" ? "Approving tool…" : decision === "decline" ? "Declining tool…" : "Approval required"}</div>
       <h3>Allow {approval.toolName}?</h3>
-      <p>PROTEUS is ready to use this tool. Review the request before it continues.</p>
+      <p>Proteus is ready to use this tool. Review the request before it continues.</p>
       <pre className="tool-approval-args">{args}</pre>
       <div className="interaction-actions">
         <button disabled={resolving} type="button" className="btn-outline sm" onClick={() => respond(false)}>
