@@ -566,6 +566,7 @@ export class TextRuntime {
       id: AGENT_ID,
       name: "PROTEUS",
       instructions: AGENT_INSTRUCTIONS,
+      workspace: this.workspace,
       tools: { ask_user: askUserTool, submit_plan: submitPlanTool },
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
@@ -1000,8 +1001,12 @@ export class TextRuntime {
     const projected = converted
       .map((message) => {
         const role = message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : null;
-        if (role === "user") currentTurnId = message.id;
-        return { message, source: sourceById.get(message.id), role, turnId: currentTurnId };
+        const source = sourceById.get(message.id);
+        const metadata = source && "metadata" in source ? (source as MastraMessage & { metadata?: Record<string, unknown> }).metadata : undefined;
+        const clientMessageId = role === "user" && typeof metadata?.clientMessageId === "string" ? metadata.clientMessageId : undefined;
+        const projectedId = clientMessageId ?? message.id;
+        if (role === "user") currentTurnId = projectedId;
+        return { message, source, role, turnId: currentTurnId, projectedId };
       })
       .filter(
         (entry): entry is {
@@ -1009,11 +1014,12 @@ export class TextRuntime {
           source: MastraMessage | undefined;
           role: ChatMessage["role"];
           turnId: string;
+          projectedId: string;
         } => entry.role !== null && entry.message.id !== hiddenRetryId,
       )
-      .map(({ message, source, role, turnId }) => {
+      .map(({ message, source, role, turnId, projectedId }) => {
         let parts = projectMessageParts({
-          id: message.id,
+          id: projectedId,
           role,
           createdAt: source?.createdAt ?? new Date(),
           content: { format: 2, parts: message.parts },

@@ -26,6 +26,7 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("gateways: [openRouterGateway, this.codexGateway]");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
+    expect(runtime).toContain("workspace: this.workspace");
     expect(runtime).not.toContain("session.subscribe((event)");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
     expect(app.toLowerCase()).not.toContain("previous decisions");
