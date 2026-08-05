@@ -9,6 +9,31 @@ type SuspendedToolLike = {
   suspendPayload: unknown;
 };
 
+type StoredMessageIdentity = {
+  id: string;
+  role?: string;
+  content?: unknown;
+  metadata?: unknown;
+};
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+/**
+ * Preserve the renderer's optimistic id after Mastra stores a user-authored
+ * queue signal under its own native signal id. Mastra persists message
+ * metadata below content.metadata.signal.metadata for signal rows.
+ */
+export function projectedMessageId(message: StoredMessageIdentity, projectedRole: string): string {
+  if (projectedRole !== "user") return message.id;
+  const contentMetadata = objectRecord(objectRecord(message.content)?.metadata);
+  const signalMetadata = objectRecord(objectRecord(contentMetadata?.signal)?.metadata);
+  const topLevelMetadata = objectRecord(message.metadata);
+  const candidate = signalMetadata?.clientMessageId ?? contentMetadata?.clientMessageId ?? topLevelMetadata?.clientMessageId;
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : message.id;
+}
+
 const LEGACY_TASK_POLICY_MESSAGES = new Set([
   "This exact task mutation already ran. Use the current task state and continue without repeating it.",
   "Task tools made no progress repeatedly. Stop using task tools and answer the user with the current result.",

@@ -16,7 +16,7 @@ import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
-import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
+import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { APPROVED_PLAN_TOOLS } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
@@ -822,9 +822,7 @@ export class TextRuntime {
       .map((message) => {
         const role = message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : null;
         const source = sourceById.get(message.id);
-        const metadata = source && "metadata" in source ? (source as MastraMessage & { metadata?: Record<string, unknown> }).metadata : undefined;
-        const clientMessageId = role === "user" && typeof metadata?.clientMessageId === "string" ? metadata.clientMessageId : undefined;
-        const projectedId = clientMessageId ?? message.id;
+        const projectedId = projectedMessageId(source ?? { id: message.id, role: message.role }, role ?? "unknown");
         if (role === "user") currentTurnId = projectedId;
         return { message, source, role, turnId: currentTurnId, projectedId };
       })
@@ -849,7 +847,7 @@ export class TextRuntime {
           .map((part) => part.text)
           .join("\n\n");
         return {
-          id: message.id,
+          id: projectedId,
           role,
           text,
           turnId,

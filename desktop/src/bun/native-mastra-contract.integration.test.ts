@@ -53,13 +53,17 @@ describe("native Mastra 1.56 contracts", () => {
       for await (const chunk of subscription.stream) chunks.push(chunk as { type: string; payload?: unknown });
     })();
 
-    const queued = agent.queueMessage("Create the contract plan.", { resourceId, threadId });
+    const clientMessageId = `client-${crypto.randomUUID()}`;
+    const queued = agent.queueMessage({ contents: "Create the contract plan.", metadata: { clientMessageId } }, { resourceId, threadId });
     const accepted = await queued.accepted;
     expect(accepted.action).toBe("wake");
     if (accepted.action === "wake") void accepted.output.consumeStream();
 
     const suspendedChunk = await waitFor("native plan suspension", () => chunks.find((chunk) => chunk.type === "tool-call-suspended"));
     expect(suspendedChunk.type).toBe("tool-call-suspended");
+    const persistedSignal = (await memory.recall({ threadId, perPage: false })).messages.find((message) => message.id === queued.signal.id);
+    expect(persistedSignal?.role).toBe("signal");
+    expect((persistedSignal?.content.metadata as { signal?: { metadata?: { clientMessageId?: string } } } | undefined)?.signal?.metadata?.clientMessageId).toBe(clientMessageId);
     const suspended = await agent.listSuspendedRuns({ resourceId, threadId });
     expect(suspended.runs).toHaveLength(1);
     const run = suspended.runs[0];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, PendingInteraction } from "../shared/contracts";
-import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectedMessageId, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
 
 const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
   isRunning: true,
@@ -55,6 +55,28 @@ describe("runtime display projection", () => {
   const taskMessage = (id: string, toolCallId: string, status: "completed" | "error", output: unknown, name = "task_check"): ChatMessage => ({
     ...assistant(id, ""),
     parts: [{ type: "tool", id: `${id}:tool`, toolCallId, name, label: "Checked task progress", status, input: {}, output }],
+  });
+
+  it("reconciles a persisted Mastra user signal to its optimistic client message id", () => {
+    const persistedId = projectedMessageId({
+      id: "mastra-signal-id",
+      role: "signal",
+      content: {
+        format: 2,
+        parts: [{ type: "text", text: "Hello!" }],
+        metadata: {
+          signal: {
+            id: "mastra-signal-id",
+            type: "user",
+            metadata: { clientMessageId: "client-message-id" },
+          },
+        },
+      },
+    }, "user");
+    expect(persistedId).toBe("client-message-id");
+    expect(upsertChatMessage([user("client-message-id")], { ...user("persisted-placeholder"), id: persistedId })).toHaveLength(1);
+
+    expect(projectedMessageId({ id: "assistant-id", role: "assistant" }, "assistant")).toBe("assistant-id");
   });
 
   it("suppresses retired repeat-guard errors but preserves genuine task failures", () => {
