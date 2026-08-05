@@ -7,9 +7,8 @@ import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
-import { MastraStorageExporter, Observability, SensitiveDataFilter } from "@mastra/observability";
+import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
-import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
@@ -27,6 +26,7 @@ import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteus
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-oauth-failure";
 import { reconcileProviderAuth } from "./provider-auth";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
+import { createProteusStorage } from "./mastra-foundation";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -433,7 +433,7 @@ function emptyWorkbench(): WorkbenchState {
 export class TextRuntime {
   private readonly vault: CredentialVault;
   private readonly listeners = new Set<SnapshotListener>();
-  private readonly storage: LibSQLStore;
+  private readonly storage: MastraCompositeStore;
   private readonly memory: Memory;
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
@@ -529,10 +529,7 @@ export class TextRuntime {
       credentialStore: this.codexCredentialStore,
     });
     this.codexCatalogProvider = createProteusCodexCatalogProvider(this.codexGateway);
-    this.storage = new LibSQLStore({
-      id: "proteus-storage-v2",
-      url: `file:${join(Utils.paths.userData, "proteus-v2.db")}`,
-    });
+    this.storage = createProteusStorage(Utils.paths.userData).storage;
     this.planFilesystem = new LocalFilesystem({
       basePath: join(Utils.paths.userData, "proteus-plans-v2"),
       contained: true,
@@ -564,6 +561,8 @@ export class TextRuntime {
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
       defaultOptions: {
+        maxSteps: 100,
+        autoResumeSuspendedTools: true,
         prepareStep: (args) => ({
           ...this.taskToolPolicy.prepareStep(args),
           ...approvedPlanPrepareStep(args),
@@ -611,17 +610,6 @@ export class TextRuntime {
       agents: { proteus: this.agent },
       agentControllers: { proteus: this.controller },
       gateways: { "models.dev": openRouterGateway, mastracode: this.codexGateway },
-      observability: new Observability({
-        configs: {
-          default: {
-            serviceName: "proteus-desktop",
-            exporters: [new MastraStorageExporter({ maxBatchWaitMs: 250, maxBatchSize: 50 })],
-            spanOutputProcessors: [new SensitiveDataFilter()],
-            includeInternalSpans: true,
-            serializationOptions: { maxStringLength: 8_000, maxDepth: 7, maxArrayLength: 80, maxObjectKeys: 100 },
-          },
-        },
-      }),
       logger: false,
     });
   }
