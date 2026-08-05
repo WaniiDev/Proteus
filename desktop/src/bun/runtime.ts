@@ -18,6 +18,7 @@ import { TaskToolPolicy } from "./task-tool-policy";
 import { PLAN_DRAFT_TOOL_GRANTS, PLANNING_MODE_ID, approvedPlanPrepareStep, planWorkflowModes, restorePlanningMode, syncPlanWorkflowModel } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
+import { CodexProviderRuntime, emptyCodexProjection, projectCodexUpdate, type CodexProjection } from "./codex-provider";
 
 const CONTROLLER_ID = "proteus-text-controller";
 const AGENT_ID = "proteus-text-agent";
@@ -418,6 +419,8 @@ export class TextRuntime {
   private readonly workspace: Workspace;
   private readonly agent: Agent;
   private readonly controller: AgentController;
+  private readonly codex: CodexProviderRuntime;
+  private codexAbortController: AbortController | null = null;
   private readonly taskToolPolicy = new TaskToolPolicy();
   private session: Awaited<ReturnType<AgentController["createSession"]>> | undefined;
   private controllerThreadId: string | null = null;
@@ -520,6 +523,11 @@ export class TextRuntime {
         generateTitle: false,
       },
     });
+    this.codex = new CodexProviderRuntime(process.cwd(), (permission) => {
+      this.publish({ toolApproval: permission });
+      const threadId = this.controllerThreadId ?? this.selectedThreadId;
+      if (threadId) this.updateThreadActivity(threadId, permission ? "waiting" : "running", permission ? 1 : 0);
+    });
 
     this.agent = new Agent({
       id: AGENT_ID,
@@ -617,6 +625,25 @@ export class TextRuntime {
   private requireSession() {
     if (!this.session) throw new Error("Text runtime is not initialized");
     return this.session;
+  }
+
+  private mergeProviderModels(providerId: ProviderId, models: RuntimeSnapshot["models"]): RuntimeSnapshot["models"] {
+    return [...this.snapshot.models.filter((model) => model.providerId !== providerId), ...models];
+  }
+
+  private async refreshCodexModels(): Promise<void> {
+    this.publish({ providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, availability: "checking" } : provider) });
+    try {
+      const models = await this.codex.listModels();
+      this.publish({
+        models: this.mergeProviderModels("codex", models),
+        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: true, availability: "ready", detail: "Connected through your local Codex sign-in." } : provider),
+      });
+    } catch (error) {
+      this.publish({
+        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: false, availability: "unavailable", detail: error instanceof Error ? error.message : "Codex ACP is unavailable." } : provider),
+      });
+    }
   }
 
   private async loadThreadState(threadId: string): Promise<PersistedThreadState> {
@@ -1504,7 +1531,7 @@ export class TextRuntime {
       });
       try {
         const models = await listOpenRouterTextModels(apiKey);
-        this.publish({ models, status: "ready", error: null });
+        this.publish({ models: this.mergeProviderModels("openrouter", models), status: "ready", error: null });
         await this.syncThreadState({ clearError: false });
         if (this.snapshot.selectedModelId !== DEFAULT_MODEL_ID && !models.some((model) => model.id === this.snapshot.selectedModelId)) {
           this.publish({
@@ -1544,6 +1571,7 @@ export class TextRuntime {
         for (const toolName of [...INTERNAL_TOOL_GRANTS, ...PLAN_DRAFT_TOOL_GRANTS]) this.session.grantTool(toolName);
         this.subscribeToController();
         await this.syncThreadState();
+        await this.refreshCodexModels();
         await this.validateStoredCredential();
         return this.getSnapshot();
       } catch (error) {
@@ -1574,7 +1602,7 @@ export class TextRuntime {
       let catalogUnavailable = false;
       try {
         const models = await listOpenRouterTextModels(candidate);
-        this.publish({ models, status: "ready", error: null });
+        this.publish({ models: this.mergeProviderModels("openrouter", models), status: "ready", error: null });
       } catch {
         catalogUnavailable = true;
         this.publish({
@@ -1618,7 +1646,7 @@ export class TextRuntime {
     this.publish({ status: "loading-models", error: null });
     try {
       const models = await listOpenRouterTextModels(apiKey);
-      this.publish({ models, status: "ready", error: null });
+      this.publish({ models: this.mergeProviderModels("openrouter", models), status: "ready", error: null });
       if (this.snapshot.selectedModelId !== DEFAULT_MODEL_ID && !models.some((model) => model.id === this.snapshot.selectedModelId)) {
         this.publish({
           status: "error",
@@ -1800,7 +1828,8 @@ export class TextRuntime {
 
   private async sendReserved(candidate: string, messageId: string, reservedThreadId: string | null): Promise<{ runId: string }> {
     await this.ensureInitialized();
-    if (!this.snapshot.credential.configured || !this.snapshot.credential.verified) throw makeRuntimeError("invalid-credential");
+    if (this.snapshot.selectedProviderId === "openrouter" && (!this.snapshot.credential.configured || !this.snapshot.credential.verified)) throw makeRuntimeError("invalid-credential");
+    if (this.snapshot.selectedProviderId === "codex" && this.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
     if (this.snapshot.status === "error" && this.snapshot.error?.code === "model-unavailable") throw makeRuntimeError("model-unavailable");
     this.retryingText = null;
     this.hideSingleRetry = false;
@@ -1830,10 +1859,117 @@ export class TextRuntime {
       }
     }
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
+    if (this.snapshot.selectedProviderId === "codex") return this.startCodexRun(candidate, messageId);
     return this.startRun(candidate, {
       optimistic: true,
       clientMessageId: messageId,
     });
+  }
+
+  private startCodexRun(candidate: string, messageId: string): { runId: string } {
+    const threadId = this.controllerThreadId ?? this.requireSession().thread.getId();
+    if (!threadId) throw new Error("No active conversation");
+    const selectedModel = this.snapshot.models.find((model) => model.id === this.snapshot.selectedModelId && model.providerId === "codex");
+    if (!selectedModel) throw makeRuntimeError("model-unavailable");
+    const runId = randomUUID();
+    const createdAt = new Date().toISOString();
+    this.runId = runId;
+    this.runClientMessageId = messageId;
+    this.runStartedAt = createdAt;
+    this.runOutcome = "streaming";
+    this.runError = null;
+    this.lastAssistantId = `codex-assistant:${runId}`;
+    this.optimisticUserMessages.set(messageId, {
+      threadId,
+      message: {
+        id: messageId,
+        role: "user",
+        text: candidate,
+        turnId: messageId,
+        parts: [{ type: "text", id: `${messageId}:text:0`, text: candidate }],
+        status: "complete",
+        createdAt,
+      },
+    });
+    this.codexAbortController = new AbortController();
+    this.publish({
+      status: "running",
+      activeRun: { runId, threadId, status: "running" },
+      error: null,
+      retryMessageId: null,
+      messages: this.mergeTransientMessages(threadId, this.snapshot.messages),
+    });
+    this.updateThreadActivity(threadId, "running");
+    void this.runCodexTurn({ runId, threadId, messageId, candidate, modelId: selectedModel.rawId, createdAt, signal: this.codexAbortController.signal });
+    return { runId };
+  }
+
+  private codexLiveMessage(runId: string, messageId: string, createdAt: string, projection: CodexProjection): ChatMessage {
+    const assistantId = `codex-assistant:${runId}`;
+    const parts: ChatMessagePart[] = [
+      ...(projection.text ? [{ type: "text" as const, id: `${assistantId}:text:0`, text: projection.text }] : []),
+      ...projection.tools.values(),
+    ];
+    return {
+      id: assistantId,
+      role: "assistant",
+      text: projection.text,
+      turnId: messageId,
+      parts,
+      status: "streaming",
+      createdAt,
+    };
+  }
+
+  private async persistCodexTurn(threadId: string, messageId: string, candidate: string, createdAt: string, runId: string, projection: CodexProjection): Promise<void> {
+    const assistantId = `codex-assistant:${runId}`;
+    const toolParts = [...projection.tools.values()].map((tool) => ({
+      type: "tool-invocation" as const,
+      toolInvocation: {
+        toolCallId: tool.toolCallId,
+        toolName: tool.name,
+        args: tool.input ?? {},
+        state: tool.status === "error" ? "output-error" as const : "result" as const,
+        result: tool.output,
+      },
+    }));
+    await this.memory.saveMessages({
+      messages: [
+        { id: messageId, role: "user", createdAt: new Date(createdAt), threadId, resourceId: RESOURCE_ID, content: { format: 2, parts: [{ type: "text", text: candidate }] } },
+        { id: assistantId, role: "assistant", createdAt: new Date(), threadId, resourceId: RESOURCE_ID, content: { format: 2, parts: [...(projection.text ? [{ type: "text" as const, text: projection.text }] : []), ...toolParts] } },
+      ],
+    });
+  }
+
+  private async runCodexTurn(options: { runId: string; threadId: string; messageId: string; candidate: string; modelId: string; createdAt: string; signal: AbortSignal }): Promise<void> {
+    let projection = emptyCodexProjection();
+    try {
+      await this.codex.run(options.threadId, options.modelId, options.candidate, options.signal, (update) => {
+        if (this.runId !== options.runId) return;
+        projection = projectCodexUpdate(projection, update);
+        this.controllerThreadState = { ...this.controllerThreadState, tasks: projection.tasks, tokenUsage: projection.usage };
+        this.threadState = this.controllerThreadState;
+        const assistant = this.codexLiveMessage(options.runId, options.messageId, options.createdAt, projection);
+        this.publish({
+          messages: upsertChatMessage(this.mergeTransientMessages(options.threadId, this.snapshot.messages), assistant),
+          workbench: this.workbenchFromState(this.controllerThreadState, null),
+        });
+      });
+      if (this.runId !== options.runId) return;
+      await this.persistCodexTurn(options.threadId, options.messageId, options.candidate, options.createdAt, options.runId, projection);
+      await this.persistThreadState(options.threadId, this.controllerThreadState);
+      this.optimisticUserMessages.delete(options.messageId);
+      this.runId = null;
+      this.runClientMessageId = null;
+      this.codexAbortController = null;
+      this.runOutcome = "complete";
+      this.publish({ status: "ready", activeRun: null, error: null, toolApproval: null });
+      this.updateThreadActivity(options.threadId, "complete", 0);
+      await this.syncMessages(options.threadId);
+      await this.refreshThreadSummaries();
+    } catch (error) {
+      if (this.runId === options.runId) await this.finishFailedRun(options.runId, normalizeError(error));
+    }
   }
 
   private startRun(candidate: string, options: { optimistic?: boolean; clientMessageId?: string } = {}): { runId: string } {
@@ -2102,6 +2238,7 @@ export class TextRuntime {
     const pending = this.snapshot.toolApproval;
     if (!pending || pending.toolCallId !== toolCallId) throw new Error("That tool approval is no longer available");
     try {
+      if (this.codex.respondToPermission(toolCallId, approved)) return;
       session.respondToToolApproval({
         decision: approved ? "approve" : "decline",
         toolCallId,
@@ -2318,7 +2455,12 @@ export class TextRuntime {
           workbench: this.workbenchFromState(this.controllerThreadState, this.displayState),
         });
     }
-    this.requireSession().abort();
+    if (this.snapshot.selectedProviderId === "codex" && this.controllerThreadId) {
+      this.codexAbortController?.abort();
+      void this.codex.cancel(this.controllerThreadId).catch(() => undefined);
+    } else {
+      this.requireSession().abort();
+    }
     this.publish({
       activeRun: {
         runId: this.runId,

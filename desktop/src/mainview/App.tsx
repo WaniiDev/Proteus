@@ -733,7 +733,8 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
-  const canChat = snapshot.credential.verified && snapshot.activeThreadId !== null && snapshot.status !== "error" && !runningElsewhere;
+  const selectedProvider = snapshot.providers.find((provider) => provider.id === snapshot.selectedProviderId);
+  const canChat = selectedProvider?.verified === true && snapshot.activeThreadId !== null && snapshot.status !== "error" && !runningElsewhere;
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
@@ -898,7 +899,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
               <div className="composer-footer">
                 <div className="composer-context">
                   <span>{selectedModel?.name ?? snapshot.selectedModelId}</span>
-                  {!snapshot.credential.verified && <button className="btn-tertiary" type="button" onClick={onSettings}>Connect a key</button>}
+                  {selectedProvider?.verified !== true && <button className="btn-tertiary" type="button" onClick={onSettings}>Configure provider</button>}
                 </div>
                 <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
                 {primaryComposerAction === "stop" ? (
@@ -972,7 +973,7 @@ function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, on
           </div>
           <div className="model-picker">
             <label htmlFor="model-select">Selected model</label>
-            <select id="model-select" className="settings-select model-select" value={snapshot.selectedModelId} onChange={(event) => onSelectModel(event.target.value as ProviderModel["id"])} disabled={!snapshot.credential.verified || snapshot.activeRun !== null}>
+            <select id="model-select" className="settings-select model-select" value={snapshot.selectedModelId} onChange={(event) => onSelectModel(event.target.value as ProviderModel["id"])} disabled={snapshot.activeRun !== null}>
               {snapshot.models.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.name} · {model.id}
