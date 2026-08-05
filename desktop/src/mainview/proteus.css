@@ -286,19 +286,19 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 /* CSS fallback blob (visible until WebGL initialises, or without it) */
 .orb-css { position: absolute; inset: 0; z-index: 1; }
 .orb-layer {
-  position: absolute; inset: 6%; border-radius: 50%;
+  position: absolute; inset: 14%; border-radius: 50%;
   transition: opacity 1.1s ease; filter: saturate(1.06);
   background: radial-gradient(circle at 34% 28%, var(--g-mint), var(--g-lavender) 78%);
 }
 .orb-layer.l0 { opacity: 1; }
 .orb-layer.l1 { opacity: 0; }
 .orb-sheen {
-  position: absolute; inset: 6%; border-radius: 50%;
+  position: absolute; inset: 14%; border-radius: 50%;
   background: radial-gradient(circle at 32% 24%, rgba(255,255,255,.85), rgba(255,255,255,0) 46%);
   pointer-events: none;
 }
 .orb-swirl {
-  position: absolute; inset: 4%; border-radius: 50%; opacity: 0;
+  position: absolute; inset: 12%; border-radius: 50%; opacity: 0;
   background: conic-gradient(from 0deg, transparent 0 40%, rgba(255,255,255,.55) 50%, transparent 62% 100%);
   -webkit-mask: radial-gradient(circle, transparent 58%, #000 62%);
           mask: radial-gradient(circle, transparent 58%, #000 62%);

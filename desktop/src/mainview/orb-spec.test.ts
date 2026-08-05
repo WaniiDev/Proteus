@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { orbStates } from "../shared/contracts";
+import { ORB_CAMERA_DISTANCE } from "./orb3d";
 import { ORB_STATES } from "./orb-spec";
 
 describe("orb visual contract", () => {
@@ -58,5 +59,13 @@ describe("orb visual contract", () => {
     expect(css).toContain(".orb-frame > .orb-float");
     expect(css).toContain("inset: calc(0px - var(--orb-bleed))");
     expect(css).toContain("--orb-bleed: 14%");
+  });
+
+  it("keeps the orb core clear of its square canvas edge", async () => {
+    const css = await Bun.file(new URL("./proteus.css", import.meta.url)).text();
+
+    expect(ORB_CAMERA_DISTANCE).toBeGreaterThanOrEqual(3.6);
+    expect(css).toContain("position: absolute; inset: 14%; border-radius: 50%");
+    expect(css).toContain("position: absolute; inset: 12%; border-radius: 50%; opacity: 0");
   });
 });

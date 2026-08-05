@@ -9,6 +9,10 @@ export interface OrbFX {
   dispose(): void;
 }
 
+// Keep liquid deformation clear of the transparent canvas' square edge. The
+// outer frame can still overlap the surrounding layout independently.
+export const ORB_CAMERA_DISTANCE = 3.6;
+
 const VERT = /* glsl */ `
 uniform float uTime;
 uniform float uAmp;
@@ -322,7 +326,7 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
     if (!renderer.getContext()) throw new Error("WebGL context unavailable");
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 10);
-    camera.position.z = 3.15;
+    camera.position.z = ORB_CAMERA_DISTANCE;
     uniforms = {
       uTime: { value: 0 },
       uAmp: { value: cur.amp },
