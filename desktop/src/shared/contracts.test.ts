@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { openRouterModelIdSchema, pendingInteractionSchema, providerModelSchema, runtimeSnapshotSchema } from "./contracts";
+import { openRouterModelIdSchema, pendingInteractionSchema, providerAuthSchema, providerModelSchema, proteusRpcSchema, runtimeSnapshotSchema } from "./contracts";
 
 describe("OpenRouter contracts", () => {
   it("accepts only OpenRouter model IDs", () => {
@@ -80,5 +80,22 @@ describe("provider-neutral model contracts", () => {
 
     expect(model.providerId).toBe("codex");
     expect(model.reasoningEffort).toBe("high");
+  });
+
+  it("exposes only safe OAuth progress fields and provider-aware RPCs", () => {
+    const auth = providerAuthSchema.parse({
+      providerId: "codex",
+      mode: "device",
+      status: "waiting",
+      url: "https://auth.openai.com/codex/device",
+      code: "ABCD-EFGH",
+    });
+    const requests = proteusRpcSchema.bun.requests;
+
+    expect(auth).not.toHaveProperty("access");
+    expect(auth).not.toHaveProperty("refresh");
+    expect(Object.hasOwn(requests, "providers.connect")).toBe(true);
+    expect(Object.hasOwn(requests, "providers.auth.submit")).toBe(true);
+    expect(Object.hasOwn(requests, "credentials.connect")).toBe(false);
   });
 });

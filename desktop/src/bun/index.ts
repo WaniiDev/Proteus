@@ -55,18 +55,36 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
   handlers: {
     requests: {
       "runtime.bootstrap": async () => encodeRuntimeSnapshot(await runtime.initialize()),
-      "credentials.connect": async ({ apiKey }) => {
+      "providers.connect": async ({ providerId, apiKey, mode }) => {
         try {
-          await runtime.connect(apiKey);
+          await runtime.connectProvider(providerId, { apiKey, mode });
           return { accepted: true };
         } catch (error) {
           runtime.reportError(error);
           return { accepted: false };
         }
       },
-      "credentials.disconnect": async () => {
+      "providers.disconnect": async ({ providerId }) => {
         try {
-          await runtime.disconnect();
+          await runtime.disconnectProvider(providerId);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "providers.auth.submit": async ({ providerId, value }) => {
+        try {
+          await runtime.submitProviderAuth(providerId, value);
+          return { accepted: true };
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false };
+        }
+      },
+      "providers.auth.cancel": async ({ providerId }) => {
+        try {
+          await runtime.cancelProviderAuth(providerId);
           return { accepted: true };
         } catch (error) {
           runtime.reportError(error);

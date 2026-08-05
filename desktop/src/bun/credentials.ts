@@ -1,10 +1,16 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { refreshOpenAICodexToken } from "@mastra/code-sdk/auth/providers/openai-codex";
+import type { CredentialStore, OAuthCredential, OAuthCredentials } from "@mastra/code-sdk/auth/types";
 import { Utils } from "electrobun/bun";
 
 const SERVICE = "com.proteus.companion";
-const ACCOUNT = "openrouter";
+const OPENROUTER_ACCOUNT = "openrouter.api-key";
+const LEGACY_OPENROUTER_ACCOUNT = "openrouter";
+const CODEX_ACCOUNT = "openai-codex.oauth";
+const CODEX_PROVIDER = "openai-codex";
 const NATIVE_FILE = "keyring.win32-x64-msvc.node";
+const REFRESH_SKEW_MS = 60_000;
 
 type NativeEntry = {
   new (service: string, username: string): {
@@ -15,6 +21,12 @@ type NativeEntry = {
 };
 
 type NativeKeyring = { Entry: NativeEntry };
+
+export interface NamedSecretStore {
+  get(account: string): string | null;
+  set(account: string, value: string): void;
+  delete(account: string): void;
+}
 
 export class SecureStoreUnavailableError extends Error {
   constructor() {
@@ -44,13 +56,32 @@ function loadNativeKeyring(): NativeKeyring {
   throw new SecureStoreUnavailableError();
 }
 
-let entry: InstanceType<NativeEntry> | undefined;
+let nativeKeyring: NativeKeyring | undefined;
+const nativeEntries = new Map<string, InstanceType<NativeEntry>>();
 
-function getEntry(): InstanceType<NativeEntry> {
-  if (entry) return entry;
-  const native = loadNativeKeyring();
-  entry = new native.Entry(SERVICE, ACCOUNT);
+function nativeEntry(account: string): InstanceType<NativeEntry> {
+  const cached = nativeEntries.get(account);
+  if (cached) return cached;
+  nativeKeyring ??= loadNativeKeyring();
+  const entry = new nativeKeyring.Entry(SERVICE, account);
+  nativeEntries.set(account, entry);
   return entry;
+}
+
+export function createNativeSecretStore(): NamedSecretStore {
+  const protect = <T>(operation: () => T): T => {
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof SecureStoreUnavailableError) throw error;
+      throw new SecureStoreUnavailableError();
+    }
+  };
+  return {
+    get: (account) => protect(() => nativeEntry(account).getPassword() || null),
+    set: (account, value) => protect(() => nativeEntry(account).setPassword(value)),
+    delete: (account) => protect(() => void nativeEntry(account).deletePassword()),
+  };
 }
 
 export interface CredentialVault {
@@ -59,32 +90,85 @@ export interface CredentialVault {
   delete(): Promise<void>;
 }
 
-export function createCredentialVault(): CredentialVault {
+export function createCredentialVault(secretStore: NamedSecretStore = createNativeSecretStore()): CredentialVault {
   return {
     async get() {
-      try {
-        return getEntry().getPassword() || null;
-      } catch (error) {
-        if (error instanceof SecureStoreUnavailableError) throw error;
-        throw new SecureStoreUnavailableError();
-      }
+      const current = secretStore.get(OPENROUTER_ACCOUNT);
+      if (current) return current;
+      const legacy = secretStore.get(LEGACY_OPENROUTER_ACCOUNT);
+      if (!legacy) return null;
+      secretStore.set(OPENROUTER_ACCOUNT, legacy);
+      secretStore.delete(LEGACY_OPENROUTER_ACCOUNT);
+      return legacy;
     },
     async set(apiKey) {
       if (!apiKey.trim()) throw new Error("OpenRouter API key cannot be empty");
-      try {
-        getEntry().setPassword(apiKey);
-      } catch (error) {
-        if (error instanceof SecureStoreUnavailableError) throw error;
-        throw new SecureStoreUnavailableError();
-      }
+      secretStore.set(OPENROUTER_ACCOUNT, apiKey);
     },
     async delete() {
-      try {
-        getEntry().deletePassword();
-      } catch (error) {
-        if (error instanceof SecureStoreUnavailableError) throw error;
-        throw new SecureStoreUnavailableError();
-      }
+      secretStore.delete(OPENROUTER_ACCOUNT);
+      secretStore.delete(LEGACY_OPENROUTER_ACCOUNT);
+    },
+  };
+}
+
+function parseOAuthCredential(value: string | null): OAuthCredential | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<OAuthCredential>;
+    if (parsed.type !== "oauth" || typeof parsed.access !== "string" || !parsed.access || typeof parsed.refresh !== "string" || !parsed.refresh || typeof parsed.expires !== "number") return undefined;
+    return parsed as OAuthCredential;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface CodexCredentialStore extends CredentialStore {
+  setOAuth(credentials: OAuthCredentials): void;
+  clear(): void;
+}
+
+export function createCodexCredentialStore(
+  secretStore: NamedSecretStore = createNativeSecretStore(),
+  refresh: typeof refreshOpenAICodexToken = refreshOpenAICodexToken,
+): CodexCredentialStore {
+  let credential = parseOAuthCredential(secretStore.get(CODEX_ACCOUNT));
+  let refreshInFlight: Promise<string | undefined> | undefined;
+  const persist = (next: OAuthCredential) => {
+    credential = next;
+    secretStore.set(CODEX_ACCOUNT, JSON.stringify(next));
+  };
+  return {
+    allowEnvironmentFallback: false,
+    reload() {
+      credential = parseOAuthCredential(secretStore.get(CODEX_ACCOUNT));
+    },
+    get(provider) {
+      return provider === CODEX_PROVIDER ? credential : undefined;
+    },
+    getStoredApiKey() {
+      return undefined;
+    },
+    async getApiKey(provider) {
+      if (provider !== CODEX_PROVIDER || !credential) return undefined;
+      if (credential.expires > Date.now() + REFRESH_SKEW_MS) return credential.access;
+      refreshInFlight ??= (async () => {
+        const current = credential;
+        if (!current) return undefined;
+        const refreshed = await refresh(current.refresh, typeof current.accountId === "string" ? current.accountId : undefined);
+        persist({ type: "oauth", ...refreshed });
+        return refreshed.access;
+      })().finally(() => {
+        refreshInFlight = undefined;
+      });
+      return refreshInFlight;
+    },
+    setOAuth(credentials) {
+      persist({ type: "oauth", ...credentials });
+    },
+    clear() {
+      credential = undefined;
+      secretStore.delete(CODEX_ACCOUNT);
     },
   };
 }

@@ -6,6 +6,7 @@ const baseSnapshot = (): RuntimeSnapshot => ({
   revision: 1,
   status: "ready",
   credential: { configured: true, verified: true },
+  providerAuth: null,
   providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" }],
   models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] }],
   selectedProviderId: "openrouter",

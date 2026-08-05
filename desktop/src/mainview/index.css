@@ -394,6 +394,13 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .provider-badge.unavailable { background: rgba(220, 38, 38, .07); color: #991b1b; }
 .provider-card > .btn-primary, .provider-card > .btn-outline { align-self: flex-start; margin-top: auto; }
 .provider-detail { margin: 0 0 var(--s-base); color: var(--body-strong); font-size: 13px; line-height: 1.5; }
+.provider-auth-controls, .provider-auth-progress { display: grid; gap: var(--s-sm); }
+.provider-auth-actions { display: flex; flex-wrap: wrap; gap: var(--s-xs); }
+.provider-auth-progress { padding: var(--s-sm); border: 1px solid var(--hairline-strong); border-radius: var(--r-lg); background: var(--canvas-soft); }
+.provider-auth-progress p { margin: 0; color: var(--body-strong); font-size: 13px; line-height: 1.5; }
+.provider-auth-progress code { width: fit-content; padding: 7px 10px; border-radius: var(--r-sm); background: var(--surface); font-size: 15px; letter-spacing: .08em; }
+.provider-auth-progress a { color: var(--accent-ink); font-size: 13px; }
+.provider-auth-progress.failed { border-color: rgba(179, 78, 78, .25); }
 .provider-card .key-form { margin-bottom: var(--s-xs); border-radius: var(--r-lg); }
 .settings-wide-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .model-settings-card { display: flex; flex-direction: column; gap: var(--s-base); }

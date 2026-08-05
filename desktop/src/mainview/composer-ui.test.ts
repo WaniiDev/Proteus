@@ -17,6 +17,7 @@ describe("composer UI policy", () => {
       revision: 1,
       status: "error",
       credential: { configured: false, verified: false },
+      providerAuth: null,
       providers: [
         { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
         { id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" },

@@ -19,9 +19,10 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
   status: "booting",
   credential: { configured: false, verified: false },
+  providerAuth: null,
   providers: [
     { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
-    { id: "codex", name: "Codex", configured: true, verified: false, availability: "checking" },
+    { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration" },
   ],
   models: [
     {
@@ -934,9 +935,10 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   );
 }
 
-export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
+export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: (providerId: "openrouter" | "codex") => void; onStartCodexAuth: (mode: "browser" | "device") => void; onSubmitCodexAuth: (value: string) => void; onCancelCodexAuth: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
   const [tab, setTab] = useState<"providers" | "models">("providers");
   const [modelSearch, setModelSearch] = useState("");
+  const [authorizationCode, setAuthorizationCode] = useState("");
   const selected = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
   const price = (value: number | undefined) => (value === undefined ? "—" : `$${(value * 1_000_000).toFixed(2)}/M`);
   const providerModels = snapshot.models.filter((model) => model.providerId === snapshot.selectedProviderId);
@@ -959,12 +961,24 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
       </nav>
       {tab === "providers" ? <div className="provider-grid">
         {snapshot.providers.map((provider) => <section className={`card provider-card ${snapshot.selectedProviderId === provider.id ? "selected" : ""}`} key={provider.id}>
-          <div className="provider-card-head"><div><span className="settings-eyebrow">{provider.id === "codex" ? "Native ACP" : "Universal gateway"}</span><h2 className="title-md">{provider.name}</h2></div><span className={`provider-badge ${provider.availability}`}>{provider.availability.replace("-", " ")}</span></div>
-          <p className="settings-intro">{provider.id === "codex" ? "Uses your local Codex sign-in through Mastra ACP. No API key is copied into PROTEUS." : "Use one OpenRouter key to access your account's text-model catalog."}</p>
+          <div className="provider-card-head"><div><span className="settings-eyebrow">{provider.id === "codex" ? "ChatGPT OAuth" : "Universal gateway"}</span><h2 className="title-md">{provider.name}</h2></div><span className={`provider-badge ${provider.availability}`}>{provider.availability.replace("-", " ")}</span></div>
+          <p className="settings-intro">{provider.id === "codex" ? "Connect a ChatGPT Plus or Pro subscription. Tokens stay in Windows Credential Manager." : "Use one OpenRouter key to access your account's text-model catalog."}</p>
           {provider.id === "openrouter" ? <>
             <form className="key-form" onSubmit={onConnect}><Icon name="key" size={18} /><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.credential.configured ? "Enter a replacement key" : "sk-or-v1-…"} autoComplete="off" aria-label="OpenRouter API key" /><button className="btn-primary sm" type="submit" disabled={!apiKey.trim() || snapshot.status === "validating-key"}>{snapshot.status === "validating-key" ? "Checking…" : snapshot.credential.configured ? "Replace" : "Connect"}</button></form>
-            {snapshot.credential.configured && <button className="btn-danger-ghost" type="button" onClick={onDisconnect}>Disconnect key</button>}
-          </> : <p className="provider-detail">{provider.detail ?? "Checking the local Codex connection…"}</p>}
+            {snapshot.credential.configured && <button className="btn-danger-ghost" type="button" onClick={() => onDisconnect("openrouter")}>Disconnect key</button>}
+          </> : <div className="provider-auth-controls">
+            <p className="provider-detail">{provider.detail}</p>
+            {!provider.configured && !snapshot.providerAuth && <div className="provider-auth-actions"><button className="btn-primary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Connect in browser</button><button className="btn-outline sm" type="button" onClick={() => onStartCodexAuth("device")}>Use device code</button></div>}
+            {snapshot.providerAuth?.providerId === "codex" && <div className={`provider-auth-progress ${snapshot.providerAuth.status}`} role="status">
+              <strong>{snapshot.providerAuth.status === "failed" ? "Authorization failed" : snapshot.providerAuth.status === "waiting" ? "Waiting for you" : "Connecting…"}</strong>
+              <p>{snapshot.providerAuth.error ?? snapshot.providerAuth.instructions}</p>
+              {snapshot.providerAuth.code && <code>{snapshot.providerAuth.code}</code>}
+              {snapshot.providerAuth.url && <a href={snapshot.providerAuth.url} target="_blank" rel="noreferrer">Open authorization page</a>}
+              {snapshot.providerAuth.mode === "browser" && snapshot.providerAuth.status === "waiting" && <form className="key-form" onSubmit={(event) => { event.preventDefault(); onSubmitCodexAuth(authorizationCode); setAuthorizationCode(""); }}><input value={authorizationCode} onChange={(event) => setAuthorizationCode(event.target.value)} placeholder="Paste callback URL or code" aria-label="ChatGPT authorization code" /><button className="btn-primary sm" type="submit" disabled={!authorizationCode.trim()}>Submit</button></form>}
+              {snapshot.providerAuth.status !== "failed" ? <button className="btn-danger-ghost" type="button" onClick={onCancelCodexAuth}>Cancel</button> : <div className="provider-auth-actions"><button className="btn-primary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Try browser again</button><button className="btn-outline sm" type="button" onClick={() => onStartCodexAuth("device")}>Try device code</button></div>}
+            </div>}
+            {provider.configured && <button className="btn-danger-ghost" type="button" onClick={() => onDisconnect("codex")}>Disconnect ChatGPT</button>}
+          </div>}
           <button className={snapshot.selectedProviderId === provider.id ? "btn-primary sm" : "btn-outline sm"} type="button" disabled={!provider.verified || snapshot.activeRun !== null || snapshot.selectedProviderId === provider.id} onClick={() => onSelectProvider(provider.id)}>{snapshot.selectedProviderId === provider.id ? "Current provider" : `Use ${provider.name}`}</button>
         </section>)}
         <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
@@ -1131,7 +1145,7 @@ export default function App() {
     event.preventDefault();
     const candidate = apiKey;
     setApiKey("");
-    ignoreRpc(rpc.request["credentials.connect"]({ apiKey: candidate }));
+    ignoreRpc(rpc.request["providers.connect"]({ providerId: "openrouter", mode: "api-key", apiKey: candidate }));
   };
   const handleCreate = () => {
     if (snapshot.activeRun) return;
@@ -1197,7 +1211,7 @@ export default function App() {
           )}
           {view === "projects" && <Projects />}
           {view === "memory" && <Memory />}
-          {view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={() => ignoreRpc(rpc.request["credentials.disconnect"]())} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          {view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
         </main>
       </div>
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}

@@ -31,6 +31,17 @@ export const providerStatusSchema = z.object({
 });
 export type ProviderStatus = z.infer<typeof providerStatusSchema>;
 
+export const providerAuthSchema = z.object({
+  providerId: providerIdSchema,
+  mode: z.enum(["api-key", "browser", "device"]),
+  status: z.enum(["starting", "waiting", "completing", "failed"]),
+  url: z.string().url().optional(),
+  code: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  error: z.string().optional(),
+});
+export type ProviderAuth = z.infer<typeof providerAuthSchema>;
+
 export const providerErrorCodeSchema = z.enum(["invalid-credential", "insufficient-credits", "forbidden", "model-unavailable", "context-too-large", "rate-limited", "timeout", "offline", "aborted", "busy", "secure-store-unavailable", "catalog-unavailable", "unknown"]);
 export type ProviderErrorCode = z.infer<typeof providerErrorCodeSchema>;
 
@@ -227,6 +238,7 @@ export const runtimeSnapshotSchema = z.object({
   revision: z.number().int().nonnegative().default(0),
   status: runtimeStatusSchema,
   credential: credentialStatusSchema,
+  providerAuth: providerAuthSchema.nullable().default(null),
   providers: z.array(providerStatusSchema),
   models: z.array(providerModelSchema),
   selectedProviderId: providerIdSchema,
@@ -268,12 +280,20 @@ export const proteusRpcSchema = {
         params: undefined as undefined,
         response: {} as RuntimeSnapshotEnvelope,
       },
-      "credentials.connect": {
-        params: {} as { apiKey: string },
+      "providers.connect": {
+        params: {} as { providerId: ProviderId; mode?: "api-key" | "browser" | "device"; apiKey?: string },
         response: {} as { accepted: boolean },
       },
-      "credentials.disconnect": {
-        params: undefined as undefined,
+      "providers.disconnect": {
+        params: {} as { providerId: ProviderId },
+        response: {} as { accepted: boolean },
+      },
+      "providers.auth.submit": {
+        params: {} as { providerId: ProviderId; value: string },
+        response: {} as { accepted: boolean },
+      },
+      "providers.auth.cancel": {
+        params: {} as { providerId: ProviderId },
         response: {} as { accepted: boolean },
       },
       "models.refresh": {

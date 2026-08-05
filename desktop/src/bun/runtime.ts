@@ -9,9 +9,10 @@ import { TaskSignalProvider } from "@mastra/core/signals";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
+import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
-import { createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CredentialVault } from "./credentials";
+import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectPendingInteractions, projectTasks, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
@@ -422,6 +423,9 @@ export class TextRuntime {
   private readonly controller: AgentController;
   private readonly codex: CodexProviderRuntime;
   private codexAbortController: AbortController | null = null;
+  private readonly codexCredentialStore: CodexCredentialStore;
+  private codexAuthAbortController: AbortController | null = null;
+  private codexManualInput: { resolve: (value: string) => void; reject: (error: Error) => void } | null = null;
   private readonly taskToolPolicy = new TaskToolPolicy();
   private session: Awaited<ReturnType<AgentController["createSession"]>> | undefined;
   private controllerThreadId: string | null = null;
@@ -439,9 +443,10 @@ export class TextRuntime {
   private snapshot: RuntimeSnapshot = {
     status: "booting",
     credential: { configured: false, verified: false },
+    providerAuth: null,
     providers: [
       { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
-      { id: "codex", name: "Codex", configured: true, verified: false, availability: "checking", detail: "Uses your local Codex sign-in." },
+      { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Connect a ChatGPT subscription to use Codex." },
     ],
     models: [
       {
@@ -494,8 +499,9 @@ export class TextRuntime {
   private threadStateSyncGeneration = 0;
   private pendingThreadSelectionId: string | null = null;
 
-  constructor(vault: CredentialVault = createCredentialVault()) {
+  constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore()) {
     this.vault = vault;
+    this.codexCredentialStore = codexCredentialStore;
     this.storage = new LibSQLStore({
       id: "proteus-storage-v2",
       url: `file:${join(Utils.paths.userData, "proteus-v2.db")}`,
@@ -638,16 +644,24 @@ export class TextRuntime {
   }
 
   private async refreshCodexModels(): Promise<void> {
+    const credential = this.codexCredentialStore.get("openai-codex");
+    if (!credential) {
+      this.publish({
+        models: this.mergeProviderModels("codex", []),
+        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: false, verified: false, availability: "needs-configuration", detail: "Connect a ChatGPT subscription to use Codex." } : provider),
+      });
+      return;
+    }
     this.publish({ providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, availability: "checking" } : provider) });
     try {
       const models = await this.codex.listModels();
       this.publish({
         models: this.mergeProviderModels("codex", models),
-        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: true, availability: "ready", detail: "Connected through your local Codex sign-in." } : provider),
+        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: true, availability: "ready", detail: "Connected with ChatGPT OAuth." } : provider),
       });
     } catch (error) {
       this.publish({
-        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: false, availability: "unavailable", detail: error instanceof Error ? error.message : "Codex ACP is unavailable." } : provider),
+        providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: false, availability: "unavailable", detail: error instanceof Error ? error.message : "Codex is unavailable." } : provider),
       });
     }
   }
@@ -1588,6 +1602,112 @@ export class TextRuntime {
       }
     })();
     return this.initializePromise;
+  }
+
+  async connectProvider(providerId: ProviderId, options: { apiKey?: string; mode?: "api-key" | "browser" | "device" }): Promise<void> {
+    if (providerId === "openrouter") {
+      await this.connect(options.apiKey ?? "");
+      return;
+    }
+    await this.ensureInitialized();
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+    if (this.codexAuthAbortController) throw makeRuntimeError("busy");
+
+    const mode = options.mode === "device" ? "device" : "browser";
+    const abortController = new AbortController();
+    this.codexAuthAbortController = abortController;
+    let resolveManual!: (value: string) => void;
+    let rejectManual!: (error: Error) => void;
+    const manualInput = new Promise<string>((resolve, reject) => {
+      resolveManual = resolve;
+      rejectManual = reject;
+    });
+    this.codexManualInput = mode === "browser" ? { resolve: resolveManual, reject: rejectManual } : null;
+    this.publish({
+      providerAuth: { providerId: "codex", mode, status: "starting", instructions: "Starting secure ChatGPT authorization…" },
+      error: null,
+    });
+
+    void loginOpenAICodex({
+      mode,
+      signal: abortController.signal,
+      originator: "proteus",
+      onAuth: ({ url, instructions }) => {
+        const code = mode === "device" ? instructions?.match(/Enter code:\s*(\S+)/i)?.[1] : undefined;
+        this.publish({ providerAuth: { providerId: "codex", mode, status: "waiting", url, ...(code ? { code } : {}), ...(instructions ? { instructions } : {}) } });
+        try {
+          Utils.openExternal(url);
+        } catch {
+          // The URL remains visible for manual opening when the OS rejects launch.
+        }
+      },
+      onProgress: (instructions) => {
+        const current = this.snapshot.providerAuth;
+        if (current?.providerId === "codex") this.publish({ providerAuth: { ...current, instructions } });
+      },
+      onPrompt: async () => manualInput,
+      ...(mode === "browser" ? { onManualCodeInput: async () => manualInput } : {}),
+    }).then(async (credentials) => {
+      if (abortController.signal.aborted) return;
+      this.publish({ providerAuth: { providerId: "codex", mode, status: "completing", instructions: "Saving the authorization securely…" } });
+      this.codexCredentialStore.setOAuth(credentials);
+      await this.refreshCodexModels();
+      this.publish({ providerAuth: null, error: null, status: this.idleStatus() });
+    }).catch((error) => {
+      if (abortController.signal.aborted) {
+        this.publish({ providerAuth: null });
+        return;
+      }
+      this.publish({
+        providerAuth: {
+          providerId: "codex",
+          mode,
+          status: "failed",
+          error: "ChatGPT authorization did not complete. Try browser sign-in again or use device code.",
+        },
+      });
+      console.warn("Codex OAuth failed", error instanceof Error ? error.message : "Unknown OAuth error");
+    }).finally(() => {
+      if (this.codexAuthAbortController === abortController) this.codexAuthAbortController = null;
+      this.codexManualInput = null;
+    });
+  }
+
+  async submitProviderAuth(providerId: ProviderId, value: string): Promise<void> {
+    if (providerId !== "codex" || !this.codexManualInput || this.snapshot.providerAuth?.status !== "waiting") throw makeRuntimeError("busy");
+    const candidate = value.trim();
+    if (!candidate) throw new Error("Authorization code cannot be empty");
+    this.codexManualInput.resolve(candidate);
+    this.codexManualInput = null;
+    const current = this.snapshot.providerAuth;
+    this.publish({ providerAuth: current ? { ...current, status: "completing", instructions: "Completing ChatGPT authorization…" } : null });
+  }
+
+  async cancelProviderAuth(providerId: ProviderId): Promise<void> {
+    if (providerId !== "codex") return;
+    const abortController = this.codexAuthAbortController;
+    this.codexAuthAbortController = null;
+    abortController?.abort();
+    this.codexManualInput?.reject(new Error("Login cancelled"));
+    this.codexManualInput = null;
+    this.publish({ providerAuth: null });
+  }
+
+  async disconnectProvider(providerId: ProviderId): Promise<void> {
+    if (providerId === "openrouter") {
+      await this.disconnect();
+      return;
+    }
+    await this.ensureInitialized();
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+    await this.cancelProviderAuth("codex");
+    this.codexCredentialStore.clear();
+    this.publish({
+      models: this.mergeProviderModels("codex", []),
+      providers: this.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: false, verified: false, availability: "needs-configuration", detail: "Connect a ChatGPT subscription to use Codex." } : provider),
+      status: this.snapshot.selectedProviderId === "codex" ? "error" : this.idleStatus("openrouter"),
+      error: null,
+    });
   }
 
   async connect(apiKey: string): Promise<void> {

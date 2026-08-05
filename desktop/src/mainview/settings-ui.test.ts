@@ -20,4 +20,12 @@ describe("Settings provider and model UI", () => {
     expect(cssSource).toContain(".reasoning-options");
     expect(cssSource).toContain(".provider-grid, .model-card-list { grid-template-columns: 1fr; }");
   });
+
+  it("offers upstream ChatGPT OAuth browser, device, manual, and cancel controls", () => {
+    expect(appSource).toContain("Connect in browser");
+    expect(appSource).toContain("Use device code");
+    expect(appSource).toContain("Paste callback URL or code");
+    expect(appSource).toContain('rpc.request["providers.auth.cancel"]');
+    expect(appSource).not.toContain("Native ACP");
+  });
 });
