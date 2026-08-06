@@ -352,6 +352,39 @@ export function describeToolActivity(tool: ChatToolPart, context: ToolActivityCo
         fullTarget: stringField(input, "question"), groupKey: "ask_user", groupLabel: "Asked", countNoun: "questions", action, details: [detail("Question", stringField(input, "question"))],
       });
     }
+    case "search_tools": {
+      const query = truncate(stringField(input, "query") ?? stringField(input, "keywords") ?? "available capabilities", 80);
+      return descriptor(tool, { base: "find tools for", ongoing: "Finding tools for", past: "Found tools for" }, query, {
+        groupKey: "search_tools", groupLabel: "Found", countNoun: "tool searches", details: [detail("Search", query)],
+      });
+    }
+    case "web_fetch": {
+      const url = stringField(input, "url") ?? "web page";
+      return descriptor(tool, { base: "fetch", ongoing: "Fetching", past: "Fetched" }, truncate(url, 80), {
+        fullTarget: url, groupKey: "web_fetch", groupLabel: "Fetched", countNoun: "pages", details: [detail("URL", url, true)],
+      });
+    }
+    case "get_datetime": {
+      const target = stringField(input, "timezone") ?? "local time";
+      return descriptor(tool, { base: "check time in", ongoing: "Checking time in", past: "Checked time in" }, target, {
+        groupKey: "datetime", groupLabel: "Checked", countNoun: "times", details: [detail("Timestamp", stringField(input, "timestamp"), true), detail("Timezone", stringField(input, "timezone"), true)],
+      });
+    }
+    case "calculate": {
+      const expression = truncate(stringField(input, "expression") ?? "expression", 80);
+      return descriptor(tool, { base: "calculate", ongoing: "Calculating", past: "Calculated" }, expression, {
+        groupKey: "calculate", groupLabel: "Calculated", countNoun: "expressions", details: [detail("Expression", stringField(input, "expression"), true)],
+      });
+    }
+    case "convert_units": {
+      const value = numberField(input, "value");
+      const from = stringField(input, "from");
+      const to = stringField(input, "to");
+      const target = `${value ?? "value"} ${from ?? "unit"} to ${to ?? "unit"}`;
+      return descriptor(tool, { base: "convert", ongoing: "Converting", past: "Converted" }, target, {
+        groupKey: "convert_units", groupLabel: "Converted", countNoun: "values", details: [detail("Conversion", target, true)],
+      });
+    }
     default: {
       const friendly = tool.label && !TOOL_PREFIX.test(tool.label) ? tool.label : humanizeToolName(tool.name);
       return descriptor(tool, { base: `use ${friendly}`, ongoing: `Using ${friendly}`, past: `Used ${friendly}` }, undefined, {
@@ -394,6 +427,11 @@ export function pluralizeCount(noun: string, count: number): string {
     "task lists": "task list",
     questions: "question",
     tools: "tool",
+    "tool searches": "tool search",
+    pages: "page",
+    times: "time",
+    expressions: "expression",
+    values: "value",
   };
   return count === 1 ? singular[noun] ?? noun.replace(/s$/, "") : noun;
 }

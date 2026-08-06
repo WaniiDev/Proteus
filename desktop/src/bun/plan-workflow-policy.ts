@@ -1,6 +1,11 @@
 /** Tools available after native submit_plan approval. */
 export const APPROVED_PLAN_TOOLS = [
   "ask_user",
+  "search_tools",
+  "web_fetch",
+  "get_datetime",
+  "calculate",
+  "convert_units",
   "read_plan",
   "task_write",
   "task_update",

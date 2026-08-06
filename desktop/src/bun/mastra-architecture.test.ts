@@ -29,6 +29,11 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
     expect(runtime).toContain("workspace: this.agentWorkspace");
+    expect(runtime).toContain("new ToolSearchProcessor({");
+    expect(runtime).toContain('storage: "context"');
+    expect(runtime).toContain("search: { topK: 3, minScore: 0.1, autoLoad: true }");
+    expect(runtime).toContain("inputProcessors: [toolSearch, nativeToolCallGuard]");
+    expect(runtime).toContain("web_fetch: webFetchTool");
     expect(runtime).toContain("new RequestContext(");
     expect(runtime).toContain("contained: true");
     expect(runtime).toContain("sandboxCacheKey:");

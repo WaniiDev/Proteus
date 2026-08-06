@@ -8,9 +8,10 @@ import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
 import { RequestContext } from "@mastra/core/request-context";
+import { ToolSearchProcessor } from "@mastra/core/processors";
 import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
-import { askUserTool, submitPlanTool, TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
+import { askUserTool, submitPlanTool, TASK_STATE_TYPE, webFetchTool, type TaskItemSnapshot } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
 import { createWorkspaceTools, LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
@@ -38,6 +39,7 @@ import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-p
 import { NativeToolCallGuard } from "./native-tool-call-guard";
 import type { ProjectRegistryStorage, StoredProject } from "./project-registry";
 import { FILE_WORKSPACE_TOOLS } from "./workspace-policy";
+import { createWorkingTools } from "./working-tools";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -561,6 +563,12 @@ export class TextRuntime {
     nativeToolCallGuard.onViolation = (violation) => {
       this.diagnostics.record({ source: "runtime", type: "tool_call_integrity_violation", payload: violation });
     };
+    const workingTools = createWorkingTools();
+    const toolSearch = new ToolSearchProcessor({
+      tools: { web_fetch: webFetchTool },
+      storage: "context",
+      search: { topK: 3, minScore: 0.1, autoLoad: true },
+    });
     this.agent = new Agent({
       id: AGENT_ID,
       name: "Proteus",
@@ -570,11 +578,12 @@ export class TextRuntime {
       tools: async ({ requestContext }) => ({
         ask_user: askUserTool,
         submit_plan: submitPlanTool,
+        ...workingTools,
         ...await createWorkspaceTools(this.workspace, { workspace: this.workspace, requestContext }),
       }),
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
-      inputProcessors: [nativeToolCallGuard],
+      inputProcessors: [toolSearch, nativeToolCallGuard],
       outputProcessors: [nativeToolCallGuard],
       maxProcessorRetries: 1,
       defaultOptions: {
