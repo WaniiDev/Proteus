@@ -1,5 +1,6 @@
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, ChatToolPart, PendingInteraction, WorkbenchTask } from "../shared/contracts";
+import { APPROVAL_POLICY_VERSION, approvalFingerprint } from "./approval-policy";
 
 type TaskLike = { id?: unknown; content?: unknown; activeForm?: unknown; status?: unknown };
 
@@ -335,6 +336,8 @@ export function parseToolApproval(input: ApprovalToolLike): PendingInteraction {
     question: "Proteus is ready to use this tool. Review the request before it continues.",
     args: input.args,
     argsSummary,
+    fingerprint: approvalFingerprint(input.toolName, input.args),
+    policyVersion: APPROVAL_POLICY_VERSION,
     options: [],
     status: "pending",
     createdAt: new Date().toISOString(),

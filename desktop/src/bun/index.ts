@@ -227,13 +227,12 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { accepted: false, code: "resume-failed" as const, message: "The interaction could not be dismissed.", retryable: true };
         }
       },
-      "chat.tool-approval.respond": async ({ toolCallId, approved }) => {
+      "chat.tool-approval.respond": async ({ toolCallId, approved, fingerprint }) => {
         try {
-          await runtime.respondToToolApproval(toolCallId, approved);
-          return { accepted: true };
+          return await runtime.respondToToolApproval(toolCallId, approved, fingerprint);
         } catch (error) {
           runtime.reportError(error);
-          return { accepted: false };
+          return { accepted: false, code: "resume-failed" as const, message: "The tool approval could not be processed.", retryable: true };
         }
       },
       "chat.abort": async () => {

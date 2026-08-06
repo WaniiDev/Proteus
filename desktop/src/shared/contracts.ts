@@ -376,8 +376,8 @@ export const proteusRpcSchema = {
         response: {} as InteractionResponseResult,
       },
       "chat.tool-approval.respond": {
-        params: {} as { toolCallId: string; approved: boolean },
-        response: {} as { accepted: boolean },
+        params: {} as { toolCallId: string; approved: boolean; fingerprint: string },
+        response: {} as InteractionResponseResult,
       },
       "chat.abort": {
         params: undefined as undefined,

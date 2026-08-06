@@ -84,12 +84,12 @@ export class NativeAgentDriver {
     return runs.flatMap((run) => run.toolCalls.map((toolCall) => ({ ...toolCall, runId: run.runId })));
   }
 
-  async findSuspension(threadId: string, toolCallId: string): Promise<{ runId: string; requiresApproval: boolean } | null> {
+  async findSuspension(threadId: string, toolCallId: string): Promise<{ runId: string; toolCallId: string; toolName?: string; args?: unknown; requiresApproval: boolean; suspendPayload?: unknown } | null> {
     if (!this.agent.listSuspendedRuns) return null;
     const { runs } = await this.agent.listSuspendedRuns({ resourceId: this.resourceId, threadId });
     for (const run of runs) {
       const toolCall = run.toolCalls.find((item) => item.toolCallId === toolCallId);
-      if (toolCall) return { runId: run.runId, requiresApproval: toolCall.requiresApproval };
+      if (toolCall) return { ...toolCall, toolCallId, runId: run.runId };
     }
     return null;
   }

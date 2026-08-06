@@ -67,7 +67,7 @@ describe("native Mastra agent driver", () => {
       },
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
-    expect(await driver.findSuspension("thread-1", "call-durable")).toEqual({ runId: "run-durable", requiresApproval: true });
+    expect(await driver.findSuspension("thread-1", "call-durable")).toEqual({ runId: "run-durable", toolCallId: "call-durable", requiresApproval: true });
     expect(await driver.approve("thread-1", "call-durable", true)).toEqual({ runId: "run-durable" });
     expect(approvals).toEqual([{ resourceId: "local-user", threadId: "thread-1", toolCallId: "call-durable", approved: true }]);
   });

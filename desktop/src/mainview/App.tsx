@@ -1244,6 +1244,7 @@ export default function App() {
                 rpc.request["chat.tool-approval.respond"]({
                   toolCallId,
                   approved,
+                  fingerprint: snapshot.interactions.find((item) => item.toolCallId === toolCallId)?.fingerprint ?? "",
                 })
                   .then((result) => result.accepted)
                   .catch(() => false)

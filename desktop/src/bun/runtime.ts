@@ -26,6 +26,7 @@ import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteus
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-oauth-failure";
 import { reconcileProviderAuth } from "./provider-auth";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
+import { approvalFingerprint } from "./approval-policy";
 import { createProteusStorage, type ProteusStorageFoundation } from "./mastra-foundation";
 import { resolveRememberedModelSelection, type AppModelSelection, type ModelPreferencesStorage } from "./model-preferences";
 import { NativeThreadRepository } from "./native-thread-repository";
@@ -747,7 +748,7 @@ export class TextRuntime {
         }
       }
       const parsed = parseSuspendedInteraction({ toolCallId: item.toolCallId, toolName: item.toolName, suspendPayload }, ++nextVersion);
-      if (parsed) nextPending = upsertPendingInteraction(nextPending, parsed);
+      if (parsed) nextPending = upsertPendingInteraction(nextPending, { ...parsed, threadId, runId: item.runId, toolName: item.toolName });
     }
     const next = stale.length > 0 || nextPending.length !== pending.length
       ? {
@@ -1003,7 +1004,8 @@ export class TextRuntime {
         this.runClientMessageId ?? undefined,
       );
       if (interaction) {
-        this.threadState = { ...this.threadState, pendingInteractions: upsertPendingInteraction(this.threadState.pendingInteractions ?? [], interaction) };
+        const boundInteraction = { ...interaction, threadId, runId, toolName: payload.toolName };
+        this.threadState = { ...this.threadState, pendingInteractions: upsertPendingInteraction(this.threadState.pendingInteractions ?? [], boundInteraction) };
         if (threadId === this.selectedThreadId) {
               this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
         }
@@ -1652,9 +1654,7 @@ export class TextRuntime {
     if (interaction.status !== "pending") return this.interactionFailure({ code: "busy", message: "That request is already being resolved.", retryable: interaction.status === "failed" });
     if (this.resolvingInteractions.size > 0) return this.interactionFailure({ code: "busy", message: "Another response is already being resolved.", retryable: true });
     const nativeThreadId = this.selectedThreadId;
-    const nativeSuspension = nativeThreadId
-      ? this.nativeSuspensions.get(toolCallId) ?? (await this.nativeDriver.findSuspension(nativeThreadId, toolCallId))
-      : null;
+    const nativeSuspension = nativeThreadId ? await this.nativeDriver.findSuspension(nativeThreadId, toolCallId) : null;
     if (!nativeSuspension) return this.interactionFailure({ code: "stale", message: "This approval expired. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) });
     let resumeData: unknown;
     let nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">;
@@ -1704,17 +1704,16 @@ export class TextRuntime {
       });
     }
     this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "ui_resolving", threadId: this.selectedThreadId, runId: this.runId, toolCallId, durationMs: performance.now() - requestStartedAt });
-    void this.completeInteractionResponse(toolCallId, resumeData, interaction, nextStatus, feedback);
-    return { accepted: true };
+    return await this.completeInteractionResponse(toolCallId, resumeData, interaction, nextStatus, feedback);
   }
 
-  private async completeInteractionResponse(toolCallId: string, resumeData: unknown, interaction: PendingInteraction, nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">, feedback?: string): Promise<void> {
-    const threadId = this.selectedThreadId ?? undefined;
+  private async completeInteractionResponse(toolCallId: string, resumeData: unknown, interaction: PendingInteraction, nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">, feedback?: string): Promise<InteractionResponseResult> {
+    const threadId = interaction.threadId ?? this.selectedThreadId ?? undefined;
     try {
-      const nativeSuspension = threadId
-        ? this.nativeSuspensions.get(toolCallId) ?? (await this.nativeDriver.findSuspension(threadId, toolCallId))
-        : null;
+      const nativeSuspension = threadId ? await this.nativeDriver.findSuspension(threadId, toolCallId) : null;
       if (!threadId || !nativeSuspension) throw new Error("Mastra no longer has this suspended run.");
+      if (interaction.runId && nativeSuspension.runId !== interaction.runId) throw new Error("The suspended run changed before this response was accepted.");
+      if (nativeSuspension.requiresApproval) throw new Error("This response belongs to an approval request, not a suspended interaction.");
       const resumeStartedAt = performance.now();
       const approvedPlan = interaction.kind === "submit_plan" && nextStatus === "approved";
       await this.nativeDriver.resume(threadId, nativeSuspension.runId, toolCallId, resumeData, approvedPlan ? { activeTools: [...APPROVED_PLAN_TOOLS] } : undefined);
@@ -1723,10 +1722,12 @@ export class TextRuntime {
       this.finalizeResolvingInteractions(toolCallId);
       this.updateThreadActivity(threadId, "running", 0);
       this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: nativeSuspension.runId, toolCallId, durationMs: performance.now() - resumeStartedAt });
+      return { accepted: true };
     } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not resume this request. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
       this.markInteractionFailed(toolCallId, failure);
       this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "error", threadId, runId: this.runId, toolCallId, payload: error });
+      return this.interactionFailure(failure);
     }
   }
 
@@ -1747,12 +1748,23 @@ export class TextRuntime {
     return { accepted: true };
   }
 
-  async respondToToolApproval(toolCallId: string, approved: boolean): Promise<void> {
+  async respondToToolApproval(toolCallId: string, approved: boolean, fingerprint: string): Promise<InteractionResponseResult> {
     await this.ensureInitialized();
     const pending = this.threadState.pendingInteractions?.find((item) => item.kind === "tool_approval" && item.toolCallId === toolCallId);
-    if (!pending) throw new Error("That tool approval is no longer available");
-    const threadId = this.selectedThreadId;
-    if (!threadId) throw new Error("No active conversation");
+    if (!pending) return this.interactionFailure({ code: "stale", message: "That tool approval is no longer available.", retryable: false });
+    if (pending.status !== "pending") return this.interactionFailure({ code: "busy", message: "That tool approval is already being resolved.", retryable: pending.status === "failed" });
+    const threadId = pending.threadId ?? this.selectedThreadId;
+    if (!threadId) return this.interactionFailure({ code: "stale", message: "The approval conversation is no longer available.", retryable: false });
+    const nativeSuspension = await this.nativeDriver.findSuspension(threadId, toolCallId);
+    if (!nativeSuspension || !nativeSuspension.requiresApproval) return this.interactionFailure({ code: "stale", message: "That tool approval has expired.", retryable: false });
+    if (pending.runId && pending.runId !== nativeSuspension.runId) return this.interactionFailure({ code: "stale", message: "The approval run changed. Review the current request again.", retryable: false });
+    const currentFingerprint = approvalFingerprint(nativeSuspension.toolName ?? pending.toolName ?? "", nativeSuspension.args);
+    if (!fingerprint || fingerprint !== pending.fingerprint || fingerprint !== currentFingerprint) return this.interactionFailure({ code: "invalid-response", message: "The tool request changed before approval. Review its current arguments.", retryable: false });
+    this.threadState = {
+      ...this.threadState,
+      pendingInteractions: (this.threadState.pendingInteractions ?? []).map((item) => item.toolCallId === toolCallId ? { ...item, status: "resolving" as const } : item),
+    };
+    this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
     try {
       await this.nativeDriver.approve(threadId, toolCallId, approved);
       this.threadState = {
@@ -1763,8 +1775,12 @@ export class TextRuntime {
       await this.persistThreadState(threadId, this.threadState);
       this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
       this.updateThreadActivity(threadId, "running", 0);
+      return { accepted: true };
     } catch (error) {
-      throw normalizeError(error);
+      const failure: InteractionError = { code: "resume-failed", message: "Mastra could not apply this tool decision. Try again.", retryable: true };
+      this.markInteractionFailed(toolCallId, failure);
+      this.diagnostics.record({ source: "runtime", type: "tool_approval_response", phase: "error", threadId, runId: nativeSuspension.runId, toolCallId, payload: normalizeError(error) });
+      return this.interactionFailure(failure);
     }
   }
 
