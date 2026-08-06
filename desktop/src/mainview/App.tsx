@@ -1317,6 +1317,7 @@ export function ToolApprovalCard({ approval, onRespond }: { approval: PendingInt
       <div className="interaction-kicker">{decision === "approve" ? "Approving tool…" : decision === "decline" ? "Declining tool…" : "Approval required"}</div>
       <h3>Allow {approval.toolName ?? "tool"}?</h3>
       <p>Proteus is ready to use this tool. Review the request before it continues.</p>
+      {approval.toolName === "mastra_workspace_execute_command" && <p className="tool-approval-warning">This command runs directly on your Windows computer from this chat’s workspace. Mastra LocalSandbox does not provide OS isolation on Windows.</p>}
       <pre className="tool-approval-args">{args}</pre>
       <div className="interaction-actions">
         <button disabled={resolving} type="button" className="btn-outline sm" onClick={() => respond(false)}>

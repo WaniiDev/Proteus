@@ -9,6 +9,8 @@ describe("native Mastra workspace policy", () => {
     expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE, context)).toMatchObject({ enabled: true, requireApproval: true, requireReadBeforeWrite: true });
     expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.FILESYSTEM.DELETE, context)).toMatchObject({ enabled: true, requireApproval: true });
     expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT, context)).toMatchObject({ enabled: false });
-    expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND, context)).toMatchObject({ enabled: false });
+    expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND, context)).toMatchObject({ enabled: true, requireApproval: true, maxOutputTokens: 4_000 });
+    expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT, context)).toMatchObject({ enabled: true, requireApproval: false });
+    expect(await resolveToolConfig(FILE_WORKSPACE_TOOLS, WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS, context)).toMatchObject({ enabled: true, requireApproval: true });
   });
 });

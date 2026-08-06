@@ -12,7 +12,7 @@ import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { askUserTool, submitPlanTool, TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
-import { createWorkspaceTools, LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
+import { createWorkspaceTools, LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceScopeSummary } from "../shared/contracts";
@@ -23,6 +23,7 @@ import { TaskToolPolicy } from "./task-tool-policy";
 import { APPROVED_PLAN_TOOLS } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { AGENT_INSTRUCTIONS } from "./agent-instructions";
+import { COMMAND_SAFETY_INSTRUCTIONS } from "./command-safety-instructions";
 import { selectedModelMissingFromCatalog } from "./provider-readiness";
 import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels, migrateCodexSelection, resolveCodexGatewayModel } from "./codex-models";
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "./codex-oauth-failure";
@@ -409,6 +410,7 @@ export class TextRuntime {
   private readonly workspace: Workspace;
   private readonly agentWorkspace: Workspace;
   private readonly workspaceFilesystems = new Map<string, LocalFilesystem>();
+  private readonly workspaceSandboxes = new Map<string, LocalSandbox>();
   private readonly appWorkspaceRoot = join(Utils.paths.userData, "proteus-workspace-v1");
   private readonly agent: Agent;
   private readonly mastra: Mastra;
@@ -528,6 +530,21 @@ export class TextRuntime {
         }
         return filesystem;
       },
+      sandbox: async ({ requestContext }) => {
+        const rootPath = requestContext.get("proteus-workspace-root") as string | undefined;
+        const threadId = requestContext.get("proteus-thread-id") as string | undefined;
+        if (!rootPath || !isAbsolute(rootPath) || !threadId) throw new Error("No trusted command workspace is available for this chat");
+        let sandbox = this.workspaceSandboxes.get(threadId);
+        if (!sandbox) {
+          sandbox = new LocalSandbox({ id: `proteus-${threadId}`, workingDirectory: rootPath, isolation: "none", timeout: 30_000, instructions: "Commands run on the Windows host inside the chat's fixed working directory. Every command requires user approval." });
+          await sandbox.start();
+          this.workspaceSandboxes.set(threadId, sandbox);
+        }
+        if (normalize(sandbox.workingDirectory).toLowerCase() !== normalize(rootPath).toLowerCase()) throw new Error("The command workspace does not match this chat's fixed project");
+        return sandbox;
+      },
+      sandboxCacheKey: ({ requestContext }) => requestContext.get("proteus-thread-id") as string | undefined,
+      instructions: { dynamicSandbox: ({ requestContext }) => `Commands run from the fixed ${requestContext.get("proteus-workspace-kind") ?? "app"} workspace on Windows. LocalSandbox does not provide OS isolation on Windows; every command requires approval.` },
       tools: FILE_WORKSPACE_TOOLS,
     });
     this.memory = new Memory({
@@ -547,7 +564,7 @@ export class TextRuntime {
     this.agent = new Agent({
       id: AGENT_ID,
       name: "Proteus",
-      instructions: AGENT_INSTRUCTIONS,
+      instructions: `${AGENT_INSTRUCTIONS}\n\n${COMMAND_SAFETY_INSTRUCTIONS}`,
       memory: this.memory,
       workspace: this.agentWorkspace,
       tools: async ({ requestContext }) => ({
@@ -618,6 +635,9 @@ export class TextRuntime {
       } finally {
         await Promise.all([...this.workspaceFilesystems.values()].map((filesystem) => filesystem.destroy()));
         this.workspaceFilesystems.clear();
+        await Promise.all([...this.workspaceSandboxes.values()].map((sandbox) => sandbox.destroy()));
+        this.workspaceSandboxes.clear();
+        this.agentWorkspace.clearSandboxCache();
         await this.appStorage.close();
       }
     })();
@@ -1719,6 +1739,10 @@ export class TextRuntime {
     await this.threads.delete(threadId);
     this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
+    const sandbox = this.workspaceSandboxes.get(threadId);
+    if (sandbox) await sandbox.destroy();
+    this.workspaceSandboxes.delete(threadId);
+    this.agentWorkspace.clearSandboxCache(threadId);
     const remaining = (await this.threads.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     if (this.selectedThreadId === threadId || !this.selectedThreadId) {
       const next = remaining[0] ?? mapThread(await this.threads.create("New chat"));

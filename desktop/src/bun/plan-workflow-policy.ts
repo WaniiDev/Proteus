@@ -14,4 +14,7 @@ export const APPROVED_PLAN_TOOLS = [
   "mastra_workspace_edit_file",
   "mastra_workspace_mkdir",
   "mastra_workspace_delete",
+  "mastra_workspace_execute_command",
+  "mastra_workspace_get_process_output",
+  "mastra_workspace_kill_process",
 ] as const;

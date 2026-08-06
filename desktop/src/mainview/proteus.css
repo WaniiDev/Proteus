@@ -963,3 +963,4 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 .workspace-options > button:disabled { opacity:.5; cursor:not-allowed; }
 .workspace-options span { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 @media (max-width: 700px) { .project-card,.projects-heading { align-items:flex-start; flex-direction:column; } }
+.tool-approval-warning { padding:10px 12px; border:1px solid #dfb8a8; border-radius:10px; background:rgba(255,235,224,.7); color:#754230; font-size:12px; }
