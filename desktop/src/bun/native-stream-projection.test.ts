@@ -14,6 +14,24 @@ describe("native Mastra stream projection", () => {
     expect(terminal).toMatchObject({ terminal: "complete", usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 } });
   });
 
+  test("marks structured validation failures as errors instead of completed", () => {
+    const projector = new NativeStreamProjector();
+    const failed = projector.apply("thread-1", {
+      type: "tool-result",
+      runId: "run-1",
+      payload: {
+        toolCallId: "call-1",
+        toolName: "mastra_workspace_execute_command",
+        result: { error: true, message: "Tool input validation failed" },
+      },
+    });
+    expect(failed?.message.parts[0]).toMatchObject({
+      type: "tool",
+      status: "error",
+      error: "Tool input validation failed",
+    });
+  });
+
   test("accumulates text and maps aborts and errors to terminal UI state", () => {
     const projector = new NativeStreamProjector();
     projector.apply("thread-1", { type: "text-delta", runId: "run-1", payload: { id: "text-1", text: "Hel" } });

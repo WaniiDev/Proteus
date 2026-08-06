@@ -1,98 +1,81 @@
 # Proteus project handoff
 
-_Prepared for the next developer or agent on 2026-08-06. Repository: `WaniiDev/Proteus`, branch: `main`._
+_Prepared on 2026-08-06 for a future developer or agent. Repository: `WaniiDev/Proteus`; branch: `main`._
 
 ## Objective
 
-Proteus is being built as a desktop personal-AI agent harness: one continuous conversation should handle ordinary knowledge work and coding work without a visible mode switch. The product direction is framework-first—use Mastra's native agent, memory, workspace, tools, approval, suspension/resume, task signals, queueing, and provider capabilities instead of recreating those systems in application code.
+Fix Proteus workspace command tool calls when a model emits numeric JSON fields as strings, and ensure tool failures never appear as completed in live or restored chat history. Done means this real-chat call executes after approval and its timeline reflects the truthful outcome:
 
-The immediate expansion goal was to make the normal working-agent experience useful without wasting tool context: exact time, safe calculation, unit conversion, web search, and web fetch, while retaining the existing workspace list/read/grep tools for project inspection.
+```json
+{"command":"git status","cwd":".","tail":"100","timeout":"30"}
+```
 
 ## Current status
 
-The Mastra-native working-tool expansion is implemented and verified. Codex and OpenRouter now receive provider-appropriate web search, source URLs survive both live and persisted message projection, and citations render after the assistant response. Tool activity UI is compact and semantic, including the final uncommitted-at-start timeline polish now included with this handoff.
+**Unresolved in the running app.** A narrow compatibility implementation is present and all automated tests pass, but the user retested and still receives the same validation error. Do not claim this is fixed until a real desktop-chat reproduction succeeds.
 
-The repository is intended to be clean on `main` after this handoff is committed and pushed. The only known verification blocker is native Electrobun packaging: the local dependency installation lacks `desktop/node_modules/electrobun/dist-win-x64/launcher.exe`.
+The known failure is Mastra rejecting `tail: "100"` with `expected number, received string`. The command does not execute. `timeout: "30"` is accepted by the installed Mastra schema because that field already uses preprocessing; `tail` does not.
 
-## Done and verified
+## Implemented and verified
 
-- Mastra `ToolSearchProcessor` is wired before `NativeToolCallGuard` with `storage: "context"`, `autoLoad: true`, `topK: 3`, and `minScore: 0.1` in `desktop/src/bun/runtime.ts`.
-- Mastra's native `webFetchTool` is dynamically discoverable. It retains the framework's public-HTTP-only SSRF protections.
-- Always-visible read-only tools `get_datetime`, `calculate`, and `convert_units` live in `desktop/src/bun/working-tools.ts`. Arithmetic is bounded and AST-allowlisted; currency conversion is explicitly unsupported.
-- Provider-routed search is native to each provider: Mastra `webSearchTool` for Codex and `@openrouter/ai-sdk-provider`'s `webSearch({ engine: "auto", maxResults: 5 })` for OpenRouter.
-- Native AI SDK `source-url` parts are preserved through `desktop/src/bun/native-stream-projection.ts`, `desktop/src/bun/runtime.ts`, and `desktop/src/shared/contracts.ts`; the UI deduplicates and renders them after the answer in `desktop/src/mainview/App.tsx`.
-- New tools are included in the approved-plan continuation allowlist and described in the agent instructions and semantic tool timeline.
-- The existing workspace inspection set—`list_files`, `read_file`, `file_stat`, and `grep`—remains the local-search solution. A second local-file-search abstraction was intentionally not added because it would duplicate these native workspace tools and increase tool/context surface.
-- ToolTimeline polish hides redundant “Tools used” headings for one to three inline calls, removes row chevrons, and uses a reduced-motion-safe spinner for active calls.
-- Commits containing the core work:
-  - `c2e9fb3 feat: add native working utility tools`
-  - `d04e8b2 feat: add provider-native web search citations`
-- Verification on 2026-08-06:
-  - `bun test`: 168 passed, 0 failed.
+- `desktop/src/bun/workspace-tool-compat.ts` wraps Mastra's native `createWorkspaceTools()` result and extends only the native `mastra_workspace_execute_command` input schema so finite numeric strings supplied to `tail` become numbers. It does not replace command execution, approval, or sandbox behavior.
+- `desktop/src/bun/runtime.ts` explicitly adds the compatible agent-workspace tools before the separate private plan-workspace tools.
+- `desktop/src/bun/tool-result-error.ts` recognizes both Mastra `{ isError: true }` output and structured `{ error: true }` validation output.
+- `desktop/src/bun/native-stream-projection.ts` now marks structured tool-result failures as `error` and retains their message instead of showing `completed`.
+- Persisted message projection in `desktop/src/bun/runtime.ts` uses the same structured-error classifier.
+- Added focused tests in:
+  - `desktop/src/bun/workspace-tool-compat.test.ts`
+  - `desktop/src/bun/tool-result-error.test.ts`
+  - `desktop/src/bun/native-stream-projection.test.ts`
+- Verification before handoff:
+  - `bun test`: 171 passed, 0 failed.
   - `bun run typecheck`: passed.
-  - Vite production build: passed.
-  - `graphify update .`: passed; 928 nodes, 1717 edges, 58 communities, with no tracked graph delta.
-  - Focused ToolTimeline test after final UI changes: 8 passed, 0 failed.
+  - `graphify update .`: passed; 949 nodes, 1746 edges, 64 communities.
 
-## Next actions
+## Immediate next actions
 
-1. Repair or reinstall the Electrobun Windows runtime dependency so `desktop/node_modules/electrobun/dist-win-x64/launcher.exe` exists, then run `bun run build` from `desktop/`. Do not weaken `scripts/embed-windows-icons.ts`; it is correctly detecting a missing packaging input.
-2. Smoke-test both provider paths in the desktop app:
-   - Codex: current-information question should call native `web_search` and show citations.
-   - OpenRouter: same behavior through the OpenRouter server tool without changing the selected model.
-   - Ask for a public URL to confirm `search_tools` discovers and subsequently exposes `web_fetch`.
-3. Continue the working-agent tool backlog only after real usage evidence. Likely next candidates are calendar, reminders/scheduling, and connectors; put larger catalogs behind `ToolSearchProcessor` instead of making every tool always visible.
-4. Keep ordinary work and coding capabilities in the same session. Provider selection changes transport/model capability, not the product's visible operating mode.
+1. Reproduce against the effective tool assembled by the real `Agent`, not the helper in isolation. The likely issue is that Agent-level `workspace` automatically injects its own native tool after the explicit `tools` catalog and overwrites the patched tool with Mastra's original schema.
+2. Add an integration assertion around `Agent.prepare()` or the installed agent tool-preparation path that inspects the final `mastra_workspace_execute_command.inputSchema` and parses the exact string-valued payload above. A helper-only unit test is insufficient.
+3. Inspect installed Mastra source where assigned tools and workspace tools are merged. Determine precedence before changing architecture. Search installed `@mastra/core` 1.56.0 source/types; embedded docs are authoritative for this pinned version.
+4. Prefer an upstream-native solution if available. If no Agent-level repair callback or workspace schema override exists in 1.56.0, choose one of these explicit paths and test it end to end:
+   - remove automatic workspace-tool injection and supply the patched `createWorkspaceTools(agentWorkspace, ...)` catalog explicitly while preserving workspace instructions/context; or
+   - patch/upgrade Mastra once upstream makes `tail` use the same preprocessing as `timeout`.
+5. Launch the real desktop app, approve the exact `git status` call, and verify the command actually runs. Also test a genuinely invalid value such as `tail: "many"` remains rejected and appears as Failed, not Completed.
 
-## Key decisions and rationale
+## Decisions and evidence
 
-- Mastra installed docs and installed type/source files are the API authority because Mastra changes quickly. Relevant docs: [ToolSearchProcessor](https://mastra.ai/reference/processors/tool-search-processor), [agent tools](https://mastra.ai/docs/agents/using-tools), and [workspace](https://mastra.ai/docs/workspace/overview).
-- Core utilities remain always visible because they are cheap, deterministic, and frequently useful. Web fetch is discoverable because it is more specialized and establishes the pattern for future tool catalogs.
-- `ToolSearchProcessor` uses context-backed state so discovered tools survive process restarts through durable conversation messages and naturally disappear when the discovery result leaves context.
-- Search is provider-native. Do not implement a custom search proxy or silently switch providers/models when search fails.
-- Source citations use the native AI SDK `source-url` part rather than parsing URLs out of generated prose.
-- Read-only time/math/search/fetch operations do not require approval. Workspace mutations continue through Mastra's native approval flow.
-- Local file search was excluded: Mastra workspace list/read/stat/grep already covers exact and content-based project discovery inside the fixed server-owned workspace boundary.
+- Installed package: `@mastra/core` 1.56.0.
+- Installed declaration `desktop/node_modules/@mastra/core/dist/workspace/tools/execute-command.d.ts` shows:
+  - `timeout: z.ZodOptional<z.ZodNullable<z.ZodPreprocess<z.ZodNumber>>>`
+  - `tail: z.ZodOptional<z.ZodNullable<z.ZodNumber>>`
+- Mastra's internal AI SDK contains `repairToolCall`, but the installed public `AgentExecutionOptionsBase` does not expose it. Do not wire undocumented SDK internals into Proteus.
+- Keep Mastra's native Workspace, LocalSandbox, approval, and execution pipeline. Do not build a custom shell runner.
+- Structured tool output is a second, independent bug: `{ status: "completed", output: { error: true } }` must project as an error even when input coercion is later solved.
 
 ## Risks and gotchas
 
+- The current helper test proves the patched schema works in isolation, not that the final Agent catalog uses it. This is the central open risk.
+- Restart the desktop Bun process for every manual retest; Vite UI refresh alone cannot reload Bun runtime code.
+- Every command requires native approval and executes through `LocalSandbox` with `isolation: "none"` on Windows. Do not weaken approval.
 - No Docker is available on this laptop.
-- Native package build currently fails before Electrobun build because `launcher.exe` is absent. Vite compilation itself is healthy.
-- `webSearchTool` is a Mastra provider placeholder, while OpenRouter search is an AI SDK provider-defined tool. Do not put either provider-defined search tool inside `ToolSearchProcessor`, whose installed contract accepts Mastra `Tool` instances; only `web_fetch` belongs there today.
-- Keep `ToolSearchProcessor` before `NativeToolCallGuard`, otherwise the guard will not see the final dynamically assembled tool catalog.
-- Preserve model/provider affinity. A web-search failure must surface as an error and must not reset the remembered provider/model or route through Auto Router.
-- The application stores credentials in Windows Credential Manager. Never place API keys or OAuth tokens in diagnostics, handoff files, or repository configuration.
-- The workspace root is server-owned and immutable per chat. Do not reintroduce client-supplied arbitrary roots.
+- Preserve unrelated framework-first work: native queueing, approval/suspension, task signals, memory, provider selection, and workspace ownership.
+- Never expose credentials through diagnostics or command output.
 
-## Important files
+## Relevant files and docs
 
-- `desktop/src/bun/runtime.ts` — Agent construction, provider/model resolution, tool catalog, memory, queue/resume integration, persisted message projection.
-- `desktop/src/bun/working-tools.ts` — Date/time, calculator, and unit-conversion tools.
-- `desktop/src/bun/native-stream-projection.ts` — Live Mastra chunk-to-UI projection, including citations.
-- `desktop/src/bun/plan-workflow-policy.ts` — Tools permitted after plan approval.
-- `desktop/src/bun/native-tool-call-guard.ts` — Detects textual imitations of available native tool calls.
-- `desktop/src/bun/task-tool-policy.ts` — Prevents repeated task mutations and terminates completed task loops.
-- `desktop/src/bun/agent-instructions.ts` — Agent behavior and native-tool discipline.
-- `desktop/src/mainview/App.tsx` — Conversation rendering and citation list.
-- `desktop/src/mainview/ToolTimeline.tsx` and `desktop/src/mainview/tool-activity.ts` — Tool history presentation.
-- `desktop/src/shared/contracts.ts` — Runtime/UI schemas, including `source-url` parts.
-- `AGENTS.md` — Repository rules, including mandatory Graphify refresh after code changes.
+- `desktop/src/bun/runtime.ts` — Agent and workspace construction, final dynamic tool catalog, persisted projection.
+- `desktop/src/bun/workspace-tool-compat.ts` — attempted numeric-string compatibility layer.
+- `desktop/src/bun/native-stream-projection.ts` — live tool lifecycle projection.
+- `desktop/src/bun/tool-result-error.ts` — shared structured-error recognition.
+- `desktop/src/bun/workspace-policy.ts` — native workspace tool allowlist and approvals.
+- Installed Mastra docs: `desktop/node_modules/@mastra/core/dist/docs/references/docs-workspace-overview.md` and `docs-agents-using-tools.md`.
+- Installed Mastra schema: `desktop/node_modules/@mastra/core/dist/workspace/tools/execute-command.d.ts`.
+- Repository rule: run `graphify update .` after source changes.
 
-## Verification and definition of done
+## Definition of done
 
-From `desktop/`:
-
-```powershell
-bun install
-bun test
-bun run typecheck
-bun run build
-```
-
-From the repository root after code changes:
-
-```powershell
-graphify update .
-```
-
-The current working-agent expansion is complete when the full tests and typecheck pass, both provider search paths produce a final answer with deduplicated citations, web fetch is discoverable and blocks private/local targets, the selected provider/model never changes implicitly, and the repaired Electrobun dependency allows the native package build to finish.
+- The exact string-valued real-chat payload executes successfully after approval.
+- Invalid nonnumeric values are still rejected safely.
+- Live and restored history both show validation/execution failures as Failed.
+- The effective final Agent tool-schema integration test passes.
+- Full `bun test`, `bun run typecheck`, and `graphify update .` pass.

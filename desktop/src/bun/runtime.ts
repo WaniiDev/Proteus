@@ -41,6 +41,8 @@ import { NativeToolCallGuard } from "./native-tool-call-guard";
 import type { ProjectRegistryStorage, StoredProject } from "./project-registry";
 import { FILE_WORKSPACE_TOOLS } from "./workspace-policy";
 import { createWorkingTools } from "./working-tools";
+import { createCompatibleWorkspaceTools } from "./workspace-tool-compat";
+import { toolResultError } from "./tool-result-error";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -255,7 +257,8 @@ function toolPart(part: unknown, messageId: string, index: number): ChatToolPart
   } else return null;
   if (typeof name !== "string") return null;
   const statusText = String(rawStatus ?? "running").toLowerCase();
-  const isError = Boolean(error) || (output && typeof output === "object" && (output as { isError?: unknown }).isError === true);
+  const structuredError = toolResultError(output);
+  const isError = Boolean(error) || Boolean(structuredError);
   const status: ChatToolPart["status"] = isError ? "error" : /result|output-available|complete|success/.test(statusText) ? "completed" : /approval|suspend|waiting/.test(statusText) ? "waiting" : /denied|declined/.test(statusText) ? "declined" : /cancel/.test(statusText) ? "cancelled" : /partial|input-stream/.test(statusText) ? "streaming_input" : "running";
   const toolCallId = typeof callId === "string" && callId ? callId : `${messageId}:tool:${index}`;
   const safeInput = input === undefined ? undefined : sanitizeToolDetail(input);
@@ -271,7 +274,7 @@ function toolPart(part: unknown, messageId: string, index: number): ChatToolPart
     outputSummary: detailSummary(safeOutput),
     input: safeInput,
     output: safeOutput,
-    error: error === undefined ? undefined : String(error).slice(0, 2_000),
+    error: error === undefined ? structuredError : String(error).slice(0, 2_000),
   };
 }
 
@@ -590,6 +593,7 @@ export class TextRuntime {
           ? webSearchTool
           : openRouterTools.webSearch({ engine: "auto", maxResults: 5 }),
         ...workingTools,
+        ...await createCompatibleWorkspaceTools(this.agentWorkspace, requestContext),
         ...await createWorkspaceTools(this.workspace, { workspace: this.workspace, requestContext }),
       }),
       signals: [new TaskSignalProvider()],
