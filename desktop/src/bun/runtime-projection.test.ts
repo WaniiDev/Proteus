@@ -1,7 +1,30 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, PendingInteraction } from "../shared/contracts";
-import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, projectedMessageId, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
+import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, parseToolApproval, projectedMessageId, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
+
+describe("native approval projection", () => {
+  it("keeps run identity and exact arguments in the shared pending-action model", () => {
+    const interaction = parseToolApproval({
+      threadId: "thread-1",
+      runId: "run-1",
+      toolCallId: "call-1",
+      toolName: "write_file",
+      args: { path: "notes.txt", content: "hello" },
+    });
+
+    expect(interaction).toMatchObject({
+      id: "run-1:call-1",
+      threadId: "thread-1",
+      runId: "run-1",
+      toolCallId: "call-1",
+      toolName: "write_file",
+      kind: "tool_approval",
+      args: { path: "notes.txt", content: "hello" },
+      status: "pending",
+    });
+  });
+});
 
 const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
   isRunning: true,

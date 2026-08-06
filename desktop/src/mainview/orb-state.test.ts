@@ -18,7 +18,6 @@ const baseSnapshot = (): RuntimeSnapshot => ({
   messages: [],
   events: [],
   interactions: [],
-  toolApproval: null,
   workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
   activeRun: null,
   error: null,

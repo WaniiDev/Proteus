@@ -13,7 +13,7 @@ export function activeOrbToolNames(snapshot: RuntimeSnapshot): Set<string> {
 
 export function deriveOrbSteadyState(snapshot: RuntimeSnapshot): OrbState {
   if (snapshot.error && snapshot.error.code !== "aborted") return "error";
-  if (snapshot.toolApproval || snapshot.workbench.status === "waiting") return "waiting";
+  if (snapshot.workbench.status === "waiting") return "waiting";
   const activeRun = snapshot.activeRun?.threadId === snapshot.activeThreadId && snapshot.activeRun.status === "running" ? snapshot.activeRun : null;
   if (!activeRun) return "idle";
   if (activeOrbToolNames(snapshot).has("write_plan")) return "drafting";

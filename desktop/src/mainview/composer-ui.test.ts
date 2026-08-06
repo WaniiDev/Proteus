@@ -26,7 +26,7 @@ describe("composer UI policy", () => {
       selectedProviderId: "codex",
       selectedModelId: "codex/gpt-5.3-codex-spark[xhigh]",
       selectedReasoningEffort: "xhigh",
-      threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [], toolApproval: null,
+      threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
       workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
       activeRun: null,
       error: { code: "model-unavailable", message: "Stale OpenRouter error", retryable: true },

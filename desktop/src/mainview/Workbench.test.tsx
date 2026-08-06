@@ -20,7 +20,6 @@ function snapshot(): RuntimeSnapshot {
     messages: [],
     events: [],
     interactions: [],
-    toolApproval: null,
     workbench: {
       status: "waiting",
       goal: "Ship the side panel",

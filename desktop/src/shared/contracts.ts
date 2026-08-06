@@ -137,7 +137,7 @@ export const workbenchTaskSchema = z.object({
 });
 export type WorkbenchTask = z.infer<typeof workbenchTaskSchema>;
 
-export const interactionKindSchema = z.enum(["ask_user", "submit_plan"]);
+export const interactionKindSchema = z.enum(["ask_user", "submit_plan", "tool_approval"]);
 export type InteractionKind = z.infer<typeof interactionKindSchema>;
 
 export const interactionStatusSchema = z.enum(["pending", "resolving", "approved", "rejected", "answered", "cancelled", "failed"]);
@@ -169,8 +169,15 @@ export type PlanVersion = z.infer<typeof planVersionSchema>;
 export const pendingInteractionSchema = z.object({
   id: z.string().min(1),
   toolCallId: z.string().min(1),
+  threadId: z.string().min(1).optional(),
+  runId: z.string().min(1).optional(),
   kind: interactionKindSchema,
   title: z.string(),
+  toolName: z.string().min(1).optional(),
+  args: z.unknown().optional(),
+  argsSummary: z.string().optional(),
+  fingerprint: z.string().min(1).optional(),
+  policyVersion: z.number().int().positive().optional(),
   question: z.string().optional(),
   options: z
     .array(
@@ -227,13 +234,6 @@ export const activeRunSchema = z.object({
 });
 export type ActiveRun = z.infer<typeof activeRunSchema>;
 
-export const toolApprovalSchema = z.object({
-  toolCallId: z.string().min(1),
-  toolName: z.string().min(1),
-  args: z.unknown(),
-});
-export type ToolApproval = z.infer<typeof toolApprovalSchema>;
-
 export const diagnosticSourceSchema = z.enum(["mastra", "runtime", "rpc", "storage"]);
 export type DiagnosticSource = z.infer<typeof diagnosticSourceSchema>;
 
@@ -274,7 +274,6 @@ export const runtimeSnapshotSchema = z.object({
   messages: z.array(chatMessageSchema),
   events: z.array(chatEventSchema),
   interactions: z.array(pendingInteractionSchema),
-  toolApproval: toolApprovalSchema.nullable().default(null),
   workbench: workbenchSchema,
   activeRun: activeRunSchema.nullable(),
   error: runtimeErrorSchema.nullable(),

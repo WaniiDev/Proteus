@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ToolApproval, ThreadSummary } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
@@ -43,7 +43,6 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   messages: [],
   events: [],
   interactions: [],
-  toolApproval: null,
   workbench: {
     status: "idle",
     tasks: [],
@@ -750,7 +749,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
   const workbenchOpen = !!snapshot.activeThreadId && workbenchHasContent && workbenchOpenByThread.get(snapshot.activeThreadId) === true;
-  const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length + (snapshot.toolApproval ? 1 : 0);
+  const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
   const draftPresent = input.trim().length > 0;
   const primaryComposerAction = composerAction(runningForSelected, draftPresent);
   const inputLineCount = composerLineCount(input);
@@ -784,7 +783,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
   const retryTarget = snapshot.retryMessageId ?? lastErrorMessage?.id;
   const conversationItems = useMemo(() => groupConversationItems(snapshot.messages), [snapshot.messages]);
-  const pendingToolIds = useMemo(() => new Set([...snapshot.interactions.map((item) => item.toolCallId), ...(snapshot.toolApproval ? [snapshot.toolApproval.toolCallId] : [])]), [snapshot.interactions, snapshot.toolApproval]);
+  const pendingToolIds = useMemo(() => new Set(snapshot.interactions.map((item) => item.toolCallId)), [snapshot.interactions]);
   const jumpToInteraction = (id: string) => {
     document.getElementById(`interaction-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
@@ -856,10 +855,10 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                   {event.text}
                 </div>
               ))}
-              {snapshot.interactions.map((interaction) => (
-                <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} onDismiss={onInteractionDismiss} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />
-              ))}
-              {snapshot.toolApproval && <ToolApprovalCard approval={snapshot.toolApproval} onRespond={onToolApproval} />}
+              {snapshot.interactions.map((interaction) => interaction.kind === "tool_approval"
+                ? <ToolApprovalCard key={interaction.id} approval={interaction} onRespond={onToolApproval} />
+                : <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} onDismiss={onInteractionDismiss} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />
+              )}
               {snapshot.error && snapshot.error.code !== "aborted" && (
                 <div className="run-error-card">
                   <div>
@@ -1261,12 +1260,12 @@ export default function App() {
   );
 }
 
-function ToolApprovalCard({ approval, onRespond }: { approval: ToolApproval; onRespond: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
+function ToolApprovalCard({ approval, onRespond }: { approval: PendingInteraction; onRespond: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
   const [decision, setDecision] = useState<"approve" | "decline" | null>(null);
   const resolving = decision !== null;
   const args = useMemo(() => {
     try {
-      return JSON.stringify(approval.args, null, 2);
+      return JSON.stringify(approval.args ?? null, null, 2);
     } catch {
       return "Unable to display tool arguments.";
     }
@@ -1283,7 +1282,7 @@ function ToolApprovalCard({ approval, onRespond }: { approval: ToolApproval; onR
   return (
     <article className={`interaction-card tool-approval-card${resolving ? " resolving" : ""}`} id={`tool-approval-${approval.toolCallId}`}>
       <div className="interaction-kicker">{decision === "approve" ? "Approving tool…" : decision === "decline" ? "Declining tool…" : "Approval required"}</div>
-      <h3>Allow {approval.toolName}?</h3>
+      <h3>Allow {approval.toolName ?? "tool"}?</h3>
       <p>Proteus is ready to use this tool. Review the request before it continues.</p>
       <pre className="tool-approval-args">{args}</pre>
       <div className="interaction-actions">

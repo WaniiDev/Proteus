@@ -9,6 +9,14 @@ type SuspendedToolLike = {
   suspendPayload: unknown;
 };
 
+type ApprovalToolLike = {
+  threadId: string;
+  runId: string;
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+};
+
 type StoredMessageIdentity = {
   id: string;
   role?: string;
@@ -305,6 +313,32 @@ export function parseSuspendedInteraction(input: SuspendedToolLike, version: num
     };
   }
   return null;
+}
+
+/** Project a native Mastra requireApproval suspension into the shared pending-action model. */
+export function parseToolApproval(input: ApprovalToolLike): PendingInteraction {
+  let argsSummary = "No arguments";
+  try {
+    const serialized = JSON.stringify(input.args);
+    if (serialized) argsSummary = serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
+  } catch {
+    argsSummary = "Arguments are not serializable";
+  }
+  return {
+    id: `${input.runId}:${input.toolCallId}`,
+    threadId: input.threadId,
+    runId: input.runId,
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+    kind: "tool_approval",
+    title: `Allow ${input.toolName}?`,
+    question: "Proteus is ready to use this tool. Review the request before it continues.",
+    args: input.args,
+    argsSummary,
+    options: [],
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
 }
 
 /**

@@ -13,10 +13,10 @@ import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ToolApproval, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
-import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
+import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { APPROVED_PLAN_TOOLS } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
@@ -442,7 +442,6 @@ export class TextRuntime {
     messages: [],
     events: [],
     interactions: [],
-    toolApproval: null,
     workbench: emptyWorkbench(),
     activeRun: null,
     error: null,
@@ -725,7 +724,18 @@ export class TextRuntime {
     let nextPending = pending.filter((item) => liveIds.has(item.toolCallId));
     let nextVersion = Math.max(0, ...[...(state.pendingInteractions ?? []), ...(state.resolvedInteractions ?? [])].map((item) => item.plan?.version ?? 0));
     for (const item of suspensions) {
-      if (!item.toolCallId || !item.toolName || nextPending.some((interaction) => interaction.toolCallId === item.toolCallId)) continue;
+      if (!item.toolCallId || !item.toolName) continue;
+      if (item.requiresApproval) {
+        nextPending = upsertPendingInteraction(nextPending, parseToolApproval({
+          threadId,
+          runId: item.runId,
+          toolCallId: item.toolCallId,
+          toolName: item.toolName,
+          args: item.args,
+        }));
+        continue;
+      }
+      if (nextPending.some((interaction) => interaction.toolCallId === item.toolCallId)) continue;
       let suspendPayload = item.suspendPayload;
       if (item.toolName === "submit_plan" && suspendPayload && typeof suspendPayload === "object" && typeof (suspendPayload as { path?: unknown }).path === "string") {
         const path = (suspendPayload as { path: string }).path;
@@ -801,10 +811,10 @@ export class TextRuntime {
     return [...this.assistantProjections.values()].filter((projection) => projection.threadId === threadId && projection.messages.size > 0).sort((left, right) => left.runStartedAt.localeCompare(right.runStartedAt));
   }
 
-  private workbenchFromState(state: PersistedThreadState, _displayState: null = null, runStatus: RuntimeSnapshot["activeRun"] = this.snapshot.activeRun, toolApproval: ToolApproval | null = this.snapshot.toolApproval): WorkbenchState {
+  private workbenchFromState(state: PersistedThreadState, _displayState: null = null, runStatus: RuntimeSnapshot["activeRun"] = this.snapshot.activeRun): WorkbenchState {
     const tasks = state.tasks ?? [];
     const pendingInteractions = state.pendingInteractions ?? [];
-    const pending = pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving") || toolApproval !== null;
+    const pending = pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving");
     const status: WorkbenchState["status"] = pending ? "waiting" : runStatus?.threadId === this.selectedThreadId && runStatus.status === "running" ? "active" : runStatus?.threadId === this.selectedThreadId && runStatus.status === "aborted" ? "interrupted" : this.snapshot.error && runStatus?.threadId === this.selectedThreadId ? "error" : tasks.some((task) => task.status !== "completed") ? "active" : tasks.length > 0 ? "complete" : "idle";
     const usage = state.tokenUsage ?? emptyTokenUsage();
     return {
@@ -1007,9 +1017,10 @@ export class TextRuntime {
 
     if (chunk.type === "tool-call-approval" && toolCallId && typeof payload.toolName === "string") {
       this.nativeSuspensions.set(toolCallId, { runId, threadId });
-      const toolApproval = { toolCallId, toolName: payload.toolName, args: payload.args };
+      const interaction = parseToolApproval({ threadId, runId, toolCallId, toolName: payload.toolName, args: payload.args });
+      this.threadState = { ...this.threadState, pendingInteractions: upsertPendingInteraction(this.threadState.pendingInteractions ?? [], interaction) };
       if (threadId === this.selectedThreadId) {
-        this.publish({ toolApproval, workbench: this.workbenchFromState(this.threadState, null, this.snapshot.activeRun, toolApproval) });
+        this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
       }
       this.updateThreadActivity(threadId, "waiting", 1);
     }
@@ -1140,7 +1151,6 @@ export class TextRuntime {
       messages: [],
       events: nextThreadState.events ?? [],
       interactions: nextThreadState.pendingInteractions ?? [],
-      toolApproval: null,
       workbench: this.workbenchFromState(nextThreadState, null),
     };
     if (options.clearError !== false) nextSnapshot.error = null;
@@ -1739,13 +1749,19 @@ export class TextRuntime {
 
   async respondToToolApproval(toolCallId: string, approved: boolean): Promise<void> {
     await this.ensureInitialized();
-    const pending = this.snapshot.toolApproval;
-    if (!pending || pending.toolCallId !== toolCallId) throw new Error("That tool approval is no longer available");
+    const pending = this.threadState.pendingInteractions?.find((item) => item.kind === "tool_approval" && item.toolCallId === toolCallId);
+    if (!pending) throw new Error("That tool approval is no longer available");
     const threadId = this.selectedThreadId;
     if (!threadId) throw new Error("No active conversation");
     try {
       await this.nativeDriver.approve(threadId, toolCallId, approved);
-      this.publish({ toolApproval: null });
+      this.threadState = {
+        ...this.threadState,
+        pendingInteractions: (this.threadState.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId),
+        resolvedInteractions: [...(this.threadState.resolvedInteractions ?? []), { ...pending, status: approved ? "approved" : "rejected" }],
+      };
+      await this.persistThreadState(threadId, this.threadState);
+      this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
       this.updateThreadActivity(threadId, "running", 0);
     } catch (error) {
       throw normalizeError(error);
