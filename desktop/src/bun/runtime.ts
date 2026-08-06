@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, normalize } from "node:path";
 import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import { Agent } from "@mastra/core/agent";
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
@@ -11,7 +12,7 @@ import { RequestContext } from "@mastra/core/request-context";
 import { ToolSearchProcessor } from "@mastra/core/processors";
 import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
-import { askUserTool, submitPlanTool, TASK_STATE_TYPE, webFetchTool, type TaskItemSnapshot } from "@mastra/core/tools";
+import { askUserTool, submitPlanTool, TASK_STATE_TYPE, webFetchTool, webSearchTool, type TaskItemSnapshot } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
 import { createWorkspaceTools, LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
@@ -280,6 +281,12 @@ function projectMessageParts(message: MastraMessage): ChatMessagePart[] {
   return raw.flatMap((part, index): ChatMessagePart[] => {
     const text = extractPartText(part);
     if (text) return [{ type: "text", id: `${message.id}:text:${index}`, text }];
+    if (part && typeof part === "object" && (part as { type?: unknown }).type === "source-url") {
+      const source = part as { sourceId?: unknown; url?: unknown; title?: unknown };
+      if (typeof source.sourceId === "string" && source.sourceId && typeof source.url === "string") {
+        return [{ type: "source-url", id: `${message.id}:source:${index}`, sourceId: source.sourceId, url: source.url, ...(typeof source.title === "string" ? { title: source.title } : {}) }];
+      }
+    }
     const tool = toolPart(part, message.id, index);
     return tool ? [tool] : [];
   });
@@ -564,6 +571,7 @@ export class TextRuntime {
       this.diagnostics.record({ source: "runtime", type: "tool_call_integrity_violation", payload: violation });
     };
     const workingTools = createWorkingTools();
+    const openRouterTools = createOpenRouter().tools;
     const toolSearch = new ToolSearchProcessor({
       tools: { web_fetch: webFetchTool },
       storage: "context",
@@ -578,6 +586,9 @@ export class TextRuntime {
       tools: async ({ requestContext }) => ({
         ask_user: askUserTool,
         submit_plan: submitPlanTool,
+        web_search: this.snapshot.selectedProviderId === "codex"
+          ? webSearchTool
+          : openRouterTools.webSearch({ engine: "auto", maxResults: 5 }),
         ...workingTools,
         ...await createWorkspaceTools(this.workspace, { workspace: this.workspace, requestContext }),
       }),

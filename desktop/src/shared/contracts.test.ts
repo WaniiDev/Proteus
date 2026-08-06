@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { openRouterModelIdSchema, pendingInteractionSchema, providerAuthSchema, providerModelSchema, proteusRpcSchema, runtimeSnapshotSchema } from "./contracts";
+import { chatMessagePartSchema, openRouterModelIdSchema, pendingInteractionSchema, providerAuthSchema, providerModelSchema, proteusRpcSchema, runtimeSnapshotSchema } from "./contracts";
 
 describe("OpenRouter contracts", () => {
+  it("preserves valid provider source URL parts", () => {
+    expect(chatMessagePartSchema.parse({ type: "source-url", id: "source-1", sourceId: "result-1", url: "https://example.com", title: "Example" })).toMatchObject({ type: "source-url", sourceId: "result-1" });
+    expect(() => chatMessagePartSchema.parse({ type: "source-url", id: "source-1", sourceId: "result-1", url: "not-a-url" })).toThrow();
+  });
   it("accepts only OpenRouter model IDs", () => {
     expect(openRouterModelIdSchema.parse("openrouter/auto")).toBe("openrouter/auto");
     expect(() => openRouterModelIdSchema.parse("openai/gpt-4.1")).toThrow();

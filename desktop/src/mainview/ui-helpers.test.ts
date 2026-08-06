@@ -127,6 +127,16 @@ describe("conversation helpers", () => {
       { type: "text", part: { type: "text", id: "final", text: "All tasks are complete." } },
     ]);
   });
+
+  it("keeps and deduplicates source URLs while excluding them from text/tool runs", () => {
+    const source = { type: "source-url" as const, id: "source-1", sourceId: "one", url: "https://example.com/docs", title: "Example docs" };
+    const items = groupConversationItems([
+      { id: "a", role: "assistant", text: "Answer", status: "complete", createdAt: now.toISOString(), turnId: "turn", parts: [{ type: "text", id: "text", text: "Answer" }, source] },
+      { id: "b", role: "assistant", text: "", status: "complete", createdAt: now.toISOString(), turnId: "turn", parts: [{ ...source, id: "source-2", title: "Updated title" }] },
+    ]);
+    expect(items[0]).toMatchObject({ type: "assistant", parts: [{ type: "text", text: "Answer" }, { type: "source-url", title: "Updated title" }] });
+    expect(groupAssistantPartRuns([{ type: "text", id: "text", text: "Answer" }, source])).toEqual([{ type: "text", part: { type: "text", id: "text", text: "Answer" } }]);
+  });
 });
 
 describe("Workbench visibility policy", () => {

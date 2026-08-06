@@ -61,6 +61,19 @@ export class NativeStreamProjector {
       else parts.push(part);
     }
 
+    if (chunk.type === "source-url" && typeof payload.sourceId === "string" && typeof payload.url === "string") {
+      const index = parts.findIndex((part) => part.type === "source-url" && part.url === payload.url);
+      const source = {
+        type: "source-url" as const,
+        id: `${runId}:source:${payload.sourceId}`,
+        sourceId: payload.sourceId,
+        url: payload.url,
+        ...(typeof payload.title === "string" ? { title: payload.title } : {}),
+      };
+      if (index >= 0) parts[index] = source;
+      else parts.push(source);
+    }
+
     const toolCallId = typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
     const toolName = typeof payload.toolName === "string" ? payload.toolName : undefined;
     if (toolCallId && toolName && ["tool-call-input-streaming-start", "tool-call", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended"].includes(chunk.type)) {

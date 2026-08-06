@@ -34,6 +34,9 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("search: { topK: 3, minScore: 0.1, autoLoad: true }");
     expect(runtime).toContain("inputProcessors: [toolSearch, nativeToolCallGuard]");
     expect(runtime).toContain("web_fetch: webFetchTool");
+    expect(runtime).toContain('this.snapshot.selectedProviderId === "codex"');
+    expect(runtime).toContain("? webSearchTool");
+    expect(runtime).toContain('openRouterTools.webSearch({ engine: "auto", maxResults: 5 })');
     expect(runtime).toContain("new RequestContext(");
     expect(runtime).toContain("contained: true");
     expect(runtime).toContain("sandboxCacheKey:");

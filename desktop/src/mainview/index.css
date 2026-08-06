@@ -405,6 +405,11 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-completed .tool-status-dot::after { content: "\2713"; }
 @keyframes toolRowArrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .message-status { display: block; margin-top: 7px; color: var(--muted-soft); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.message-sources { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline-soft); color: var(--muted); font-size: 12px; }
+.message-sources > span { display: block; margin-bottom: 6px; color: var(--body-strong); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.message-sources ol { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.message-sources a { display: inline-flex; max-width: 280px; padding: 5px 9px; overflow: hidden; border: 1px solid var(--hairline-soft); border-radius: var(--r-pill); color: var(--muted); text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.message-sources a:hover { border-color: var(--hairline-strong); color: var(--body-strong); }
 .settings-intro { margin: 5px 0 var(--s-base); color: var(--muted); font-size: 13.5px; line-height: 1.5; }
 .key-form { display: flex; align-items: center; gap: var(--s-xs); padding: 6px; border: 1px solid var(--hairline-strong); border-radius: var(--r-pill); background: var(--canvas-soft); }
 .key-form > svg { margin-left: 8px; color: var(--muted); flex-shrink: 0; }

@@ -101,9 +101,17 @@ export const chatToolPartSchema = z.object({
   output: z.unknown().optional(),
   error: z.string().optional(),
 });
-export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema]);
+export const chatSourcePartSchema = z.object({
+  type: z.literal("source-url"),
+  id: z.string().min(1),
+  sourceId: z.string().min(1),
+  url: z.string().url(),
+  title: z.string().optional(),
+});
+export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema, chatSourcePartSchema]);
 export type ChatMessagePart = z.infer<typeof chatMessagePartSchema>;
 export type ChatToolPart = z.infer<typeof chatToolPartSchema>;
+export type ChatSourcePart = z.infer<typeof chatSourcePartSchema>;
 
 export const chatMessageSchema = z.object({
   id: z.string().min(1),

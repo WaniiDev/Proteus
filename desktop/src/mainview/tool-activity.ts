@@ -364,6 +364,12 @@ export function describeToolActivity(tool: ChatToolPart, context: ToolActivityCo
         fullTarget: url, groupKey: "web_fetch", groupLabel: "Fetched", countNoun: "pages", details: [detail("URL", url, true)],
       });
     }
+    case "web_search": {
+      const query = truncate(stringField(input, "query") ?? stringField(input, "searchQuery") ?? "the web", 80);
+      return descriptor(tool, { base: "search the web for", ongoing: "Searching the web for", past: "Searched the web for" }, query, {
+        groupKey: "web_search", groupLabel: "Searched", countNoun: "web searches", details: [detail("Query", query)],
+      });
+    }
     case "get_datetime": {
       const target = stringField(input, "timezone") ?? "local time";
       return descriptor(tool, { base: "check time in", ongoing: "Checking time in", past: "Checked time in" }, target, {
@@ -428,6 +434,7 @@ export function pluralizeCount(noun: string, count: number): string {
     questions: "question",
     tools: "tool",
     "tool searches": "tool search",
+    "web searches": "web search",
     pages: "page",
     times: "time",
     expressions: "expression",

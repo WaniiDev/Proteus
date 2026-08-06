@@ -22,6 +22,7 @@ export function groupAssistantPartRuns(parts: ChatMessagePart[]): AssistantPartR
       runs.push({ type: "text", part });
       continue;
     }
+    if (part.type === "source-url") continue;
     const previous = runs.at(-1);
     if (previous?.type === "tools") previous.tools.push(part);
     else runs.push({ type: "tools", tools: [part] });
@@ -51,6 +52,12 @@ export function groupConversationItems(messages: ChatMessage[]): ConversationIte
     for (const part of message.parts) {
       if (part.type === "text") {
         group.parts.push(part);
+        continue;
+      }
+      if (part.type === "source-url") {
+        const index = group.parts.findIndex((item) => item.type === "source-url" && item.url === part.url);
+        if (index >= 0) group.parts[index] = part;
+        else group.parts.push(part);
         continue;
       }
       const index = group.parts.findIndex((item) => item.type === "tool" && item.toolCallId === part.toolCallId);

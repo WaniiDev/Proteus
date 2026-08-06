@@ -3,6 +3,7 @@ export const APPROVED_PLAN_TOOLS = [
   "ask_user",
   "search_tools",
   "web_fetch",
+  "web_search",
   "get_datetime",
   "calculate",
   "convert_units",

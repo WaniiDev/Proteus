@@ -31,4 +31,11 @@ describe("native Mastra stream projection", () => {
     });
     expect(approval?.message.parts[0]).toMatchObject({ type: "tool", status: "waiting", toolCallId: "call-1", name: "write_file" });
   });
+
+  test("streams and deduplicates provider source URLs", () => {
+    const projector = new NativeStreamProjector();
+    projector.apply("thread-1", { type: "source-url", runId: "run-1", payload: { sourceId: "one", url: "https://example.com/docs", title: "Docs" } });
+    const updated = projector.apply("thread-1", { type: "source-url", runId: "run-1", payload: { sourceId: "two", url: "https://example.com/docs", title: "Updated docs" } });
+    expect(updated?.message.parts).toEqual([{ type: "source-url", id: "run-1:source:two", sourceId: "two", url: "https://example.com/docs", title: "Updated docs" }]);
+  });
 });

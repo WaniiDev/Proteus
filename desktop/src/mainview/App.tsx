@@ -606,6 +606,7 @@ const markdownComponents = {
 function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
   const terminal = messages.at(-1)!;
   const runs = groupAssistantPartRuns(parts);
+  const sources = [...new Map(parts.filter((part): part is Extract<ChatMessage["parts"][number], { type: "source-url" }> => part.type === "source-url").map((source) => [source.url, source])).values()];
   const actionMessage = {
     ...terminal,
     text: parts.filter((part): part is Extract<ChatMessage["parts"][number], { type: "text" }> => part.type === "text").map((part) => part.text).join("\n\n"),
@@ -622,6 +623,12 @@ function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue
         ) : (
           <ToolTimeline key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`} tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} tasks={tasks} />
         ))}
+        {sources.length > 0 && (
+          <nav className="message-sources" aria-label="Sources">
+            <span>Sources</span>
+            <ol>{sources.map((source, index) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title?.trim() || new URL(source.url).hostname || `Source ${index + 1}`}</a></li>)}</ol>
+          </nav>
+        )}
         {(terminal.status === "interrupted" || terminal.status === "error") && <span className="message-status">{terminal.status === "interrupted" ? "Stopped" : "Response failed"}</span>}
         <MessageActions message={actionMessage} onRetry={terminal.status === "error" ? () => onRetry(terminal.id) : undefined} onContinue={terminal.status === "interrupted" ? () => onContinue(terminal.id) : undefined} />
       </div>

@@ -104,6 +104,7 @@ describe("tool activity descriptions", () => {
   it("describes working utilities and dynamic web discovery semantically", () => {
     expect(describeToolActivity(tool("search_tools", "completed", { query: "fetch a web page" })).title).toBe("Found tools for fetch a web page");
     expect(describeToolActivity(tool("web_fetch", "running", { url: "https://mastra.ai/docs" })).title).toBe("Fetching https://mastra.ai/docs");
+    expect(describeToolActivity(tool("web_search", "completed", { query: "Mastra tools" })).title).toBe("Searched the web for Mastra tools");
     expect(describeToolActivity(tool("get_datetime", "completed", { timezone: "Asia/Bangkok" })).title).toBe("Checked time in Asia/Bangkok");
     expect(describeToolActivity(tool("calculate", "completed", { expression: "2 + 2" })).title).toBe("Calculated 2 + 2");
     expect(describeToolActivity(tool("convert_units", "completed", { value: 1, from: "km", to: "m" })).title).toBe("Converted 1 km to m");
