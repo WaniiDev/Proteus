@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkbenchTask, WorkspaceBinding } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
@@ -603,7 +603,7 @@ const markdownComponents = {
   },
 };
 
-function AssistantTurn({ messages, parts, pendingIds, onRetry, onContinue }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
+function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
   const terminal = messages.at(-1)!;
   const runs = groupAssistantPartRuns(parts);
   const actionMessage = {
@@ -620,7 +620,7 @@ function AssistantTurn({ messages, parts, pendingIds, onRetry, onContinue }: { m
             </ReactMarkdown>
           </div>
         ) : (
-          <ToolTimeline key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`} tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} />
+          <ToolTimeline key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`} tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} tasks={tasks} />
         ))}
         {(terminal.status === "interrupted" || terminal.status === "error") && <span className="message-status">{terminal.status === "interrupted" ? "Stopped" : "Response failed"}</span>}
         <MessageActions message={actionMessage} onRetry={terminal.status === "error" ? () => onRetry(terminal.id) : undefined} onContinue={terminal.status === "interrupted" ? () => onContinue(terminal.id) : undefined} />
@@ -859,7 +859,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                     <MessageActions message={item.message} />
                   </div>
                 ) : (
-                  <AssistantTurn key={item.id} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} onRetry={onRetry} onContinue={onContinue} />
+                  <AssistantTurn key={item.id} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} />
                 ),
               )}
               {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} />)}

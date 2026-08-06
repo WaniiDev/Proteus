@@ -373,7 +373,10 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-disclosure-chevron { width: 7px; height: 7px; justify-self: center; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-1px,-1px); transition: transform .18s ease; }
 .tool-timeline-disclosure[open] .tool-disclosure-chevron { transform: rotate(225deg) translate(-1px,-1px); }
 .tool-list { border-bottom: 1px solid var(--hairline); }
-.tool-row { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 0; border-top: 1px solid var(--hairline-soft); }
+.tool-row-disclosure { border-top: 1px solid var(--hairline-soft); }
+.tool-row { display: grid; grid-template-columns: 20px minmax(0,1fr) 18px; align-items: center; gap: 9px; padding: 9px 0; cursor: pointer; list-style: none; }
+.tool-row::-webkit-details-marker { display: none; }
+.tool-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--g-mint) 62%, transparent); outline-offset: -2px; border-radius: var(--r-sm); }
 .tool-timeline-live .tool-row { animation: toolRowArrive 180ms ease-out both; }
 .tool-status-dot { width: 18px; height: 18px; border: 1px solid var(--hairline-strong); border-radius: 50%; position: relative; }
 .tool-running .tool-status-dot::after, .tool-streaming_input .tool-status-dot::after, .tool-waiting .tool-status-dot::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--g-mint); animation: dotPulse 1.2s ease-in-out infinite; }
@@ -381,9 +384,25 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-completed .tool-status-dot::after { content: "✓"; display: grid; place-items: center; color: white; font-size: 10px; }
 .tool-error .tool-status-dot, .tool-declined .tool-status-dot, .tool-cancelled .tool-status-dot { border-color: var(--error); }
 .tool-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.tool-row-copy b { color: var(--body-strong); font-weight: 550; }
+.tool-row-title { display: flex; min-width: 0; align-items: baseline; gap: 6px; color: var(--body-strong); font-weight: 430; }
+.tool-action { flex: 0 0 auto; }
+.tool-target { min-width: 0; overflow: hidden; padding: 0; background: transparent; color: color-mix(in srgb, var(--body-strong) 76%, var(--muted)); font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .tool-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-soft); }
-.tool-state { color: var(--muted-soft); font-size: 10px; text-transform: capitalize; }
+.tool-error .tool-action, .tool-declined .tool-action, .tool-cancelled .tool-action { color: var(--error); }
+.tool-row-chevron { width: 7px; height: 7px; justify-self: center; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-1px,-1px); transition: transform .18s ease; }
+.tool-row-disclosure[open] .tool-row-chevron { transform: rotate(225deg) translate(-1px,-1px); }
+.tool-row-details { margin: 0 0 10px 29px; padding: 9px 12px; border: 1px solid var(--hairline-soft); border-radius: var(--r-sm); background: color-mix(in srgb, var(--canvas-soft) 68%, transparent); }
+.tool-row-details dl { display: grid; gap: 7px; margin: 0; }
+.tool-row-details dl > div { display: grid; grid-template-columns: minmax(82px,.24fr) minmax(0,1fr); gap: 12px; }
+.tool-row-details dt { color: var(--muted-soft); }
+.tool-row-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--body); }
+.tool-row-details dd.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11px; }
+.tool-raw-disclosure { margin-top: 9px; border-top: 1px solid var(--hairline-soft); padding-top: 7px; }
+.tool-raw-disclosure > summary { width: fit-content; cursor: pointer; color: var(--muted-soft); list-style-position: inside; }
+.tool-raw-disclosure > summary:focus-visible { outline: 2px solid color-mix(in srgb, var(--g-mint) 62%, transparent); outline-offset: 2px; border-radius: 3px; }
+.tool-raw-disclosure pre { max-height: 260px; margin: 8px 0 0; overflow: auto; padding: 10px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--body-strong) 5%, transparent); color: var(--muted); font: 10.5px/1.5 "SFMono-Regular", Consolas, "Liberation Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-group-label + .tool-group-label::before { content: "\00b7"; }
+.tool-completed .tool-status-dot::after { content: "\2713"; }
 @keyframes toolRowArrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .message-status { display: block; margin-top: 7px; color: var(--muted-soft); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
 .settings-intro { margin: 5px 0 var(--s-base); color: var(--muted); font-size: 13.5px; line-height: 1.5; }
