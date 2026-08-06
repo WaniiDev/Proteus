@@ -1,5 +1,6 @@
 import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
 import { NativeStreamProjector } from "./native-stream-projection";
+import type { RequestContext } from "@mastra/core/request-context";
 
 type NativeThreadSubscription = {
   stream: AsyncIterable<NativeAgentChunk>;
@@ -19,7 +20,7 @@ export type NativeQueueAgent = {
   subscribeToThread(options: { resourceId: string; threadId: string }): Promise<NativeThreadSubscription>;
   queueMessage(
     message: { contents: string; metadata?: Record<string, unknown> },
-    options: { resourceId: string; threadId: string },
+    options: { resourceId: string; threadId: string; ifIdle?: { streamOptions?: { requestContext?: RequestContext<any> } } },
   ): { accepted: Promise<NativeQueueAccepted> };
   sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown; streamOptions?: { activeTools?: string[] } }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
   listSuspendedRuns?(options: { resourceId: string; threadId: string }): Promise<{
@@ -46,9 +47,9 @@ export class NativeAgentDriver {
     private readonly callbacks: NativeAgentDriverCallbacks,
   ) {}
 
-  async queue(threadId: string, text: string, metadata?: Record<string, unknown>): Promise<{ runId: string; queued: boolean }> {
+  async queue(threadId: string, text: string, metadata?: Record<string, unknown>, requestContext?: RequestContext<any>): Promise<{ runId: string; queued: boolean }> {
     await this.ensureSubscription(threadId);
-    const result = this.agent.queueMessage({ contents: text, ...(metadata ? { metadata } : {}) }, { resourceId: this.resourceId, threadId });
+    const result = this.agent.queueMessage({ contents: text, ...(metadata ? { metadata } : {}) }, { resourceId: this.resourceId, threadId, ...(requestContext ? { ifIdle: { streamOptions: { requestContext } } } : {}) });
     const accepted = await result.accepted;
     if (accepted.action === "blocked") throw new Error("This conversation is waiting for a suspended tool response.");
     if (accepted.action === "persist" || accepted.action === "discard") throw new Error("Mastra accepted the message without starting or queueing a run.");

@@ -7,6 +7,7 @@ import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
 import { Mastra } from "@mastra/core/mastra";
+import { RequestContext } from "@mastra/core/request-context";
 import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { askUserTool, submitPlanTool, TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
@@ -405,6 +406,9 @@ export class TextRuntime {
   private readonly nativeSuspensions = new Map<string, { runId: string; threadId: string }>();
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
+  private readonly agentWorkspace: Workspace;
+  private readonly workspaceFilesystems = new Map<string, LocalFilesystem>();
+  private readonly appWorkspaceRoot = join(Utils.paths.userData, "proteus-workspace-v1");
   private readonly agent: Agent;
   private readonly mastra: Mastra;
   private readonly codexGateway: MastraCodeGateway;
@@ -510,6 +514,21 @@ export class TextRuntime {
         [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: { enabled: true, name: "write_plan", requireApproval: false, requireReadBeforeWrite: false },
       },
     });
+    this.agentWorkspace = new Workspace({
+      id: "proteus-agent-workspace",
+      name: "Proteus workspace",
+      filesystem: ({ requestContext }) => {
+        const rootPath = requestContext.get("proteus-workspace-root") as string | undefined;
+        if (!rootPath || !isAbsolute(rootPath)) throw new Error("No trusted workspace is available for this chat");
+        let filesystem = this.workspaceFilesystems.get(rootPath);
+        if (!filesystem) {
+          filesystem = new LocalFilesystem({ basePath: rootPath, contained: true, instructions: "This is the fixed workspace selected when the chat was created." });
+          this.workspaceFilesystems.set(rootPath, filesystem);
+        }
+        return filesystem;
+      },
+      tools: { enabled: false },
+    });
     this.memory = new Memory({
       storage: this.storage,
       vector: false,
@@ -583,6 +602,7 @@ export class TextRuntime {
       gateways: { "models.dev": openRouterGateway, mastracode: this.codexGateway },
       logger: false,
     });
+    this.mastra.addWorkspace(this.agentWorkspace, "proteus-agent-workspace");
   }
 
   /** Release the Mastra-owned workspace, event engine, and storage handles once. */
@@ -591,6 +611,8 @@ export class TextRuntime {
       try {
         await this.mastra.shutdown();
       } finally {
+        await Promise.all([...this.workspaceFilesystems.values()].map((filesystem) => filesystem.destroy()));
+        this.workspaceFilesystems.clear();
         await this.appStorage.close();
       }
     })();
@@ -1115,6 +1137,22 @@ export class TextRuntime {
     if (binding.kind === "app") return { binding, label: "Proteus workspace", availability: "ready" };
     const project = projects.find((item) => item.id === binding.projectId);
     return { binding, label: project?.name ?? "Missing project", availability: project?.availability ?? "missing" };
+  }
+
+  private async requestContextFor(threadId: string): Promise<RequestContext> {
+    const state = await this.loadThreadState(threadId);
+    const binding = state.workspaceBinding ?? { kind: "app" as const };
+    let rootPath = this.appWorkspaceRoot;
+    if (binding.kind === "project") {
+      const project = (await this.projectSummaries()).find((item) => item.id === binding.projectId);
+      if (!project || project.availability !== "ready") throw new Error("This chat's project folder is unavailable. Reconnect it from Projects before continuing.");
+      rootPath = project.rootPath;
+    }
+    return new RequestContext([
+      ["proteus-thread-id", threadId],
+      ["proteus-workspace-root", rootPath],
+      ["proteus-workspace-kind", binding.kind],
+    ]);
   }
 
   private async syncMessages(threadId = this.selectedThreadId ?? undefined, guard?: { selectionGeneration?: number; syncGeneration?: number }, assistantRunId?: string): Promise<boolean> {
@@ -1708,7 +1746,7 @@ export class TextRuntime {
       });
       this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), error: null, retryMessageId: null });
     }
-    const result = await this.nativeDriver.queue(threadId, candidate, { clientMessageId: messageId });
+    const result = await this.nativeDriver.queue(threadId, candidate, { clientMessageId: messageId }, await this.requestContextFor(threadId));
     if (!result.queued) {
       this.runClientMessageId = options.optimistic === false ? null : messageId;
       this.runId = result.runId;

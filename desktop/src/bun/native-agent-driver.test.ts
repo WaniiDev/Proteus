@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
+import { RequestContext } from "@mastra/core/request-context";
 
 async function* noChunks() {}
 async function* pendingChunks() { await new Promise<void>(() => undefined); }
@@ -37,6 +38,19 @@ describe("native Mastra agent driver", () => {
     expect(driver.abort("thread-1")).toBeTrue();
     expect(aborted).toBeTrue();
     expect(counts).toEqual([1]);
+  });
+
+  test("passes the server-built RequestContext through Mastra's idle stream options", async () => {
+    let received: unknown;
+    const context = new RequestContext([["proteus-thread-id", "thread-1"], ["proteus-workspace-root", "C:\\trusted"]]);
+    const agent: NativeQueueAgent = {
+      subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
+      queueMessage: (_message, options) => { received = options; return { accepted: Promise.resolve({ action: "deliver", runId: "run-1" }) }; },
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+    };
+    const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
+    await driver.queue("thread-1", "hello", undefined, context);
+    expect(received).toEqual({ resourceId: "local-user", threadId: "thread-1", ifIdle: { streamOptions: { requestContext: context } } });
   });
 
   test("acknowledges native suspension resumption without waiting for run completion", async () => {
