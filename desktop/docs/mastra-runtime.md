@@ -8,7 +8,23 @@ Proteus uses the installed Mastra `Agent` as its run, queue, suspension, history
 - Every response includes the exact `toolCallId`; Proteus never relies on Mastra's most-recent-call fallback.
 - Persistent LibSQL storage supplies canonical message history and suspended run snapshots. `toAISdkV5Messages()` converts stored history for rendering.
 - `TaskSignalProvider` owns task state and supplies the native task tools and task-state input processor.
-- `Workspace` supplies contained filesystem tools. The native `read_file` and `write_file` capabilities are exposed privately as `read_plan` and `write_plan`.
+- A resolver-backed `Workspace` supplies native filesystem and command tools. Proteus builds a server-owned `RequestContext` for every idle wake; the renderer never supplies a filesystem root.
+- Plan drafts remain in a separate contained `Workspace`. Its native read/write capabilities are exposed privately as `read_plan` and `write_plan`.
+
+## Workspace boundary
+
+Each conversation has an immutable workspace binding: either the private Proteus app workspace or one attached project folder. Existing conversations migrate to the app workspace. Project records live in a Mastra `FactoryStorageDomain`; conversation metadata stores only the binding. If an attached folder is moved, deleted, or forgotten, the chat becomes explicitly unavailable until the user reconnects it. Proteus never silently redirects it to the app workspace.
+
+`RequestContext` carries the trusted thread ID, workspace kind, and canonical root from the Bun runtime into `Agent.queueMessage()` through `ifIdle.streamOptions`. A dynamic `LocalFilesystem` is constructed with `contained: true`, so traversal and symlink escapes outside that root are rejected by Mastra.
+
+The filesystem tool allowlist is deny-by-default:
+
+- Read, list, stat, and grep run automatically.
+- Write and edit require approval and Mastra's `requireReadBeforeWrite` protection.
+- Directory creation and deletion require approval.
+- AST editing, indexed search, LSP, browser, and skills are not enabled.
+
+Commands use a resolver-backed `LocalSandbox`, keyed by conversation ID for background-process continuity. Execute and kill require approval; reading process output does not. Resolver-created filesystem and sandbox providers are owned and destroyed by Proteus. On Windows, `LocalSandbox` uses `isolation: "none"`: commands run on the host from the selected working directory, so the approval card and agent instructions state that limitation explicitly.
 
 The Mastra `AgentController` beta API is deliberately not part of this runtime. Its controller session state and grants are process-local in Mastra 1.56, while Proteus requires approvals to survive refreshes and restarts.
 
@@ -47,13 +63,13 @@ Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: fal
 
 ## Storage and packaging
 
-The runtime uses `proteus-v2.db` and `proteus-plans-v2`. A one-time allowlisted cutover removes only legacy v1 database/session files. Credential Manager data is untouched.
+The runtime uses `proteus-v3.db`, `proteus-plans-v2`, and the app-owned `proteus-workspace-v1` directory. A one-time allowlisted cutover removes only legacy v1 database/session files. Credential Manager data is untouched.
 
 The Electrobun bundle includes the MastraCode OAuth gateway runtime. Optional Stagehand and Playwright subsystems are external because Proteus does not enable them. Docker is not required.
 
 ## Backlog
 
-- Expand the contained Workspace tool catalog only after reviewing each native tool's approval policy.
+- Evaluate search, skills, AST editing, and LSP separately before expanding the explicit Workspace allowlist.
 - Add durable session-level trust when Mastra provides a restart-safe native grant path or a deliberately scoped persistence design is approved.
 - Keep observability backends out of scope; local diagnostics remain sufficient for this application.
 

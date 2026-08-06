@@ -28,7 +28,11 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("memory: this.memory");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
-    expect(runtime).toContain("workspace: this.workspace");
+    expect(runtime).toContain("workspace: this.agentWorkspace");
+    expect(runtime).toContain("new RequestContext(");
+    expect(runtime).toContain("contained: true");
+    expect(runtime).toContain("sandboxCacheKey:");
+    expect(runtime).toContain('isolation: "none"');
     expect(runtime).not.toContain("session.subscribe((event)");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.steer");
@@ -38,6 +42,19 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes");
     expect(app.toLowerCase()).not.toContain("previous decisions");
     expect(app).not.toContain("TypingDots");
+  });
+
+  it("keeps workspace roots server-owned and chat bindings immutable", async () => {
+    const [runtime, contracts, entry] = await Promise.all([
+      readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
+      readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
+      readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
+    ]);
+    expect(runtime).toContain("requestContextFor(threadId)");
+    expect(runtime).toContain("The selected project folder is unavailable");
+    expect(contracts).toContain("workspaceBindingSchema");
+    expect(contracts).not.toContain('"threads.workspace.update"');
+    expect(entry).not.toContain("rootPath }");
   });
 
   it("removes the retired ACP runtime and packaged adapter", async () => {
