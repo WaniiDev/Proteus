@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatToolPart } from "../shared/contracts";
 import { ToolTimeline } from "./ToolTimeline";
+
+const css = readFileSync(new URL("./index.css", import.meta.url), "utf8");
 
 function tool(toolCallId: string, name: string, status: ChatToolPart["status"], input?: unknown, output?: unknown): ChatToolPart {
   return {
@@ -17,7 +20,7 @@ function tool(toolCallId: string, name: string, status: ChatToolPart["status"], 
 }
 
 describe("ToolTimeline", () => {
-  it("shows three or fewer semantic tool rows inline", () => {
+  it("shows one or two semantic rows without a redundant tool-count heading", () => {
     const html = renderToStaticMarkup(
       <ToolTimeline
         tools={[
@@ -29,7 +32,7 @@ describe("ToolTimeline", () => {
       />,
     );
 
-    expect(html).toContain("Using tools");
+    expect(html).not.toContain("Using tools");
     expect(html).toContain("Searched");
     expect(html).toContain("desktop/src for ToolTimeline");
     expect(html).toContain("Reading");
@@ -38,8 +41,26 @@ describe("ToolTimeline", () => {
     expect(html).not.toContain("Mastra Workspace");
     expect(html).not.toContain("<b>");
     expect(html).not.toContain("tool-state");
+    expect(html).not.toContain("tool-row-chevron");
     expect(html).not.toContain("Completed</span>");
     expect(html).not.toContain("tool-timeline-disclosure");
+  });
+
+  it("keeps the tool-count heading hidden for three inline calls", () => {
+    const html = renderToStaticMarkup(
+      <ToolTimeline
+        tools={[
+          tool("one", "mastra_workspace_read_file", "completed", { path: "one.ts" }),
+          tool("two", "mastra_workspace_read_file", "completed", { path: "two.ts" }),
+          tool("three", "mastra_workspace_read_file", "running", { path: "three.ts" }),
+        ]}
+        live
+        pendingIds={new Set()}
+      />,
+    );
+
+    expect(html).not.toContain("Using tools");
+    expect(html).toContain("tool-running");
   });
 
   it("collapses a completed run with action-count summaries", () => {
@@ -58,6 +79,7 @@ describe("ToolTimeline", () => {
     );
 
     expect(html).toContain('<details class="tool-timeline-disclosure">');
+    expect(html).toContain("Tools used");
     expect(html).toContain("Wrote 2 plans");
     expect(html).toContain("Submitted 2 plans");
     expect(html).toContain("Read 1 plan");
@@ -94,6 +116,7 @@ describe("ToolTimeline", () => {
     );
 
     expect(html).not.toContain("tool-timeline-disclosure");
+    expect(html).not.toContain("tool-timeline-head");
   });
 
   it("renders expandable human and sanitized raw details", () => {
@@ -129,5 +152,13 @@ describe("ToolTimeline", () => {
     expect(html).not.toContain("Which design?");
     expect(html).toContain("Updated");
     expect(html).toContain("Review the design");
+  });
+
+  it("uses a spinner for active calls and respects reduced motion", () => {
+    expect(css).toContain(".tool-running .tool-status-dot, .tool-streaming_input .tool-status-dot");
+    expect(css).toContain("animation: toolIconSpin .72s linear infinite");
+    expect(css).toContain("@keyframes toolIconSpin");
+    expect(css).toMatch(/prefers-reduced-motion[\s\S]*\.tool-status-dot[^}]*animation:\s*none\s*!important/);
+    expect(css).not.toContain(".tool-row-chevron");
   });
 });

@@ -374,12 +374,13 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-timeline-disclosure[open] .tool-disclosure-chevron { transform: rotate(225deg) translate(-1px,-1px); }
 .tool-list { border-bottom: 1px solid var(--hairline); }
 .tool-row-disclosure { border-top: 1px solid var(--hairline-soft); }
-.tool-row { display: grid; grid-template-columns: 20px minmax(0,1fr) 18px; align-items: center; gap: 9px; padding: 9px 0; cursor: pointer; list-style: none; }
+.tool-row { display: grid; grid-template-columns: 20px minmax(0,1fr); align-items: center; gap: 9px; padding: 9px 0; cursor: pointer; list-style: none; }
 .tool-row::-webkit-details-marker { display: none; }
 .tool-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--g-mint) 62%, transparent); outline-offset: -2px; border-radius: var(--r-sm); }
 .tool-timeline-live .tool-row { animation: toolRowArrive 180ms ease-out both; }
 .tool-status-dot { width: 18px; height: 18px; border: 1px solid var(--hairline-strong); border-radius: 50%; position: relative; }
-.tool-running .tool-status-dot::after, .tool-streaming_input .tool-status-dot::after, .tool-waiting .tool-status-dot::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--g-mint); animation: dotPulse 1.2s ease-in-out infinite; }
+.tool-running .tool-status-dot, .tool-streaming_input .tool-status-dot { border-width: 1.5px; border-color: var(--hairline-strong); border-top-color: var(--g-mint); animation: toolIconSpin .72s linear infinite; }
+.tool-waiting .tool-status-dot::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--g-mint); animation: dotPulse 1.2s ease-in-out infinite; }
 .tool-completed .tool-status-dot { background: var(--body-strong); border-color: var(--body-strong); }
 .tool-completed .tool-status-dot::after { content: "✓"; display: grid; place-items: center; color: white; font-size: 10px; }
 .tool-error .tool-status-dot, .tool-declined .tool-status-dot, .tool-cancelled .tool-status-dot { border-color: var(--error); }
@@ -389,8 +390,6 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-target { min-width: 0; overflow: hidden; padding: 0; background: transparent; color: color-mix(in srgb, var(--body-strong) 76%, var(--muted)); font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .tool-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-soft); }
 .tool-error .tool-action, .tool-declined .tool-action, .tool-cancelled .tool-action { color: var(--error); }
-.tool-row-chevron { width: 7px; height: 7px; justify-self: center; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-1px,-1px); transition: transform .18s ease; }
-.tool-row-disclosure[open] .tool-row-chevron { transform: rotate(225deg) translate(-1px,-1px); }
 .tool-row-details { margin: 0 0 10px 29px; padding: 9px 12px; border: 1px solid var(--hairline-soft); border-radius: var(--r-sm); background: color-mix(in srgb, var(--canvas-soft) 68%, transparent); }
 .tool-row-details dl { display: grid; gap: 7px; margin: 0; }
 .tool-row-details dl > div { display: grid; grid-template-columns: minmax(82px,.24fr) minmax(0,1fr); gap: 12px; }
@@ -404,6 +403,7 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .tool-group-label + .tool-group-label::before { content: "\00b7"; }
 .tool-completed .tool-status-dot::after { content: "\2713"; }
 @keyframes toolRowArrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toolIconSpin { to { transform: rotate(360deg); } }
 .message-status { display: block; margin-top: 7px; color: var(--muted-soft); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
 .message-sources { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline-soft); color: var(--muted); font-size: 12px; }
 .message-sources > span { display: block; margin-bottom: 6px; color: var(--body-strong); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
@@ -625,7 +625,7 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 }
 @media (prefers-reduced-motion: reduce) {
   .conversation-row-actions { transition: none; }
-  .tool-status-dot::after, .tool-timeline-live .tool-row { animation: none !important; }
+  .tool-status-dot, .tool-status-dot::after, .tool-timeline-live .tool-row { animation: none !important; }
 }
 
 /* Conversation workspace: Chat and relevant Workbench content share the

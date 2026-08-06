@@ -65,7 +65,6 @@ function ToolRows({ tools }: { tools: DescribedTool[] }) {
               </span>
               {activity.outcome && <small>{activity.outcome}</small>}
             </span>
-            <span className="tool-row-chevron" aria-hidden="true" />
           </summary>
           <div className="tool-row-details">
             {activity.details.length > 0 && (
@@ -133,10 +132,7 @@ export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: C
           <ToolRows tools={described} />
         </details>
       ) : (
-        <>
-          <TimelineHeading live={live} count={visible.length} />
-          <ToolRows tools={described} />
-        </>
+        <ToolRows tools={described} />
       )}
     </section>
   );
