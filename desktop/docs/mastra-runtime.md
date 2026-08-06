@@ -1,73 +1,62 @@
 # Mastra runtime ownership
 
-Proteus treats the installed Mastra APIs as the runtime source of truth:
+Proteus uses the installed Mastra `Agent` as its run, queue, suspension, history, memory, task, and storage backbone. The desktop runtime is an adapter: it projects framework state into an Electrobun IPC snapshot and never maintains a second run lifecycle.
 
-- `AgentController` and `Session` own runs, threads, model switching, steering, follow-ups, approvals, and suspensions.
-- `Session.thread.listMessages()` supplies canonical history; `toAISdkV5Messages()` converts it for rendering, including historical tool calls.
-- `TaskSignalProvider` owns task state and supplies all four native task tools plus its task-state input processor. Proteus hooks enforce a monotonic boundary around each native task-list revision; they do not maintain or persist a parallel task machine.
-- The native workspace `read_file` and `write_file` tools are remapped to `read_plan` and `write_plan`. Native `submit_plan` suspends on a relative Markdown path and resumes with Mastra's documented decision payload.
-- `Session.followUp()` owns queued messages. The UI displays `displayState.queuedFollowUps` as a count and does not expose unsupported editing or restore operations.
+- `Agent.queueMessage()` and `Agent.subscribeToThread()` own queued and active turns.
+- `Agent.listSuspendedRuns()` is the canonical recovery source for both `requireApproval` calls and tools paused with `suspend()`.
+- `Agent.sendToolApproval()` resolves `requireApproval` calls. `Agent.sendStreamResume()` resolves `ask_user` and `submit_plan` suspensions.
+- Every response includes the exact `toolCallId`; Proteus never relies on Mastra's most-recent-call fallback.
+- Persistent LibSQL storage supplies canonical message history and suspended run snapshots. `toAISdkV5Messages()` converts stored history for rendering.
+- `TaskSignalProvider` owns task state and supplies the native task tools and task-state input processor.
+- `Workspace` supplies contained filesystem tools. The native `read_file` and `write_file` capabilities are exposed privately as `read_plan` and `write_plan`.
 
-## Task completion boundary
+The Mastra `AgentController` beta API is deliberately not part of this runtime. Its controller session state and grants are process-local in Mastra 1.56, while Proteus requires approvals to survive refreshes and restarts.
 
-Mastra's documented tool hooks and `Agent.defaultOptions.prepareStep` are the run-loop boundary. `TaskSignalProvider` and its store remain the only task-state source of truth. Within one `task_write` revision, a completed task ID cannot be moved back to `pending` or `in_progress` with `task_update`; an intentional replan must replace the revision through the native `task_write` tool.
+## Approval and suspension boundary
 
-The agent-level `beforeToolCall` hook rejects duplicate, no-op, and completed-to-incomplete mutations before the native tool executes. It returns the latest successful native-shaped snapshot with `isError: false`, explains that state did not change, and identifies the next incomplete stable task ID. Mastra does not invoke `afterToolCall` for a short-circuited call, so correction attempts are counted in `beforeToolCall`: the first correction gives the model a chance to recover, while a second blocked mutation latches a text-only escape. `afterToolCall` records only real native results, retains the last successful snapshot across native errors, and uses a bounded six-snapshot history to detect an A-B-A recurrence without introducing durable state.
+Mastra has two distinct human-in-the-loop paths and Proteus preserves that distinction:
 
-`prepareStep` resolves the exact controller thread from `RequestContext`. It returns `toolChoice: "none"` after a successful terminal `task_check`, after the second blocked mutation, or after a bounded recurrence. This gives the model one final normal response instead of another tool call. A successful `task_write` starts a new canonical revision, so deliberate replanning remains available through the framework.
+1. A tool configured with `requireApproval: true` emits `tool-call-approval`. Proteus shows the emitted tool name and exact arguments, then calls `sendToolApproval()` with the stored `toolCallId`.
+2. A tool calling `suspend()` emits `tool-call-suspended`. `ask_user` resumes with schema-valid answer data; `submit_plan` resumes with `{ action: "approved" | "rejected", feedback? }`.
 
-Live tool rows settle from `AgentController`'s `tool_end` event. For canonical history, successful input-only task calls are reconciled with Mastra's persisted `current-task-list` and `task-list-update` signals. Explicit live or persisted tool errors take precedence over inferred success.
+Before applying any decision, Proteus re-runs `listSuspendedRuns()` for the conversation and requires an exact thread, run, and tool-call match. Generic approvals also carry a stable SHA-256 fingerprint of the canonical tool name and arguments shown to the user. If the current stored request differs, the old approval is rejected. The renderer receives only this projected pending-action state; historical message metadata is never treated as proof that an action remains pending.
 
-Historical rendering suppresses only the two exact errors emitted by Proteus' retired task-loop guard when an identical successful tool call already exists in that user turn. It also collapses duplicate successful terminal checks with the same completed snapshot. Current native calls and successful policy corrections remain visible once as truthful tool rows; the UI never hides or rewrites a real state regression. Other native task errors remain visible, and stored Mastra messages are never rewritten.
+The response RPC waits until Mastra accepts `sendToolApproval()` or `sendStreamResume()`. It does not wait for the resumed model turn or tool execution to finish. This is the framework's acknowledgement boundary and prevents both false “failed” results after a successful response and premature UI completion.
 
-Approval recovery is derived only from the current `Session.approval`, `displayState.pendingApproval`, and controller events. Persisted message metadata is historical context, not proof that an approval is currently pending.
+Pending actions use one UI model for approvals, questions, and plan review. Multiple tool calls remain distinct by `runId` plus `toolCallId`; resolving one cannot overwrite another. A refresh or process restart reconstructs them from Mastra storage.
 
-## Plan approval boundary
+Session-scoped “trust this tool” grants remain backlog work. They must not be added until they can be made durable without reintroducing an independent approval lifecycle.
 
-`read_plan` and `write_plan` operate only inside the contained private plan workspace and receive documented Session grants, so they never create a second generic approval checkpoint. `submit_plan` remains the sole human checkpoint and uses Mastra's native suspension/resume data.
+## Plan boundary
 
-The default conversation mode transitions to an approved-plan mode on approval. That mode excludes `write_plan` and `submit_plan`; rejection stays in the conversation mode so the model can revise and resubmit. Mastra 1.56 can carry the prior mode's tools into the resumed step, so the same approved-mode allowlist is re-applied through the documented `prepareStep.activeTools` boundary. A later top-level user message restores the conversation mode while preserving the selected model.
+`write_plan` is a private contained-workspace operation and does not require a second approval. `submit_plan` is the sole plan checkpoint and uses Mastra's native suspension/resume contract. Approval resumes with the approved implementation-tool allowlist; rejection leaves plan authoring available for revision.
 
-Proteus exposes one model selection even though Mastra stores models per mode. A user selection is persisted to both internal modes with the documented `session.model.switch({ modelId, modeId, scope: "thread" })` API, and approval backfills the target mode before Mastra performs its native transition. Restoring conversation mode relies on Mastra's saved per-mode model and never copies the outgoing execution-mode model over it.
+Plan Markdown is hydrated from the contained plan filesystem. Repeated suspension projections preserve the existing interaction state and version. A plan tool row is not marked complete until Mastra accepts the resume and the canonical stream/history settles it.
 
-The contained plan filesystem is an available internal capability, not an external action. An explicit request to create, write, show, test, or demonstrate a plan—including placeholder plans—must write one Markdown draft with `write_plan` and submit that path once with `submit_plan`; the assistant must not claim plan-file writing is unavailable after a successful write.
+## Task boundary
 
-`Session.displayState.pendingSuspensions` and `Session.suspensions` are authoritative for live plan cards. Plan Markdown is hydrated once per unique tool-call ID, and repeated display snapshots preserve the existing version and `resolving` status. A response is accepted only after the native resume boundary completes without an emitted error; terminal tool events and canonical history are used as stronger evidence when the installed runtime provides them.
+`TaskSignalProvider` and its store remain the only durable task-state source. Proteus may reject duplicate/no-op mutations at the agent hook boundary and project native task signals onto historical tool rows, but it does not persist a parallel task machine or rewrite stored Mastra messages.
 
-Mastra 1.56 does not emit `tool_end` for a resumed `submit_plan` call. After the successful native resume boundary removes that suspension, Proteus projects the original visible tool-call ID to `completed`; it never settles the row before Mastra confirms the resume.
+Historical rendering removes only artifacts emitted by the retired task-loop guard when an identical successful call already exists in the same turn. Genuine native task errors remain visible.
 
-## Compatibility boundary
+## Providers
 
-`runtime.ts` projects Mastra state into the desktop IPC snapshot. This layer may sanitize tool payloads and shape display data, but it must not duplicate Mastra lifecycle ownership. The OpenRouter catalog endpoint remains provider-specific because the product displays modality and descriptive metadata outside Mastra's `AvailableModel` contract; selection still uses `Session.model.switch()`.
+OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with the conversation; there is no silent fallback to OpenRouter.
 
-## Primary providers
+Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: false`. MastraCode owns ChatGPT OAuth and model construction. Credentials remain in Windows Credential Manager and never enter IPC snapshots, messages, diagnostics, thread metadata, or plan files.
 
-OpenRouter and Codex are alternative primary providers. A conversation persists its provider, provider model ID, and optional reasoning effort in the existing thread metadata. There is no provider delegation and no silent fallback to OpenRouter.
+## Storage and packaging
 
-OpenRouter continues through `AgentController` and `Session.sendSignal()`. Its catalog is merged into the provider-neutral snapshot, and supported reasoning effort is read from OpenRouter's per-model `reasoning.supported_efforts` metadata. The chosen effort is attached to the user signal as `providerOptions.openrouter.reasoning.effort`, using Mastra's documented provider-options boundary.
+The runtime uses `proteus-v2.db` and `proteus-plans-v2`. A one-time allowlisted cutover removes only legacy v1 database/session files. Credential Manager data is untouched.
 
-Codex uses MastraCode's upstream `MastraCodeGateway` with `routeThroughMastraGateway: false`. The gateway owns ChatGPT OAuth authentication and constructs the OpenAI Codex language model; Proteus does not implement a second provider client. The same `Agent`, `AgentController`, and `Session.sendSignal()` path handles Codex and OpenRouter, so instructions, tasks, plans, approvals, memory, history, steering, cancellation, and display events have one lifecycle owner.
+The Electrobun bundle includes the MastraCode OAuth gateway runtime. Optional Stagehand and Playwright subsystems are external because Proteus does not enable them. Docker is not required.
 
-The upstream `createModelCatalogProvider()` supplies authenticated OpenAI catalog entries. Proteus filters that catalog to GPT-5-family models, applies MastraCode's `remapOpenAIModelForCodexOAuth()`, and exposes stable product IDs as `codex/<model>`. Mastra's internal session modes receive `openai/<model>` through the documented `session.model.switch({ modelId, modeId, scope: "thread" })` API. Legacy ACP composite selections are migrated once to a stable model ID plus separate reasoning effort.
+## Backlog
 
-Codex reasoning uses MastraCode's public `ThinkingLevel` contract (`low`, `medium`, `high`, `xhigh`) and defaults to `medium`. A gateway instance is resolved for each run with the conversation's current thinking level. GPT-5 reasoning floors and provider request shaping remain upstream behavior.
-
-## ChatGPT OAuth and credential boundary
-
-MastraCode's `loginOpenAICodex()` owns browser callback and device-code authorization. Proteus exposes progress only as provider, mode, status, URL, user code, instructions, and a safe error. Browser authorization opens through Electrobun, supports manual callback URL/code entry, and can be cancelled; device authorization is the fallback for blocked localhost callbacks.
-
-OAuth access/refresh credentials remain exclusively in Windows Credential Manager through an injected structural `CredentialStore`. Because Windows generic credentials cap each UTF-16 value at 1,280 characters, `openai-codex.oauth` is an atomic checksum manifest whose generation-scoped chunk accounts hold the serialized credential below that platform limit. A new generation becomes live only after every chunk is stored. `allowEnvironmentFallback` is false, expired-token refresh uses upstream `refreshOpenAICodexToken()`, and concurrent refreshes share one in-flight promise. Tokens, account IDs, and raw OAuth failures never enter IPC snapshots, messages, logs, thread metadata, or plan files. Disconnect clears the live Codex credential generation and never silently selects or invokes OpenRouter.
-
-OpenRouter uses the separate `openrouter.api-key` keyring account. Existing installations migrate the legacy `openrouter` account on first read without writing plaintext files.
-
-## Desktop packaging
-
-The Electrobun Bun bundle contains MastraCode's OAuth gateway runtime. MastraCode's optional Stagehand and Playwright browser subsystems are external because Proteus does not enable them; no ACP adapter or Codex executable is copied into the application.
-
-## Storage cutover
-
-The v2 runtime uses `proteus-v2.db` and `proteus-plans-v2`. On first launch, an allowlisted, idempotent cutover removes only `proteus.db`, its WAL/SHM companions, and `proteus-session.json`, then writes `proteus-mastra-v2.cutover`. Windows Credential Manager data is not touched.
+- Expand the contained Workspace tool catalog only after reviewing each native tool's approval policy.
+- Add durable session-level trust when Mastra provides a restart-safe native grant path or a deliberately scoped persistence design is approved.
+- Keep observability backends out of scope; local diagnostics remain sufficient for this application.
 
 ## Required gate
 
-Every runtime phase must pass `bun test`, `bun run typecheck`, and the production build before commit. Run `graphify update .` after source changes.
+Each implementation phase must pass its focused tests and typecheck before commit. The final phase runs `bun test`, `bun run typecheck`, the production build, and `graphify update .`.

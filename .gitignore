@@ -1,6 +1,7 @@
 desktop/node_modules/
 desktop/dist/
 desktop/build/
+desktop/artifacts/
 graphify-out/
 desktop/.cache/
 desktop/playwright-report/

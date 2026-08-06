@@ -71,4 +71,22 @@ describe("native Mastra agent driver", () => {
     expect(await driver.approve("thread-1", "call-durable", true)).toEqual({ runId: "run-durable" });
     expect(approvals).toEqual([{ resourceId: "local-user", threadId: "thread-1", toolCallId: "call-durable", approved: true }]);
   });
+
+  test("keeps parallel approvals distinct by run and tool-call identity", async () => {
+    const agent: NativeQueueAgent = {
+      subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
+      queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+      listSuspendedRuns: async () => ({ runs: [
+        { runId: "run-a", toolCalls: [{ toolCallId: "call-a", toolName: "write_file", args: { path: "a" }, requiresApproval: true }] },
+        { runId: "run-b", toolCalls: [{ toolCallId: "call-b", toolName: "write_file", args: { path: "b" }, requiresApproval: true }] },
+      ] }),
+    };
+    const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
+
+    expect(await driver.listSuspensions("thread-1")).toEqual([
+      { runId: "run-a", toolCallId: "call-a", toolName: "write_file", args: { path: "a" }, requiresApproval: true },
+      { runId: "run-b", toolCallId: "call-b", toolName: "write_file", args: { path: "b" }, requiresApproval: true },
+    ]);
+  });
 });
