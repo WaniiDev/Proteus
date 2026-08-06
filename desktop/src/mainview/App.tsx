@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode } from "react";
-import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, Globe, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkbenchTask, WorkspaceBinding } from "../shared/contracts";
@@ -603,6 +603,62 @@ const markdownComponents = {
   },
 };
 
+function sourceHostname(urlStr: string): string {
+  try {
+    return new URL(urlStr).hostname.replace(/^www\./, "");
+  } catch {
+    return urlStr;
+  }
+}
+
+function SourcePill({ source, index }: { source: Extract<ChatMessage["parts"][number], { type: "source-url" }>; index: number }) {
+  const [imgError, setImgError] = useState(false);
+  const hostname = sourceHostname(source.url);
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32`;
+  const label = source.title?.trim() || hostname || `Source ${index + 1}`;
+
+  return (
+    <a
+      href={source.url}
+      target="_blank"
+      rel="noreferrer"
+      className="source-pill"
+      title={`${label} (${source.url})`}
+    >
+      {!imgError && hostname ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          className="source-favicon"
+          onError={() => setImgError(true)}
+          width={14}
+          height={14}
+        />
+      ) : (
+        <Globe className="source-favicon-fallback" />
+      )}
+      <span className="source-label">{label}</span>
+    </a>
+  );
+}
+
+function WebSearchedSources({ sources }: { sources: Extract<ChatMessage["parts"][number], { type: "source-url" }>[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <nav className="message-sources" aria-label="Web search citations">
+      <div className="message-sources-header">
+        <Search className="sources-header-icon" />
+        <span>Web Searched</span>
+      </div>
+      <div className="message-sources-pills">
+        {sources.map((source, index) => (
+          <SourcePill key={source.url} source={source} index={index} />
+        ))}
+      </div>
+    </nav>
+  );
+}
+
 function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
   const terminal = messages.at(-1)!;
   const runs = groupAssistantPartRuns(parts);
@@ -623,12 +679,7 @@ function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue
         ) : (
           <ToolTimeline key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`} tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} tasks={tasks} />
         ))}
-        {sources.length > 0 && (
-          <nav className="message-sources" aria-label="Sources">
-            <span>Sources</span>
-            <ol>{sources.map((source, index) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title?.trim() || new URL(source.url).hostname || `Source ${index + 1}`}</a></li>)}</ol>
-          </nav>
-        )}
+        <WebSearchedSources sources={sources} />
         {(terminal.status === "interrupted" || terminal.status === "error") && <span className="message-status">{terminal.status === "interrupted" ? "Stopped" : "Response failed"}</span>}
         <MessageActions message={actionMessage} onRetry={terminal.status === "error" ? () => onRetry(terminal.id) : undefined} onContinue={terminal.status === "interrupted" ? () => onContinue(terminal.id) : undefined} />
       </div>
