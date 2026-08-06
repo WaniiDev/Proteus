@@ -626,13 +626,14 @@ function AssistantTurn({ messages, parts, pendingIds, onRetry, onContinue }: { m
   );
 }
 
-function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { interaction: PendingInteraction; onRespond: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onResubmit: (messageId: string) => Promise<boolean>; onDismiss: (toolCallId: string) => Promise<InteractionResponseResult> }) {
+function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDismiss }: { interaction: PendingInteraction; onRespond: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult>; onResubmit: (messageId: string) => Promise<boolean>; onDismiss: (toolCallId: string) => Promise<InteractionResponseResult> }) {
   const [answer, setAnswer] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
   const [submittingAction, setSubmittingAction] = useState<InteractionSubmissionAction>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const isPlan = interaction.kind === "submit_plan";
+  const isApproval = interaction.kind === "tool_approval";
   const failed = interaction.status === "failed";
   const submissionUi = interactionSubmissionUi(interaction.status, submittingAction);
   const resolving = submissionUi.resolving;
@@ -646,6 +647,16 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
       setSubmittingAction(null);
     }
   };
+  const decideApproval = async (approved: boolean) => {
+    if (resolving) return;
+    setSubmittingAction(approved ? "approve" : "reject");
+    setLocalError(null);
+    const result = await onApproval(interaction.toolCallId, approved).catch(() => ({ accepted: false as const, code: "resume-failed" as const, message: "The tool decision could not be sent.", retryable: true }));
+    if (!result.accepted) {
+      setLocalError(result.message);
+      setSubmittingAction(null);
+    }
+  };
   const submit = () => void send(isPlan ? { action: "approved", feedback: feedback.trim() || undefined } : interaction.options.length > 0 && interaction.selectionMode === "multi_select" ? selected : interaction.options.length > 0 ? (selected[0] ?? "") : answer.trim(), isPlan ? "approve" : "answer");
   const toggle = (label: string) => setSelected((current) => (current.includes(label) ? current.filter((value) => value !== label) : [...current, label]));
   return (
@@ -653,6 +664,13 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
       <div className="interaction-kicker">{submissionUi.kicker ?? (failed ? "Response failed" : isPlan ? "Plan approval" : "Your input needed")}</div>
       <h3>{interaction.title}</h3>
       {interaction.question && <p>{interaction.question}</p>}
+      {isApproval && (
+        <details className="approval-details">
+          <summary>{interaction.argsSummary ?? "Review exact tool arguments"}</summary>
+          <pre className="tool-approval-args">{JSON.stringify(interaction.args ?? null, null, 2)}</pre>
+          {interaction.fingerprint && <small>Request fingerprint: {interaction.fingerprint}</small>}
+        </details>
+      )}
       {isPlan && interaction.plan && (
         <div className="plan-preview">
           <strong>{interaction.plan.title}</strong>
@@ -674,7 +692,7 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
           )}
         </div>
       )}
-      {!failed && !isPlan && interaction.options.length > 0 && (
+      {!failed && !isPlan && !isApproval && interaction.options.length > 0 && (
         <div className={`interaction-options ${interaction.selectionMode === "multi_select" ? "multi" : ""}`}>
           {interaction.options.map((option) => (
             <label key={option.label} className={`interaction-option${selected.includes(option.label) ? " selected" : ""}`}>
@@ -687,7 +705,7 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
           ))}
         </div>
       )}
-      {!failed && !isPlan && interaction.options.length === 0 && <textarea disabled={resolving} className="interaction-input" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
+      {!failed && !isPlan && !isApproval && interaction.options.length === 0 && <textarea disabled={resolving} className="interaction-input" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
       {!failed && isPlan && <textarea disabled={resolving} className="interaction-input" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback or requested changes" rows={2} />}
       {(localError || interaction.error) && <p className="interaction-error" role="alert">{localError ?? interaction.error?.message}</p>}
       <div className="interaction-actions">
@@ -696,6 +714,8 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
             <button type="button" className="btn-outline sm" disabled={resolving} onClick={() => void onDismiss(interaction.toolCallId)}>Dismiss</button>
             {interaction.originMessageId && <button type="button" className="btn-primary sm" disabled={resolving} onClick={() => void onResubmit(interaction.originMessageId as string)}>Resubmit turn</button>}
           </>
+        ) : isApproval ? (
+          <button disabled={resolving} type="button" className="btn-outline sm" onClick={() => void decideApproval(false)}>{submissionUi.rejectLabel ?? "Decline"}</button>
         ) : isPlan && (
           <button
             disabled={resolving}
@@ -711,8 +731,8 @@ function InteractionCard({ interaction, onRespond, onResubmit, onDismiss }: { in
             {submissionUi.rejectLabel}
           </button>
         )}
-        {!failed && <button type="button" className="btn-primary sm" onClick={submit} disabled={resolving || (!isPlan && interaction.options.length > 0 && selected.length === 0) || (!isPlan && interaction.options.length === 0 && !answer.trim())}>
-          {isPlan ? submissionUi.approveLabel : "Send answer"}
+        {!failed && <button type="button" className="btn-primary sm" onClick={isApproval ? () => void decideApproval(true) : submit} disabled={resolving || (!isPlan && !isApproval && interaction.options.length > 0 && selected.length === 0) || (!isPlan && !isApproval && interaction.options.length === 0 && !answer.trim())}>
+          {isApproval ? (submissionUi.approveLabel ?? "Approve") : isPlan ? submissionUi.approveLabel : "Send answer"}
         </button>}
       </div>
     </article>
@@ -730,7 +750,7 @@ function QueuedMessageBubble({ draft }: { draft: QueuedDraft }) {
   );
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSend, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
+function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSend, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -855,10 +875,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                   {event.text}
                 </div>
               ))}
-              {snapshot.interactions.map((interaction) => interaction.kind === "tool_approval"
-                ? <ToolApprovalCard key={interaction.id} approval={interaction} onRespond={onToolApproval} />
-                : <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} onDismiss={onInteractionDismiss} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />
-              )}
+              {snapshot.interactions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} onApproval={onToolApproval} onDismiss={onInteractionDismiss} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />)}
               {snapshot.error && snapshot.error.code !== "aborted" && (
                 <div className="run-error-card">
                   <div>
@@ -1246,8 +1263,7 @@ export default function App() {
                   approved,
                   fingerprint: snapshot.interactions.find((item) => item.toolCallId === toolCallId)?.fingerprint ?? "",
                 })
-                  .then((result) => result.accepted)
-                  .catch(() => false)
+                  .catch(() => ({ accepted: false, code: "resume-failed", message: "The tool decision could not be sent.", retryable: true }))
               }
             />
           )}
@@ -1261,7 +1277,8 @@ export default function App() {
   );
 }
 
-function ToolApprovalCard({ approval, onRespond }: { approval: PendingInteraction; onRespond: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
+/** @deprecated Approval interactions render through InteractionCard. */
+export function ToolApprovalCard({ approval, onRespond }: { approval: PendingInteraction; onRespond: (toolCallId: string, approved: boolean) => Promise<boolean> }) {
   const [decision, setDecision] = useState<"approve" | "decline" | null>(null);
   const resolving = decision !== null;
   const args = useMemo(() => {

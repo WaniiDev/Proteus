@@ -81,6 +81,10 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .interaction-input:focus { border-color: var(--ink); background: var(--surface-card); }
 .interaction-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; margin-top: var(--s-sm); }
 .tool-approval-args { max-height: 180px; overflow: auto; margin: var(--s-md) 0 0; padding: var(--s-sm); border: 1px solid var(--hairline); border-radius: var(--r-md); background: rgba(246, 244, 241, .8); color: var(--body); font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+.approval-details { margin-top: var(--s-sm); border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--canvas-soft); overflow: hidden; }
+.approval-details summary { padding: 10px 12px; color: var(--body-strong); font-size: 12.5px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-details .tool-approval-args { margin: 0; border-width: 1px 0 0; border-radius: 0; background: var(--surface-card); }
+.approval-details small { display: block; padding: 8px 12px; border-top: 1px solid var(--hairline); color: var(--muted); font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .plan-preview { margin-top: var(--s-sm); padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--canvas-soft); }
 .plan-preview strong { color: var(--ink); font-size: 14px; }
 .plan-preview p, .plan-preview li { color: var(--body); font-size: 13px; line-height: 1.48; }
