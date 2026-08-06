@@ -10,6 +10,7 @@ const thread = (id: string, title: string, updatedAt: string): ThreadSummary => 
   updatedAt,
   activity: "idle",
   attention: 0,
+  workspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
 });
 const emptyWorkbench = (overrides: Partial<WorkbenchState> = {}): WorkbenchState => ({
   status: "idle",

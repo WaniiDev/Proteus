@@ -12,6 +12,7 @@ describe("Quickstart-native Mastra foundation", () => {
       expect(await foundation.storage.getStore("memory")).toBe(await foundation.primary.getStore("memory"));
       expect(await foundation.storage.getStore("observability")).toBeUndefined();
       expect(foundation.appStorage.isDomainReady("proteus-model-preferences")).toBe(true);
+      expect(foundation.appStorage.isDomainReady("proteus-project-registry")).toBe(true);
     } finally {
       await foundation.appStorage.close();
     }

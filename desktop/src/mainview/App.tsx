@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
@@ -37,6 +37,8 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   selectedProviderId: "openrouter",
   selectedModelId: "openrouter/auto",
   selectedReasoningEffort: null,
+  projects: [],
+  activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
   threads: [],
   activeThreadId: null,
   retryMessageId: null,
@@ -830,6 +832,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
             <h1 className="chat-title">{activeTitle}</h1>
             <Icon name="down" size={18} />
           </button>
+          <span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span>
         </div>
         {workbenchHasContent && (
           <button
@@ -1059,17 +1062,23 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
   );
 }
 
-function Projects() {
+function Projects({ snapshot }: { snapshot: RuntimeSnapshot }) {
   return (
     <section className="view active">
       <div className="page-narrow">
         <PageHeader kicker="Your contexts" title="Projects" subtitle="Keep longer-running work organized around the conversations that matter." />
-        <div className="card">
-          <p>Projects will be available here when you are ready to organize longer-running work.</p>
-        </div>
+        <div className="projects-heading"><p>Attach a folder once, then choose it when starting a chat.</p><button className="btn-primary sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.attach"]())}><Icon name="plus" size={15} /> Attach folder</button></div>
+        <div className="project-list">{snapshot.projects.length === 0 ? <div className="card"><p>No project folders are attached. Chats can still use the private Proteus workspace.</p></div> : snapshot.projects.map((project) => <article className="card project-card" key={project.id}>
+          <div><span className="caption-uppercase">{project.availability === "ready" ? "Available" : "Folder missing"}</span><h2>{project.name}</h2><p>{project.rootPath}</p></div>
+          <div className="project-actions">{project.availability === "ready" ? <button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.open"]({ projectId: project.id }))}>Open folder</button> : <button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.reconnect"]({ projectId: project.id }))}>Reconnect</button>}<button className="btn-danger-ghost" type="button" onClick={() => ignoreRpc(rpc.request["projects.remove"]({ projectId: project.id }))}>Forget</button></div>
+        </article>)}</div>
       </div>
     </section>
   );
+}
+
+function NewChatModal({ snapshot, onCancel, onCreate }: { snapshot: RuntimeSnapshot; onCancel: () => void; onCreate: (binding: WorkspaceBinding) => void }) {
+  return <div className="modal-backdrop" role="presentation"><section className="modal-card workspace-picker" role="dialog" aria-modal="true" aria-labelledby="workspace-picker-title"><div className="modal-head"><div><span className="caption-uppercase">New chat</span><h2 id="workspace-picker-title">Where should Proteus work?</h2></div><button className="icon-btn" type="button" onClick={onCancel} aria-label="Close"><Icon name="close" /></button></div><p>The workspace is fixed after the first message so tools always use the same trusted folder.</p><div className="workspace-options"><button type="button" onClick={() => onCreate({ kind: "app" })}><strong>Don’t work in any project</strong><span>Use Proteus’s private app workspace.</span></button>{snapshot.projects.map((project) => <button type="button" key={project.id} disabled={project.availability !== "ready"} onClick={() => onCreate({ kind: "project", projectId: project.id })}><strong>{project.name}</strong><span>{project.availability === "ready" ? project.rootPath : "Reconnect this folder in Projects first."}</span></button>)}</div></section></div>;
 }
 function Memory() {
   return (
@@ -1094,6 +1103,7 @@ export default function App() {
   const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
   const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const latestRevisionRef = useRef(0);
   useEffect(() => {
     const applyEnvelope = (envelope: RuntimeSnapshotEnvelope) => {
@@ -1209,7 +1219,11 @@ export default function App() {
   const handleCreate = () => {
     if (snapshot.activeRun) return;
     setSidebarOpen(false);
-    ignoreRpc(rpc.request["threads.create"]({ title: "New chat" }));
+    setNewChatOpen(true);
+  };
+  const createWithWorkspace = (workspaceBinding: WorkspaceBinding) => {
+    setNewChatOpen(false);
+    ignoreRpc(rpc.request["threads.create"]({ title: "New chat", workspaceBinding }));
   };
   const handleRename = (threadId: string, title: string) => {
     ignoreRpc(rpc.request["threads.rename"]({ threadId, title }));
@@ -1267,12 +1281,13 @@ export default function App() {
               }
             />
           )}
-          {view === "projects" && <Projects />}
+          {view === "projects" && <Projects snapshot={snapshot} />}
           {view === "memory" && <Memory />}
           {view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
         </main>
       </div>
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}
+      {newChatOpen && <NewChatModal snapshot={snapshot} onCancel={() => setNewChatOpen(false)} onCreate={createWithWorkspace} />}
     </>
   );
 }

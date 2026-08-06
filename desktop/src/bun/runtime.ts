@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute, join, normalize } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, normalize } from "node:path";
 import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import { Agent } from "@mastra/core/agent";
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
@@ -13,7 +14,7 @@ import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceScopeSummary } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
@@ -33,6 +34,7 @@ import { NativeThreadRepository } from "./native-thread-repository";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
 import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
 import { NativeToolCallGuard } from "./native-tool-call-guard";
+import type { ProjectRegistryStorage, StoredProject } from "./project-registry";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -122,6 +124,7 @@ type MastraMessage = {
 };
 
 type PersistedThreadState = {
+  workspaceBinding?: WorkspaceBinding;
   goal?: string;
   tasks?: WorkbenchTask[];
   pendingInteractions?: PendingInteraction[];
@@ -359,7 +362,11 @@ function normalizeError(error: unknown): RuntimeError {
   return makeRuntimeError("unknown");
 }
 
-function mapThread(thread: { id: string; title?: string | null; createdAt: Date; updatedAt: Date }): ThreadSummary {
+function mapThread(thread: { id: string; title?: string | null; createdAt: Date; updatedAt: Date; metadata?: Record<string, unknown> | null }): ThreadSummary {
+  const rawState = thread.metadata?.[THREAD_METADATA_KEY] ?? thread.metadata?.[LEGACY_THREAD_METADATA_KEY];
+  const binding = rawState && typeof rawState === "object" && !Array.isArray(rawState) && "workspaceBinding" in rawState
+    ? (rawState as PersistedThreadState).workspaceBinding ?? { kind: "app" as const }
+    : { kind: "app" as const };
   return {
     id: thread.id,
     title: thread.title?.trim() || "New chat",
@@ -367,6 +374,7 @@ function mapThread(thread: { id: string; title?: string | null; createdAt: Date;
     updatedAt: isoDate(thread.updatedAt),
     activity: "idle",
     attention: 0,
+    workspace: { binding, label: binding.kind === "app" ? "Proteus workspace" : "Project", availability: "ready" },
   };
 }
 
@@ -390,6 +398,7 @@ export class TextRuntime {
   private readonly storage: MastraCompositeStore;
   private readonly appStorage: ProteusStorageFoundation["appStorage"];
   private readonly modelPreferences: ModelPreferencesStorage;
+  private readonly projects: ProjectRegistryStorage;
   private readonly memory: Memory;
   private readonly threads: NativeThreadRepository;
   private readonly nativeDriver: NativeAgentDriver;
@@ -437,6 +446,8 @@ export class TextRuntime {
     selectedProviderId: DEFAULT_PROVIDER_ID,
     selectedModelId: DEFAULT_MODEL_ID,
     selectedReasoningEffort: null,
+    projects: [],
+    activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
     threads: [],
     activeThreadId: null,
     retryMessageId: null,
@@ -483,6 +494,7 @@ export class TextRuntime {
     this.storage = storageFoundation.storage;
     this.appStorage = storageFoundation.appStorage;
     this.modelPreferences = storageFoundation.modelPreferences;
+    this.projects = storageFoundation.projects;
     this.planFilesystem = new LocalFilesystem({
       basePath: join(Utils.paths.userData, "proteus-plans-v2"),
       contained: true,
@@ -691,12 +703,13 @@ export class TextRuntime {
       const value = thread?.metadata?.[THREAD_METADATA_KEY] ?? thread?.metadata?.[LEGACY_THREAD_METADATA_KEY];
       if (value && typeof value === "object" && !Array.isArray(value)) {
         const state = structuredClone(value as PersistedThreadState);
+        state.workspaceBinding ??= { kind: "app" };
         return this.reconcileNativeThreadState(threadId, state);
       }
     } catch {
       // Metadata is optional; an empty state is a valid first-run state.
     }
-    const empty: PersistedThreadState = {};
+    const empty: PersistedThreadState = { workspaceBinding: { kind: "app" } };
     this.threadStateCache.set(threadId, empty);
     return {};
   }
@@ -1090,6 +1103,20 @@ export class TextRuntime {
     this.publish({ threads });
   }
 
+  private async projectSummaries(): Promise<ProjectSummary[]> {
+    return Promise.all((await this.projects.list()).map(async (project) => ({
+      ...project,
+      createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString(), lastOpenedAt: project.lastOpenedAt.toISOString(),
+      availability: await stat(project.rootPath).then((entry) => entry.isDirectory() ? "ready" as const : "missing" as const).catch(() => "missing" as const),
+    })));
+  }
+
+  private scopeFor(binding: WorkspaceBinding, projects: ProjectSummary[]): WorkspaceScopeSummary {
+    if (binding.kind === "app") return { binding, label: "Proteus workspace", availability: "ready" };
+    const project = projects.find((item) => item.id === binding.projectId);
+    return { binding, label: project?.name ?? "Missing project", availability: project?.availability ?? "missing" };
+  }
+
   private async syncMessages(threadId = this.selectedThreadId ?? undefined, guard?: { selectionGeneration?: number; syncGeneration?: number }, assistantRunId?: string): Promise<boolean> {
     if (!threadId) {
       if (guard && ((guard.selectionGeneration !== undefined && guard.selectionGeneration !== this.threadSelectionGeneration) || (guard.syncGeneration !== undefined && guard.syncGeneration !== this.threadStateSyncGeneration))) return false;
@@ -1108,14 +1135,16 @@ export class TextRuntime {
 
   private async syncThreadState(options: { clearError?: boolean } = {}, selectionGeneration = this.threadSelectionGeneration): Promise<void> {
     const syncGeneration = ++this.threadStateSyncGeneration;
+    const projectSummaries = await this.projectSummaries();
     let threads = (await this.threads.list())
       .map((thread) => {
         const summary = mapThread(thread);
+        summary.workspace = this.scopeFor(summary.workspace.binding, projectSummaries);
         const activity = this.threadActivity.get(summary.id);
         return activity ? { ...summary, ...activity } : summary;
       })
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-    if (threads.length === 0) threads = [mapThread(await this.threads.create("New chat"))];
+    if (threads.length === 0) threads = [mapThread(await this.threads.create("New chat", { [THREAD_METADATA_KEY]: { workspaceBinding: { kind: "app" } } }))];
     const activeThreadId = this.selectedThreadId && threads.some((thread) => thread.id === this.selectedThreadId) ? this.selectedThreadId : threads[0].id;
     if (selectionGeneration !== this.threadSelectionGeneration || syncGeneration !== this.threadStateSyncGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)) return;
     const nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
@@ -1150,6 +1179,8 @@ export class TextRuntime {
       selectedProviderId: modelSelection.providerId,
       selectedModelId: modelSelection.modelId,
       selectedReasoningEffort: modelSelection.reasoningEffort ?? null,
+      projects: projectSummaries,
+      activeWorkspace: this.scopeFor(nextThreadState.workspaceBinding ?? { kind: "app" }, projectSummaries),
       messages: [],
       events: nextThreadState.events ?? [],
       interactions: nextThreadState.pendingInteractions ?? [],
@@ -1553,13 +1584,56 @@ export class TextRuntime {
     this.publish({ selectedReasoningEffort: nextReasoningEffort, error: null });
   }
 
-  async createThread(title?: string): Promise<string> {
+  async createThread(title?: string, workspaceBinding: WorkspaceBinding = { kind: "app" }): Promise<string> {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
-    const thread = await this.threads.create(title?.trim() || "New chat");
+    if (workspaceBinding.kind === "project") {
+      const project = (await this.projectSummaries()).find((item) => item.id === workspaceBinding.projectId);
+      if (!project || project.availability !== "ready") throw new Error("The selected project folder is unavailable");
+    }
+    const state: PersistedThreadState = { workspaceBinding };
+    const thread = await this.threads.create(title?.trim() || "New chat", { [THREAD_METADATA_KEY]: state });
+    this.threadStateCache.set(thread.id, state);
     this.selectedThreadId = thread.id;
     await this.syncThreadState();
     return thread.id;
+  }
+
+  private async chooseProjectDirectory(): Promise<string | null> {
+    const selected = await Utils.openFileDialog({ canChooseFiles: false, canChooseDirectory: true, allowsMultipleSelection: false });
+    const candidate = selected.find((value) => value.trim())?.trim();
+    if (!candidate) return null;
+    const rootPath = await realpath(candidate);
+    if (!(await stat(rootPath)).isDirectory()) throw new Error("Choose a folder for the project");
+    return rootPath;
+  }
+
+  async attachProject(projectId?: string): Promise<boolean> {
+    await this.ensureInitialized();
+    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+    const rootPath = await this.chooseProjectDirectory();
+    if (!rootPath) return false;
+    const now = new Date();
+    const existing = (await this.projects.list()).find((item) => item.id === projectId || normalize(item.rootPath).toLowerCase() === normalize(rootPath).toLowerCase());
+    const project: StoredProject = { id: existing?.id ?? randomUUID(), name: basename(rootPath), rootPath, createdAt: existing?.createdAt ?? now, updatedAt: now, lastOpenedAt: now };
+    await this.projects.save(project);
+    await this.syncThreadState();
+    return true;
+  }
+
+  async removeProject(projectId: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.projects.remove(projectId);
+    await this.syncThreadState();
+  }
+
+  async openProject(projectId: string): Promise<void> {
+    const project = (await this.projects.list()).find((item) => item.id === projectId);
+    if (!project) throw new Error("Project not found");
+    await stat(project.rootPath);
+    Utils.openPath(project.rootPath);
+    await this.projects.save({ ...project, lastOpenedAt: new Date() });
+    await this.syncThreadState();
   }
 
   async selectThread(threadId: string): Promise<void> {

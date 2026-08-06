@@ -26,6 +26,7 @@ describe("composer UI policy", () => {
       selectedProviderId: "codex",
       selectedModelId: "codex/gpt-5.3-codex-spark[xhigh]",
       selectedReasoningEffort: "xhigh",
+      projects: [], activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
       threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
       workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
       activeRun: null,

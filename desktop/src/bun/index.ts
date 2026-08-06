@@ -136,12 +136,28 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       },
       "threads.create": async (params) => {
         try {
-          const threadId = await runtime.createThread(params?.title);
+          const threadId = await runtime.createThread(params?.title, params?.workspaceBinding);
           return { threadId };
         } catch (error) {
           runtime.reportError(error);
           return { threadId: "" };
         }
+      },
+      "projects.attach": async () => {
+        try { return { accepted: await runtime.attachProject() }; }
+        catch (error) { runtime.reportError(error); return { accepted: false }; }
+      },
+      "projects.reconnect": async ({ projectId }) => {
+        try { return { accepted: await runtime.attachProject(projectId) }; }
+        catch (error) { runtime.reportError(error); return { accepted: false }; }
+      },
+      "projects.remove": async ({ projectId }) => {
+        try { await runtime.removeProject(projectId); return { accepted: true }; }
+        catch (error) { runtime.reportError(error); return { accepted: false }; }
+      },
+      "projects.open": async ({ projectId }) => {
+        try { await runtime.openProject(projectId); return { accepted: true }; }
+        catch (error) { runtime.reportError(error); return { accepted: false }; }
       },
       "threads.switch": async ({ threadId }) => {
         try {

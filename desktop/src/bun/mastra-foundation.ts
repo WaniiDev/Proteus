@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { MastraCompositeStore } from "@mastra/core/storage";
 import { LibSQLFactoryStorage } from "@mastra/libsql";
 import { ModelPreferencesStorage } from "./model-preferences";
+import { ProjectRegistryStorage } from "./project-registry";
 
 export const Proteus_RUNTIME_VERSION = "v3" as const;
 
@@ -10,6 +11,7 @@ export type ProteusStorageFoundation = {
   primary: MastraCompositeStore;
   appStorage: LibSQLFactoryStorage;
   modelPreferences: ModelPreferencesStorage;
+  projects: ProjectRegistryStorage;
   paths: {
     primary: string;
   };
@@ -27,11 +29,12 @@ export function createProteusStorage(userDataPath: string, options: { inMemory?:
     url: options.inMemory ? ":memory:" : `file:${paths.primary}`,
   });
   const modelPreferences = appStorage.registerDomain(new ModelPreferencesStorage());
+  const projects = appStorage.registerDomain(new ProjectRegistryStorage());
   const primary = appStorage.getMastraStorage();
   const storage = new MastraCompositeStore({
     id: `proteus-storage-${Proteus_RUNTIME_VERSION}`,
     default: primary,
     domains: { observability: false },
   });
-  return { storage, primary, appStorage, modelPreferences, paths };
+  return { storage, primary, appStorage, modelPreferences, projects, paths };
 }

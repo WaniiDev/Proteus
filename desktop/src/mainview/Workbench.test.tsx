@@ -14,6 +14,8 @@ function snapshot(): RuntimeSnapshot {
     selectedProviderId: "openrouter",
     selectedModelId: "openrouter/auto",
     selectedReasoningEffort: null,
+    projects: [],
+    activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
     threads: [],
     activeThreadId: "thread-1",
     retryMessageId: null,

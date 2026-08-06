@@ -217,6 +217,23 @@ export const workbenchSchema = z.object({
 });
 export type WorkbenchState = z.infer<typeof workbenchSchema>;
 
+export const workspaceBindingSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("app") }),
+  z.object({ kind: z.literal("project"), projectId: z.string().min(1) }),
+]);
+export type WorkspaceBinding = z.infer<typeof workspaceBindingSchema>;
+
+export const projectSummarySchema = z.object({
+  id: z.string().min(1), name: z.string().min(1), rootPath: z.string().min(1),
+  availability: z.enum(["ready", "missing"]), createdAt: z.string(), updatedAt: z.string(), lastOpenedAt: z.string(),
+});
+export type ProjectSummary = z.infer<typeof projectSummarySchema>;
+
+export const workspaceScopeSummarySchema = z.object({
+  binding: workspaceBindingSchema, label: z.string().min(1), availability: z.enum(["ready", "missing"]),
+});
+export type WorkspaceScopeSummary = z.infer<typeof workspaceScopeSummarySchema>;
+
 export const threadSummarySchema = z.object({
   id: z.string().min(1),
   title: z.string(),
@@ -224,6 +241,7 @@ export const threadSummarySchema = z.object({
   updatedAt: z.string(),
   activity: z.enum(["idle", "running", "waiting", "complete", "interrupted", "error"]).default("idle"),
   attention: z.number().int().nonnegative().default(0),
+  workspace: workspaceScopeSummarySchema.default({ binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" }),
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
@@ -268,6 +286,8 @@ export const runtimeSnapshotSchema = z.object({
   selectedProviderId: providerIdSchema,
   selectedModelId: providerModelIdSchema,
   selectedReasoningEffort: reasoningEffortSchema.nullable(),
+  projects: z.array(projectSummarySchema).default([]),
+  activeWorkspace: workspaceScopeSummarySchema.default({ binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" }),
   threads: z.array(threadSummarySchema),
   activeThreadId: z.string().nullable(),
   retryMessageId: z.string().min(1).nullable().default(null),
@@ -336,7 +356,7 @@ export const proteusRpcSchema = {
         response: {} as { accepted: boolean },
       },
       "threads.create": {
-        params: {} as { title?: string } | undefined,
+        params: {} as { title?: string; workspaceBinding?: WorkspaceBinding } | undefined,
         response: {} as { threadId: string },
       },
       "threads.switch": {
@@ -383,6 +403,10 @@ export const proteusRpcSchema = {
         params: undefined as undefined,
         response: {} as { accepted: boolean },
       },
+      "projects.attach": { params: undefined as undefined, response: {} as { accepted: boolean } },
+      "projects.reconnect": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
+      "projects.remove": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
+      "projects.open": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
       "diagnostics.get": {
         params: {} as { limit?: number } | undefined,
         response: {} as DiagnosticsSnapshot,

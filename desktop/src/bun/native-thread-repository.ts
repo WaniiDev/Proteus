@@ -21,8 +21,8 @@ export class NativeThreadRepository {
     return this.memory.getThreadById({ threadId, resourceId: this.resourceId });
   }
 
-  create(title = "New chat"): Promise<StorageThreadType> {
-    return this.memory.createThread({ resourceId: this.resourceId, title, saveThread: true });
+  create(title = "New chat", metadata: Record<string, unknown> = {}): Promise<StorageThreadType> {
+    return this.memory.createThread({ resourceId: this.resourceId, title, metadata, saveThread: true });
   }
 
   async recall(threadId: string): Promise<MastraDBMessage[]> {
