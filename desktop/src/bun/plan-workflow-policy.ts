@@ -6,4 +6,12 @@ export const APPROVED_PLAN_TOOLS = [
   "task_update",
   "task_complete",
   "task_check",
+  "mastra_workspace_read_file",
+  "mastra_workspace_list_files",
+  "mastra_workspace_file_stat",
+  "mastra_workspace_grep",
+  "mastra_workspace_write_file",
+  "mastra_workspace_edit_file",
+  "mastra_workspace_mkdir",
+  "mastra_workspace_delete",
 ] as const;

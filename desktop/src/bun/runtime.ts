@@ -12,7 +12,7 @@ import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { askUserTool, submitPlanTool, TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
-import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
+import { createWorkspaceTools, LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceScopeSummary } from "../shared/contracts";
@@ -36,6 +36,7 @@ import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver"
 import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
 import { NativeToolCallGuard } from "./native-tool-call-guard";
 import type { ProjectRegistryStorage, StoredProject } from "./project-registry";
+import { FILE_WORKSPACE_TOOLS } from "./workspace-policy";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -527,7 +528,7 @@ export class TextRuntime {
         }
         return filesystem;
       },
-      tools: { enabled: false },
+      tools: FILE_WORKSPACE_TOOLS,
     });
     this.memory = new Memory({
       storage: this.storage,
@@ -548,8 +549,12 @@ export class TextRuntime {
       name: "Proteus",
       instructions: AGENT_INSTRUCTIONS,
       memory: this.memory,
-      workspace: this.workspace,
-      tools: { ask_user: askUserTool, submit_plan: submitPlanTool },
+      workspace: this.agentWorkspace,
+      tools: async ({ requestContext }) => ({
+        ask_user: askUserTool,
+        submit_plan: submitPlanTool,
+        ...await createWorkspaceTools(this.workspace, { workspace: this.workspace, requestContext }),
+      }),
       signals: [new TaskSignalProvider()],
       hooks: this.taskToolPolicy.hooks,
       inputProcessors: [nativeToolCallGuard],
