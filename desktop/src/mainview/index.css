@@ -67,6 +67,12 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .interaction-card.resolving { opacity: .72; }
 .interaction-card.resolving .interaction-kicker { color: var(--body-strong); }
 .interaction-card.failed { border-color: color-mix(in srgb, var(--danger) 35%, var(--hairline-strong)); }
+.interaction-card[data-interaction-variant="plan"] { border-top: 3px solid color-mix(in srgb, #9b8bd8 62%, var(--hairline-strong)); }
+.interaction-card[data-interaction-variant="tool"] { border-top: 3px solid color-mix(in srgb, #75b9aa 64%, var(--hairline-strong)); }
+.interaction-card[data-interaction-variant="question"] { border-top: 3px solid color-mix(in srgb, #78aede 58%, var(--hairline-strong)); }
+.interaction-card[data-interaction-variant="recovery"] { border-top: 3px solid color-mix(in srgb, var(--danger) 58%, var(--hairline-strong)); }
+.interaction-actions-tool .btn-primary { background: var(--ink); }
+.interaction-actions-question .btn-primary { min-width: 112px; }
 .interaction-error { margin: var(--s-sm) 0 0; color: var(--danger); font-size: 13px; line-height: 1.45; }
 .interaction-card h3 { margin: 4px 0 6px; font-size: 16px; font-weight: 500; color: var(--ink); }
 .interaction-card > p { color: var(--body); font-size: 14px; line-height: 1.5; }

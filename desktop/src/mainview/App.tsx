@@ -9,6 +9,7 @@ import { rpc } from "./bridge";
 import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
+import { InteractionActions, InteractionFrame, interactionVariant } from "./InteractionPrimitives";
 import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
@@ -637,8 +638,9 @@ function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDis
   const isPlan = interaction.kind === "submit_plan";
   const isApproval = interaction.kind === "tool_approval";
   const failed = interaction.status === "failed";
-  const submissionUi = interactionSubmissionUi(interaction.status, submittingAction);
+  const submissionUi = interactionSubmissionUi(interaction.kind, interaction.status, submittingAction);
   const resolving = submissionUi.resolving;
+  const variant = interactionVariant(interaction.kind, failed);
   const send = async (response: unknown, action: Exclude<InteractionSubmissionAction, null>) => {
     if (resolving) return;
     setSubmittingAction(action);
@@ -662,9 +664,7 @@ function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDis
   const submit = () => void send(isPlan ? { action: "approved", feedback: feedback.trim() || undefined } : interaction.options.length > 0 && interaction.selectionMode === "multi_select" ? selected : interaction.options.length > 0 ? (selected[0] ?? "") : answer.trim(), isPlan ? "approve" : "answer");
   const toggle = (label: string) => setSelected((current) => (current.includes(label) ? current.filter((value) => value !== label) : [...current, label]));
   return (
-    <article className={`interaction-card interaction-${interaction.kind}${resolving ? " resolving" : ""}${failed ? " failed" : ""}`} id={`interaction-${interaction.id}`}>
-      <div className="interaction-kicker">{submissionUi.kicker ?? (failed ? "Response failed" : isPlan ? "Plan approval" : "Your input needed")}</div>
-      <h3>{interaction.title}</h3>
+    <InteractionFrame variant={variant} resolving={resolving} failed={failed} id={`interaction-${interaction.id}`} kicker={submissionUi.kicker ?? (failed ? "Response failed" : isPlan ? "Plan approval" : isApproval ? "Tool approval" : "Your input needed")} title={interaction.title}>
       {interaction.question && <p>{interaction.question}</p>}
       {isApproval && (
         <details className="approval-details">
@@ -710,34 +710,24 @@ function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDis
       {!failed && !isPlan && !isApproval && interaction.options.length === 0 && <textarea disabled={resolving} className="interaction-input" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
       {!failed && isPlan && <textarea disabled={resolving} className="interaction-input" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback or requested changes" rows={2} />}
       {(localError || interaction.error) && <p className="interaction-error" role="alert">{localError ?? interaction.error?.message}</p>}
-      <div className="interaction-actions">
-        {failed ? (
-          <>
-            <button type="button" className="btn-outline sm" disabled={resolving} onClick={() => void onDismiss(interaction.toolCallId)}>Dismiss</button>
-            {interaction.originMessageId && <button type="button" className="btn-primary sm" disabled={resolving} onClick={() => void onResubmit(interaction.originMessageId as string)}>Resubmit turn</button>}
-          </>
-        ) : isApproval ? (
-          <button disabled={resolving} type="button" className="btn-outline sm" onClick={() => void decideApproval(false)}>{submissionUi.rejectLabel ?? "Decline"}</button>
-        ) : isPlan && (
-          <button
-            disabled={resolving}
-            type="button"
-            className="btn-outline sm"
-            onClick={() =>
-              void send({
-                action: "rejected",
-                feedback: feedback.trim() || "Please revise the plan.",
-              }, "reject")
-            }
-          >
-            {submissionUi.rejectLabel}
-          </button>
-        )}
-        {!failed && <button type="button" className="btn-primary sm" onClick={isApproval ? () => void decideApproval(true) : submit} disabled={resolving || (!isPlan && !isApproval && interaction.options.length > 0 && selected.length === 0) || (!isPlan && !isApproval && interaction.options.length === 0 && !answer.trim())}>
-          {isApproval ? (submissionUi.approveLabel ?? "Approve") : isPlan ? submissionUi.approveLabel : "Send answer"}
-        </button>}
-      </div>
-    </article>
+      <InteractionActions
+        variant={variant}
+        disabled={resolving}
+        secondaryLabel={failed ? "Dismiss" : isApproval || isPlan ? submissionUi.rejectLabel : undefined}
+        onSecondary={failed
+          ? () => void onDismiss(interaction.toolCallId)
+          : isApproval
+            ? () => void decideApproval(false)
+            : isPlan
+              ? () => void send({ action: "rejected", feedback: feedback.trim() || "Please revise the plan." }, "reject")
+              : undefined}
+        primaryLabel={failed ? (interaction.originMessageId ? "Resubmit turn" : undefined) : submissionUi.approveLabel}
+        onPrimary={failed
+          ? interaction.originMessageId ? () => void onResubmit(interaction.originMessageId as string) : undefined
+          : isApproval ? () => void decideApproval(true) : submit}
+        primaryDisabled={!failed && !isPlan && !isApproval && (interaction.options.length > 0 ? selected.length === 0 : !answer.trim())}
+      />
+    </InteractionFrame>
   );
 }
 
