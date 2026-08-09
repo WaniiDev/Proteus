@@ -13,6 +13,29 @@ Proteus uses the installed Mastra `Agent` as its run, queue, suspension, history
 
 ## Workspace boundary
 
+Proteus follows the official Mastra Workspace overview end to end rather than
+wrapping it in a parallel tool system:
+
+- **Workspace creation:** both the agent workspace and private plan workspace
+  are native `Workspace` instances registered with the application `Mastra`.
+- **Filesystem:** a contained `LocalFilesystem` is resolved from trusted
+  `RequestContext` state for each chat. Native read/list/stat/grep operations
+  are available, while mutations use Mastra's read-before-write and approval
+  controls.
+- **Sandbox:** a resolver-backed `LocalSandbox` is started lazily, cached per
+  conversation, and destroyed with the workspace. Command execution and
+  process termination require native tool approval.
+- **Dynamic configuration:** filesystem, sandbox, cache keys, and sandbox
+  instructions are all request-context resolvers. This keeps one registered
+  workspace while preserving a different immutable root per conversation.
+- **Agent integration:** `workspace` is supplied directly to `Agent`, and
+  `createWorkspaceTools` provides the official Mastra tool implementations.
+  Proteus only applies an explicit capability policy and a compatibility
+  schema normalization; it does not reimplement their execution.
+- **Lifecycle:** resolver-owned filesystems and sandboxes are explicitly
+  destroyed, the sandbox cache is cleared, and `Workspace.destroy()` runs as
+  part of runtime shutdown.
+
 Each conversation has an immutable workspace binding: either the private Proteus app workspace or one attached project folder. Existing conversations migrate to the app workspace. Project records live in a Mastra `FactoryStorageDomain`; conversation metadata stores only the binding. If an attached folder is moved, deleted, or forgotten, the chat becomes explicitly unavailable until the user reconnects it. Proteus never silently redirects it to the app workspace.
 
 `RequestContext` carries the trusted thread ID, workspace kind, and canonical root from the Bun runtime into `Agent.queueMessage()` through `ifIdle.streamOptions`. A dynamic `LocalFilesystem` is constructed with `contained: true`, so traversal and symlink escapes outside that root are rejected by Mastra.

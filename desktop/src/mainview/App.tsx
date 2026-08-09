@@ -1143,7 +1143,7 @@ function Memory() {
 
 export default function App() {
   const [view, setView] = useState<View>("companion");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [input, setInput] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [, setOrbState] = useState<OrbState>("idle");
@@ -1297,8 +1297,7 @@ export default function App() {
         <div className="ambient-orb amb-sky" />
       </div>
       <div className="app-shell">
-        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} />
-        {sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
+        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} />
         <main>
           {view === "companion" && (
             <Companion

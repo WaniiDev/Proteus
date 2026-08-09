@@ -11,6 +11,9 @@ describe("Sidebar", () => {
       onView={() => undefined}
       onToggle={() => undefined}
       onCreate={() => undefined}
+      threads={[]}
+      activeThreadId={null}
+      onSwitch={() => undefined}
     />);
 
     expect(html).toContain("lucide-square-pen");
@@ -22,6 +25,25 @@ describe("Sidebar", () => {
     expect(html).toContain('aria-label="New chat"');
     expect(html).toContain("proteus-orb-256.png");
     expect(html).toContain('class="app-nav__orb-image"');
+    expect(html).toContain("Recent chats");
+  });
+
+  it("renders the local conversation library in the expanded desktop sidebar", () => {
+    const html = renderToStaticMarkup(<Sidebar
+      view="companion"
+      open
+      disabled={false}
+      onView={() => undefined}
+      onToggle={() => undefined}
+      onCreate={() => undefined}
+      threads={[{ id: "thread-1", title: "Workspace architecture", createdAt: "2026-08-09T00:00:00.000Z", updatedAt: "2026-08-09T00:00:00.000Z", activity: "idle", attention: 0, workspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" } }]}
+      activeThreadId="thread-1"
+      onSwitch={() => undefined}
+    />);
+
+    expect(html).toContain("Workspace architecture");
+    expect(html).toContain("app-nav__recent--active");
+    expect(html).toContain("Collapse sidebar");
   });
 
   it("styles the selected icon with a restrained Proteus pastel halo", async () => {

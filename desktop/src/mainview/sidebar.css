@@ -10,6 +10,21 @@
   z-index: 50;
 }
 
+.app-nav__recents { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; margin-top: 18px; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity .16s ease; }
+.app-nav--open .app-nav__recents { opacity: 1; pointer-events: auto; }
+.app-nav__section-title { padding: 0 10px 7px; color: #77746d; font-size: 11px; font-weight: 600; }
+.app-nav__recent-list { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; }
+.app-nav__recent { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; color: #4b4944; text-align: left; }
+.app-nav__recent:hover { background: rgba(55, 53, 47, .06); color: #24231f; }
+.app-nav__recent--active { background: #e8e6df; color: #24231f; }
+.app-nav__recent span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.app-nav__recent small { color: #96928a; font-size: 9.5px; white-space: nowrap; }
+.app-nav__recent-empty { padding: 8px 10px; color: #96928a; font-size: 11px; line-height: 1.45; }
+.app-nav__footer { display: flex; flex-direction: column; gap: 2px; }
+.app-nav__collapse { display: none; width: 100%; align-items: center; gap: 10px; padding: 9px 13px; border-radius: 8px; color: #77746d; font-size: 12px; text-align: left; }
+.app-nav--open .app-nav__collapse { display: flex; }
+.app-nav__collapse:hover { color: #24231f; background: rgba(55, 53, 47, .06); }
+
 .app-nav__surface {
   position: absolute;
   inset: 8px auto 8px 8px;
@@ -271,6 +286,21 @@
   .app-nav--open .app-nav__surface {
     width: min(264px, calc(100vw - 16px));
   }
+}
+
+/* Claude Desktop-inspired navigation: a calm, persistent library at desktop
+   sizes, with the original compact rail still available on demand. */
+@media (min-width: 761px) {
+  .app-nav { width: 280px; flex-basis: 280px; transition: width .24s ease, flex-basis .24s ease; }
+  .app-nav:not(.app-nav--open) { width: 72px; flex-basis: 72px; }
+  .app-nav__surface { inset: 0; width: 280px; padding: 12px 10px; border-width: 0 1px 0 0; border-radius: 0; background: #f4f3ef; box-shadow: none; }
+  .app-nav--open .app-nav__surface { width: 280px; box-shadow: none; }
+  .app-nav__header { margin-bottom: 8px; }
+  .app-nav--open .app-nav__orb { margin-left: 1px; }
+  .app-nav--open .app-nav__item { width: 100%; margin-inline: 0; }
+  .app-nav__action { margin-bottom: 8px; background: #fff; box-shadow: inset 0 0 0 1px rgba(55, 53, 47, .1), 0 1px 2px rgba(55, 53, 47, .04); }
+  .app-nav__menu { gap: 2px; }
+  .app-nav__link--active { background: #e8e6df; box-shadow: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

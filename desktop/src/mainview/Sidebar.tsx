@@ -1,12 +1,15 @@
 import { useEffect, useRef } from "react";
 import {
   BookOpenText,
+  ChevronLeft,
   MessagesSquare,
   PanelsTopLeft,
   SlidersHorizontal,
   SquarePen,
   type LucideIcon,
 } from "lucide-react";
+import type { ThreadSummary } from "../shared/contracts";
+import { relativeTime } from "./ui-helpers";
 
 export type View = "companion" | "projects" | "memory" | "settings";
 
@@ -17,6 +20,9 @@ type SidebarProps = {
   onView: (view: View) => void;
   onToggle: () => void;
   onCreate: () => void;
+  threads: ThreadSummary[];
+  activeThreadId: string | null;
+  onSwitch: (threadId: string) => void;
 };
 
 type PrimaryView = Exclude<View, "settings">;
@@ -39,7 +45,7 @@ function BrandMark() {
   </span>;
 }
 
-export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: SidebarProps) {
+export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, threads, activeThreadId, onSwitch }: SidebarProps) {
   const orbButtonRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(open);
 
@@ -111,6 +117,26 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: Si
         </button>)}
       </nav>
 
+      <section className="app-nav__recents" aria-label="Recent chats">
+        <span className="app-nav__section-title">Recents</span>
+        <div className="app-nav__recent-list">
+          {threads.slice(0, 12).map((thread) => <button
+            type="button"
+            className={`app-nav__recent${thread.id === activeThreadId && view === "companion" ? " app-nav__recent--active" : ""}`}
+            key={thread.id}
+            title={thread.title}
+            onClick={() => {
+              onSwitch(thread.id);
+              onView("companion");
+            }}
+          >
+            <span>{thread.title}</span>
+            <small>{thread.attention > 0 ? `${thread.attention} waiting` : relativeTime(thread.updatedAt)}</small>
+          </button>)}
+          {threads.length === 0 && <p className="app-nav__recent-empty">Your conversations will appear here.</p>}
+        </div>
+      </section>
+
       <div className="app-nav__footer">
         <button
           className={`app-nav__item app-nav__link${view === "settings" ? " app-nav__link--active" : ""}`}
@@ -123,6 +149,10 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: Si
         >
           <span className="app-nav__icon-track"><NavIcon icon={SlidersHorizontal} /></span>
           <span className="app-nav__label">Settings</span>
+        </button>
+        <button className="app-nav__collapse" type="button" onClick={onToggle} aria-label="Collapse sidebar">
+          <ChevronLeft size={16} strokeWidth={1.7} />
+          <span>Collapse</span>
         </button>
       </div>
     </div>
