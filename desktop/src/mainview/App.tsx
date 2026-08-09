@@ -14,6 +14,7 @@ import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { Workbench } from "./Workbench";
+import { WorkspacePane } from "./WorkspacePane";
 import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
@@ -814,6 +815,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [renameRequest, setRenameRequest] = useState<string | null>(null);
   const [workbenchOpenByThread, setWorkbenchOpenByThread] = useState<Map<string, boolean>>(() => new Map());
+  const [workspaceOpen, setWorkspaceOpen] = useState(() => localStorage.getItem("proteus.workspace.open") === "true");
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
@@ -830,6 +832,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
+  useEffect(() => { localStorage.setItem("proteus.workspace.open", String(workspaceOpen)); }, [workspaceOpen]);
   useEffect(() => {
     if (!snapshot.activeThreadId || (!snapshot.messages.length && !snapshot.activeRun)) return;
     setDockedThreads((current) => (current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)));
@@ -882,6 +885,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
           </button>
           <span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span>
         </div>
+        <button type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${workspaceOpen ? " active" : ""}`} aria-label={workspaceOpen ? "Close workspace" : "Open workspace"} aria-expanded={workspaceOpen} aria-controls="workspace-pane" onClick={() => { setWorkspaceOpen((value) => !value); if (!workspaceOpen && snapshot.activeThreadId) setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false)); }}><PanelRight size={16} /><span>Workspace</span></button>
         {workbenchHasContent && (
           <button
             ref={workbenchToggleRef}
@@ -903,7 +907,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
         <ConversationPopover snapshot={snapshot} open={sessionsOpen} disabled={snapshot.activeRun !== null} initialEditingId={renameRequest} onClose={titleTriggerClose} onCreate={onCreate} onSwitch={onSwitch} onRename={onRename} onDelete={onDeleteRequest} />
       </div>
       <div className="text-chat-layout">
-        <div className={`companion-grid ${workbenchOpen ? "workbench-present" : "workbench-absent"}`}>
+        <div className={`companion-grid ${workbenchOpen || workspaceOpen ? "workbench-present" : "workbench-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             <OrbPresence state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} />
@@ -980,6 +984,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
               </div>
             </form>
           </div>
+          {workspaceOpen && <WorkspacePane snapshot={snapshot} onJump={jumpToInteraction} onClose={() => setWorkspaceOpen(false)} />}
           {workbenchOpen && (
             <button
               type="button"
@@ -1297,7 +1302,7 @@ export default function App() {
         <div className="ambient-orb amb-sky" />
       </div>
       <div className="app-shell">
-        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} />
+        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} />
         {sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
         <main>
           {view === "companion" && (

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { ThreadSummary } from "../shared/contracts";
 import {
   BookOpenText,
   MessagesSquare,
@@ -17,6 +18,9 @@ type SidebarProps = {
   onView: (view: View) => void;
   onToggle: () => void;
   onCreate: () => void;
+  threads?: ThreadSummary[];
+  activeThreadId?: string | null;
+  onSwitch?: (threadId: string) => void;
 };
 
 type PrimaryView = Exclude<View, "settings">;
@@ -39,7 +43,7 @@ function BrandMark() {
   </span>;
 }
 
-export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: SidebarProps) {
+export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, threads = [], activeThreadId, onSwitch }: SidebarProps) {
   const orbButtonRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(open);
 
@@ -110,6 +114,11 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate }: Si
           <span className="app-nav__label">{label}</span>
         </button>)}
       </nav>
+
+      <section className="app-nav__sessions" aria-label="Conversations">
+        <span className="app-nav__section-label">Recent</span>
+        <div className="app-nav__session-list">{threads.slice(0, 18).map((thread) => <button type="button" key={thread.id} className={`app-nav__session${thread.id === activeThreadId ? " active" : ""}`} onClick={() => { onSwitch?.(thread.id); onView("companion"); }} aria-current={thread.id === activeThreadId ? "page" : undefined} title={thread.title}><span className={`app-nav__status ${thread.activity}`} aria-label={thread.activity} /><span><strong>{thread.title}</strong><small>{thread.workspace.label}</small></span>{thread.attention > 0 && <b>{thread.attention}</b>}</button>)}</div>
+      </section>
 
       <div className="app-nav__footer">
         <button

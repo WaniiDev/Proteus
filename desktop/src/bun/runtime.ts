@@ -14,7 +14,7 @@ import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TaskSignalProvider } from "@mastra/core/signals";
 import { askUserTool, submitPlanTool, TASK_STATE_TYPE, webFetchTool, webSearchTool, type TaskItemSnapshot } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
-import { createWorkspaceTools, LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
+import { createWorkspaceTools, LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceScopeSummary } from "../shared/contracts";
@@ -39,9 +39,9 @@ import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver"
 import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
 import { NativeToolCallGuard } from "./native-tool-call-guard";
 import type { ProjectRegistryStorage, StoredProject } from "./project-registry";
-import { FILE_WORKSPACE_TOOLS } from "./workspace-policy";
 import { createWorkingTools } from "./working-tools";
 import { createCompatibleWorkspaceTools } from "./workspace-tool-compat";
+import { WorkspaceRegistry } from "./workspace-registry";
 import { toolResultError } from "./tool-result-error";
 
 const AGENT_ID = "proteus-text-agent";
@@ -420,9 +420,7 @@ export class TextRuntime {
   private readonly nativeSuspensions = new Map<string, { runId: string; threadId: string }>();
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
-  private readonly agentWorkspace: Workspace;
-  private readonly workspaceFilesystems = new Map<string, LocalFilesystem>();
-  private readonly workspaceSandboxes = new Map<string, LocalSandbox>();
+  private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly appWorkspaceRoot = join(Utils.paths.userData, "proteus-workspace-v1");
   private readonly agent: Agent;
   private readonly mastra: Mastra;
@@ -529,36 +527,7 @@ export class TextRuntime {
         [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: { enabled: true, name: "write_plan", requireApproval: false, requireReadBeforeWrite: false },
       },
     });
-    this.agentWorkspace = new Workspace({
-      id: "proteus-agent-workspace",
-      name: "Proteus workspace",
-      filesystem: ({ requestContext }) => {
-        const rootPath = requestContext.get("proteus-workspace-root") as string | undefined;
-        if (!rootPath || !isAbsolute(rootPath)) throw new Error("No trusted workspace is available for this chat");
-        let filesystem = this.workspaceFilesystems.get(rootPath);
-        if (!filesystem) {
-          filesystem = new LocalFilesystem({ basePath: rootPath, contained: true, instructions: "This is the fixed workspace selected when the chat was created." });
-          this.workspaceFilesystems.set(rootPath, filesystem);
-        }
-        return filesystem;
-      },
-      sandbox: async ({ requestContext }) => {
-        const rootPath = requestContext.get("proteus-workspace-root") as string | undefined;
-        const threadId = requestContext.get("proteus-thread-id") as string | undefined;
-        if (!rootPath || !isAbsolute(rootPath) || !threadId) throw new Error("No trusted command workspace is available for this chat");
-        let sandbox = this.workspaceSandboxes.get(threadId);
-        if (!sandbox) {
-          sandbox = new LocalSandbox({ id: `proteus-${threadId}`, workingDirectory: rootPath, isolation: "none", timeout: 30_000, instructions: "Commands run on the Windows host inside the chat's fixed working directory. Every command requires user approval." });
-          await sandbox.start();
-          this.workspaceSandboxes.set(threadId, sandbox);
-        }
-        if (normalize(sandbox.workingDirectory).toLowerCase() !== normalize(rootPath).toLowerCase()) throw new Error("The command workspace does not match this chat's fixed project");
-        return sandbox;
-      },
-      sandboxCacheKey: ({ requestContext }) => requestContext.get("proteus-thread-id") as string | undefined,
-      instructions: { dynamicSandbox: ({ requestContext }) => `Commands run from the fixed ${requestContext.get("proteus-workspace-kind") ?? "app"} workspace on Windows. LocalSandbox does not provide OS isolation on Windows; every command requires approval.` },
-      tools: FILE_WORKSPACE_TOOLS,
-    });
+    this.workspaceRegistry = new WorkspaceRegistry(Utils.paths.userData);
     this.memory = new Memory({
       storage: this.storage,
       vector: false,
@@ -585,7 +554,6 @@ export class TextRuntime {
       name: "Proteus",
       instructions: `${AGENT_INSTRUCTIONS}\n\n${COMMAND_SAFETY_INSTRUCTIONS}`,
       memory: this.memory,
-      workspace: this.agentWorkspace,
       tools: async ({ requestContext }) => ({
         ask_user: askUserTool,
         submit_plan: submitPlanTool,
@@ -593,7 +561,7 @@ export class TextRuntime {
           ? webSearchTool
           : openRouterTools.webSearch({ engine: "auto", maxResults: 5 }),
         ...workingTools,
-        ...await createCompatibleWorkspaceTools(this.agentWorkspace, requestContext),
+        ...await createCompatibleWorkspaceTools(await this.workspaceRegistry.resolveFromContext(requestContext), requestContext),
         ...await createWorkspaceTools(this.workspace, { workspace: this.workspace, requestContext }),
       }),
       signals: [new TaskSignalProvider()],
@@ -648,7 +616,6 @@ export class TextRuntime {
       gateways: { "models.dev": openRouterGateway, mastracode: this.codexGateway },
       logger: false,
     });
-    this.mastra.addWorkspace(this.agentWorkspace, "proteus-agent-workspace");
   }
 
   /** Release the Mastra-owned workspace, event engine, and storage handles once. */
@@ -657,11 +624,7 @@ export class TextRuntime {
       try {
         await this.mastra.shutdown();
       } finally {
-        await Promise.all([...this.workspaceFilesystems.values()].map((filesystem) => filesystem.destroy()));
-        this.workspaceFilesystems.clear();
-        await Promise.all([...this.workspaceSandboxes.values()].map((sandbox) => sandbox.destroy()));
-        this.workspaceSandboxes.clear();
-        this.agentWorkspace.clearSandboxCache();
+        await this.workspaceRegistry.destroy();
         await this.appStorage.close();
       }
     })();
@@ -1671,6 +1634,25 @@ export class TextRuntime {
     this.publish({ selectedReasoningEffort: nextReasoningEffort, error: null });
   }
 
+  private async selectedWorkspaceRoot(): Promise<string> {
+    if (!this.selectedThreadId) throw new Error("No conversation is selected");
+    const context = await this.requestContextFor(this.selectedThreadId);
+    const root = context.get("proteus-workspace-root");
+    if (typeof root !== "string") throw new Error("The selected workspace is unavailable");
+    return root;
+  }
+
+  async workspaceTree(path?: string, depth?: number, includeHidden?: boolean) { return this.workspaceRegistry.tree(await this.selectedWorkspaceRoot(), path, depth, includeHidden); }
+  async workspaceRead(path: string, lineStart?: number, lineEnd?: number) { return this.workspaceRegistry.read(await this.selectedWorkspaceRoot(), path, lineStart, lineEnd); }
+  async workspaceWrite(path: string, content: string, expectedVersion?: string) { return this.workspaceRegistry.write(await this.selectedWorkspaceRoot(), path, content, expectedVersion); }
+  async workspaceCreateDirectory(path: string) { await this.workspaceRegistry.createDirectory(await this.selectedWorkspaceRoot(), path); return { accepted: true as const }; }
+  async workspaceDelete(path: string) { await this.workspaceRegistry.delete(await this.selectedWorkspaceRoot(), path); return { accepted: true as const }; }
+  async workspaceMove(from: string, to: string) { await this.workspaceRegistry.move(await this.selectedWorkspaceRoot(), from, to); return { accepted: true as const }; }
+  async workspaceCopy(from: string, to: string) { await this.workspaceRegistry.copy(await this.selectedWorkspaceRoot(), from, to); return { accepted: true as const }; }
+  async workspaceSearch(query: string, options?: { mode?: "bm25" | "vector" | "hybrid"; topK?: number; minScore?: number; vectorWeight?: number }) { return this.workspaceRegistry.search(await this.selectedWorkspaceRoot(), query, options); }
+  async workspaceIndex(paths: string[]) { return this.workspaceRegistry.index(await this.selectedWorkspaceRoot(), paths); }
+  async workspaceSkills(load?: boolean) { return this.workspaceRegistry.skills(await this.selectedWorkspaceRoot(), load); }
+
   async createThread(title?: string, workspaceBinding: WorkspaceBinding = { kind: "app" }): Promise<string> {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
@@ -1710,7 +1692,9 @@ export class TextRuntime {
 
   async removeProject(projectId: string): Promise<void> {
     await this.ensureInitialized();
+    const project = (await this.projects.list()).find((item) => item.id === projectId);
     await this.projects.remove(projectId);
+    if (project) await this.workspaceRegistry.remove(project.rootPath).catch(() => undefined);
     await this.syncThreadState();
   }
 
@@ -1763,10 +1747,6 @@ export class TextRuntime {
     await this.threads.delete(threadId);
     this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
-    const sandbox = this.workspaceSandboxes.get(threadId);
-    if (sandbox) await sandbox.destroy();
-    this.workspaceSandboxes.delete(threadId);
-    this.agentWorkspace.clearSandboxCache(threadId);
     const remaining = (await this.threads.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     if (this.selectedThreadId === threadId || !this.selectedThreadId) {
       const next = remaining[0] ?? mapThread(await this.threads.create("New chat"));
