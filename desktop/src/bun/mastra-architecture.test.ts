@@ -7,8 +7,9 @@ const sourceRoot = join(import.meta.dir, "..");
 
 describe("Mastra-first architecture boundaries", () => {
   it("does not reintroduce custom plan tools or follow-up queue RPCs", async () => {
-    const [runtime, contracts, bunEntry, app] = await Promise.all([
+    const [runtime, registry, contracts, bunEntry, app] = await Promise.all([
       readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
+      readFile(join(sourceRoot, "bun", "workspace-registry.ts"), "utf8"),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
       readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
       readFile(join(sourceRoot, "mainview", "App.tsx"), "utf8"),
@@ -28,7 +29,7 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("memory: this.memory");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
-    expect(runtime).toContain("workspace: this.agentWorkspace");
+    expect(runtime).toContain("createCompatibleWorkspaceTools(await this.workspaceRegistry.resolveFromContext(requestContext)");
     expect(runtime).toContain("new ToolSearchProcessor({");
     expect(runtime).toContain('storage: "context"');
     expect(runtime).toContain("search: { topK: 3, minScore: 0.1, autoLoad: true }");
@@ -38,9 +39,8 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("? webSearchTool");
     expect(runtime).toContain('openRouterTools.webSearch({ engine: "auto", maxResults: 5 })');
     expect(runtime).toContain("new RequestContext(");
-    expect(runtime).toContain("contained: true");
-    expect(runtime).toContain("sandboxCacheKey:");
-    expect(runtime).toContain('isolation: "none"');
+    expect(registry).toContain("contained: true");
+    expect(registry).toContain('isolation: "none"');
     expect(runtime).not.toContain("session.subscribe((event)");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.queue.");
     expect(`${contracts}\n${bunEntry}\n${app}`).not.toContain("chat.steer");

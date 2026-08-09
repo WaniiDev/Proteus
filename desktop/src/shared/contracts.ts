@@ -324,6 +324,15 @@ export const runtimeSnapshotEnvelopeSchema = z
   .strict();
 export type RuntimeSnapshotEnvelope = z.infer<typeof runtimeSnapshotEnvelopeSchema>;
 
+export const workspacePathSchema = z.string().max(1_024).refine((value) => !value.includes("\0") && !/^(?:[a-zA-Z]:[\\/]|[\\/]{1,2})/.test(value) && !value.split(/[\\/]+/).includes(".."), "Path must stay inside the workspace");
+export const workspaceTreeEntrySchema: z.ZodType<WorkspaceTreeEntry> = z.lazy(() => z.object({ path: workspacePathSchema, name: z.string().min(1), kind: z.enum(["file", "directory", "symlink"]), size: z.number().int().nonnegative().optional(), modifiedAt: z.string().optional(), children: z.array(workspaceTreeEntrySchema).optional() }).strict());
+export type WorkspaceTreeEntry = { path: string; name: string; kind: "file" | "directory" | "symlink"; size?: number; modifiedAt?: string; children?: WorkspaceTreeEntry[] };
+export const workspaceFileSchema = z.object({ path: workspacePathSchema, kind: z.enum(["text", "image", "pdf", "binary"]), content: z.string().optional(), dataUrl: z.string().max(15_000_000).optional(), size: z.number().int().nonnegative(), modifiedAt: z.string(), version: z.string(), lineStart: z.number().int().positive().optional(), lineEnd: z.number().int().positive().optional(), truncated: z.boolean() }).strict();
+export type WorkspaceFile = z.infer<typeof workspaceFileSchema>;
+export const workspaceSearchModeSchema = z.enum(["bm25", "vector", "hybrid"]);
+export const workspaceSearchResultSchema = z.object({ id: z.string(), content: z.string(), score: z.number(), lineRange: z.object({ start: z.number(), end: z.number() }).optional(), metadata: z.record(z.string(), z.unknown()).optional(), scoreDetails: z.object({ vector: z.number().optional(), bm25: z.number().optional() }).optional() }).strict();
+export const workspaceSkillSchema = z.object({ name: z.string(), description: z.string(), path: workspacePathSchema, source: workspacePathSchema, conflict: z.boolean(), content: z.string().optional() }).strict();
+
 export const proteusRpcSchema = {
   bun: {
     requests: {
@@ -415,6 +424,16 @@ export const proteusRpcSchema = {
       "projects.reconnect": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
       "projects.remove": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
       "projects.open": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
+      "workspace.tree": { params: {} as { path?: string; depth?: number; includeHidden?: boolean } | undefined, response: [] as WorkspaceTreeEntry[] },
+      "workspace.read": { params: {} as { path: string; lineStart?: number; lineEnd?: number }, response: {} as WorkspaceFile },
+      "workspace.write": { params: {} as { path: string; content: string; expectedVersion?: string }, response: {} as WorkspaceFile },
+      "workspace.mkdir": { params: {} as { path: string }, response: {} as { accepted: boolean } },
+      "workspace.delete": { params: {} as { path: string; confirmed: true }, response: {} as { accepted: boolean } },
+      "workspace.move": { params: {} as { from: string; to: string }, response: {} as { accepted: boolean } },
+      "workspace.copy": { params: {} as { from: string; to: string }, response: {} as { accepted: boolean } },
+      "workspace.search": { params: {} as { query: string; mode?: "bm25" | "vector" | "hybrid"; topK?: number; minScore?: number; vectorWeight?: number }, response: [] as Array<z.infer<typeof workspaceSearchResultSchema>> },
+      "workspace.index": { params: {} as { paths: string[] }, response: {} as { indexed: number } },
+      "workspace.skills": { params: {} as { load?: boolean } | undefined, response: [] as Array<z.infer<typeof workspaceSkillSchema>> },
       "diagnostics.get": {
         params: {} as { limit?: number } | undefined,
         response: {} as DiagnosticsSnapshot,

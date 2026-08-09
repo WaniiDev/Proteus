@@ -255,6 +255,16 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         runtime.abort();
         return { accepted: true };
       },
+      "workspace.tree": async (params) => runtime.workspaceTree(params?.path, params?.depth, params?.includeHidden),
+      "workspace.read": async ({ path, lineStart, lineEnd }) => runtime.workspaceRead(path, lineStart, lineEnd),
+      "workspace.write": async ({ path, content, expectedVersion }) => runtime.workspaceWrite(path, content, expectedVersion),
+      "workspace.mkdir": async ({ path }) => runtime.workspaceCreateDirectory(path),
+      "workspace.delete": async ({ path, confirmed }) => { if (!confirmed) throw new Error("Deletion requires confirmation"); return runtime.workspaceDelete(path); },
+      "workspace.move": async ({ from, to }) => runtime.workspaceMove(from, to),
+      "workspace.copy": async ({ from, to }) => runtime.workspaceCopy(from, to),
+      "workspace.search": async ({ query, ...options }) => runtime.workspaceSearch(query, options),
+      "workspace.index": async ({ paths }) => runtime.workspaceIndex(paths),
+      "workspace.skills": async (params) => runtime.workspaceSkills(params?.load),
       "diagnostics.get": async (params) => runtime.getDiagnostics(params?.limit),
       "diagnostics.set-enabled": async ({ enabled }) => runtime.setDiagnosticsEnabled(enabled),
       "diagnostics.clear": async () => runtime.clearDiagnostics(),
