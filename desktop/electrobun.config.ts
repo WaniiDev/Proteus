@@ -22,6 +22,11 @@ export default {
       "assets/proteus.ico": "views/mainview/assets/proteus.ico",
       "node_modules/@napi-rs/keyring-win32-x64-msvc/keyring.win32-x64-msvc.node": "bun/keyring.win32-x64-msvc.node",
       "node_modules/@libsql/win32-x64-msvc": "bun/node_modules/@libsql/win32-x64-msvc",
+      // onnxruntime-node is bundled into bun/index.js, but its native loader
+      // keeps this path relative to that bundle: ../bin/napi-v6/win32/x64.
+      // Ship the complete directory because the binding also loads its sibling
+      // ONNX Runtime and DirectML DLLs at runtime.
+      "node_modules/onnxruntime-node/bin/napi-v6/win32/x64": "bin/napi-v6/win32/x64",
     },
     watchIgnore: ["dist/**"],
     win: {
