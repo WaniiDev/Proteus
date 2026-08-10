@@ -134,7 +134,8 @@ const Orb = forwardRef<OrbHandle, { state: OrbState }>(function Orb({ state }, r
   );
 });
 
-function ConversationPopover({ snapshot, open, disabled, initialEditingId, onClose, onCreate, onSwitch, onRename, onDelete }: { snapshot: RuntimeSnapshot; open: boolean; disabled: boolean; initialEditingId?: string | null; onClose: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDelete: (thread: ThreadSummary) => void }) {
+/** @deprecated Conversation navigation now lives in the persistent sidebar. */
+export function ConversationPopover({ snapshot, open, disabled, initialEditingId, onClose, onCreate, onSwitch, onRename, onDelete }: { snapshot: RuntimeSnapshot; open: boolean; disabled: boolean; initialEditingId?: string | null; onClose: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDelete: (thread: ThreadSummary) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -801,7 +802,7 @@ function QueuedMessageBubble({ draft }: { draft: QueuedDraft }) {
   );
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
+function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -810,10 +811,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
   const canChat = selectedProviderCanChat(snapshot) && snapshot.activeThreadId !== null && !runningElsewhere;
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
-  const titleRef = useRef<HTMLButtonElement>(null);
   const workbenchToggleRef = useRef<HTMLButtonElement>(null);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
-  const [renameRequest, setRenameRequest] = useState<string | null>(null);
   const [workbenchOpenByThread, setWorkbenchOpenByThread] = useState<Map<string, boolean>>(() => new Map());
   const [workspaceOpen, setWorkspaceOpen] = useState(() => localStorage.getItem("proteus.workspace.open") === "true");
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
@@ -825,10 +823,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
   const draftPresent = input.trim().length > 0;
   const primaryComposerAction = composerAction(runningForSelected, draftPresent);
   const inputLineCount = composerLineCount(input);
-  const titleTriggerClose = () => {
-    setSessionsOpen(false);
-    setRenameRequest(null);
-  };
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
@@ -837,9 +831,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
     if (!snapshot.activeThreadId || (!snapshot.messages.length && !snapshot.activeRun)) return;
     setDockedThreads((current) => (current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)));
   }, [snapshot.activeRun, snapshot.messages.length, snapshot.activeThreadId]);
-  useEffect(() => {
-    if (!sessionsOpen) titleRef.current?.focus();
-  }, [sessionsOpen]);
   useEffect(() => {
     if (!workbenchOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -864,26 +855,11 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
     <section className="view active companion-view">
       <div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag">
         <div className="chat-title-copy">
-          <button
-            ref={titleRef}
-            className="chat-title-trigger electrobun-webkit-app-region-no-drag"
-            type="button"
-            onClick={() => {
-              setRenameRequest(null);
-              setSessionsOpen((value) => !value);
-            }}
-            onDoubleClick={() => {
-              if (!snapshot.activeThreadId || snapshot.activeRun) return;
-              setRenameRequest(snapshot.activeThreadId);
-              setSessionsOpen(true);
-            }}
-            aria-expanded={sessionsOpen}
-            aria-haspopup="dialog"
-          >
+          {docked && <OrbPresence state={state} docked animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} />}
+          <div className="chat-title-text">
             <h1 className="chat-title">{activeTitle}</h1>
-            <Icon name="down" size={18} />
-          </button>
-          <span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span>
+            <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
+          </div>
         </div>
         <button type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${workspaceOpen ? " active" : ""}`} aria-label={workspaceOpen ? "Close workspace" : "Open workspace"} aria-expanded={workspaceOpen} aria-controls="workspace-pane" onClick={() => { setWorkspaceOpen((value) => !value); if (!workspaceOpen && snapshot.activeThreadId) setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false)); }}><PanelRight size={16} /><span>Workspace</span></button>
         {workbenchHasContent && (
@@ -904,13 +880,22 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
             {workbenchAttention > 0 && <b>{workbenchAttention}</b>}
           </button>
         )}
-        <ConversationPopover snapshot={snapshot} open={sessionsOpen} disabled={snapshot.activeRun !== null} initialEditingId={renameRequest} onClose={titleTriggerClose} onCreate={onCreate} onSwitch={onSwitch} onRename={onRename} onDelete={onDeleteRequest} />
       </div>
       <div className="text-chat-layout">
         <div className={`companion-grid ${workbenchOpen || workspaceOpen ? "workbench-present" : "workbench-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
-            <OrbPresence state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} />
+            {!docked && <OrbPresence state={state} docked={false} animateDock={false} pulseVersion={pulseVersion} orbRef={orbRef} />}
+            {!docked && <section className="command-home-copy" aria-label="Start with Proteus">
+              <span className="caption-uppercase">Your thinking companion</span>
+              <h2>What can we work on?</h2>
+              <p>Start with a question, a folder, or a result you want to make real.</p>
+              <div className="command-home-prompts">
+                <button type="button" onClick={() => setInput("Help me explore this project and identify the most important next step.")}>Explore a project</button>
+                <button type="button" onClick={() => setInput("Help me turn an idea into a clear, reviewable plan.")}>Shape a plan</button>
+                <button type="button" onClick={() => setInput("Research a question with sources and summarize what matters.")}>Research a question</button>
+              </div>
+            </section>}
             <div className="thread" ref={threadRef} aria-live="polite">
               {conversationItems.map((item) =>
                 item.type === "user" ? (
@@ -1334,10 +1319,6 @@ export default function App() {
               onSend={handleSend}
               onAbort={() => ignoreRpc(rpc.request["chat.abort"]())}
               onSettings={() => handleNavigate("settings")}
-              onCreate={handleCreate}
-              onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))}
-              onRename={handleRename}
-              onDeleteRequest={setDeleteTarget}
               onOrbState={setOrbState}
               onRetry={(messageId) => ignoreRpc(rpc.request["chat.retry"]({ messageId }))}
               onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))}
