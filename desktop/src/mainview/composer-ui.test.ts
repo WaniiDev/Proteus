@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ChatMessage, RuntimeSnapshot } from "../shared/contracts";
-import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { canChooseComposerWorkspace, composerAction, composerLineCount, composerModelLabel, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const draft = (id: string, text = `Message ${id}`): QueuedDraft => ({ id, threadId: "thread-1", text, createdAt: `2026-08-04T00:00:0${id}.000Z`, state: "queued" });
 const user = (id: string, text: string, createdAt: string): ChatMessage => ({ id, role: "user", text, turnId: id, status: "complete", createdAt, parts: [{ type: "text", id: `${id}:text`, text }] });
@@ -50,16 +50,57 @@ describe("composer UI policy", () => {
     expect(composerLineCount("One\r\nTwo")).toBe(2);
   });
 
+  it("shows project selection only for a truly empty idle conversation", () => {
+    const snapshot = {
+      revision: 1,
+      status: "ready",
+      credential: { configured: true, verified: true },
+      providerAuth: null,
+      providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" }],
+      models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] }],
+      selectedProviderId: "openrouter",
+      selectedModelId: "openrouter/auto",
+      selectedReasoningEffort: null,
+      projects: [], activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
+      threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
+      workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
+      activeRun: null, error: null,
+    } satisfies RuntimeSnapshot;
+
+    expect(canChooseComposerWorkspace(snapshot, 0)).toBe(true);
+    expect(canChooseComposerWorkspace({ ...snapshot, messages: [user("1", "Hello", new Date().toISOString())] }, 0)).toBe(false);
+    expect(canChooseComposerWorkspace({ ...snapshot, activeRun: { runId: "run", threadId: "thread-1", status: "running" } }, 0)).toBe(false);
+    expect(canChooseComposerWorkspace(snapshot, 1)).toBe(false);
+  });
+
+  it("formats provider, model, and optional thinking effort for the compact control", () => {
+    const snapshot = {
+      revision: 1, status: "ready", credential: { configured: false, verified: false }, providerAuth: null,
+      providers: [{ id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" }],
+      models: [{ id: "codex/gpt-5.6-sol", providerId: "codex", rawId: "gpt-5.6-sol", name: "GPT-5.6 Sol", inputModalities: ["text"], outputModalities: ["text"] }],
+      selectedProviderId: "codex", selectedModelId: "codex/gpt-5.6-sol", selectedReasoningEffort: "high",
+      projects: [], activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
+      threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
+      workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
+      activeRun: null, error: null,
+    } satisfies RuntimeSnapshot;
+    expect(composerModelLabel(snapshot)).toBe("Codex · GPT-5.6 Sol · high");
+  });
+
   it("keeps the composer metadata minimal and centers its action at the right edge", async () => {
     const app = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
+    const composer = await Bun.file(new URL("./Composer.tsx", import.meta.url)).text();
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
 
     expect(app).not.toContain("Active conversation");
     expect(app).not.toContain("via OpenRouter");
+    expect(app).toContain("<Composer");
+    expect(composer).toContain("composer-project-popover");
+    expect(composer).toContain("composer-model-popover");
     expect(css).toContain(".composer-primary { position: absolute; top: 50%; right: 11px;");
-    expect(css).toContain("padding: 10px 60px 9px 12px");
-    expect(css).toContain("max-height: 154px");
-    expect(css).toContain("max-height: 114px; field-sizing: content");
+    expect(css).toContain("border-radius: 20px");
+    expect(css).toContain(".composer-popover { position: absolute; bottom: calc(100% + 10px)");
+    expect(css).toContain(".composer-model-popover { width: min(560px, calc(100% - 28px))");
   });
 
   it("reconciles identical queued text FIFO and marks a draining item", () => {

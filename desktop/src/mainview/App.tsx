@@ -14,10 +14,11 @@ import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { ContextPane, type ContextPaneTab } from "./ContextPane";
-import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { reconcileQueuedDrafts, selectedProviderCanChat, type QueuedDraft } from "./composer-ui";
 import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform, type OrbPlacement } from "./orb-motion";
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
 import { ProjectsView } from "./ProjectsView";
+import { Composer } from "./Composer";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -858,9 +859,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
   const contextOpen = !!snapshot.activeThreadId && contextOpenByThread.get(snapshot.activeThreadId) === true;
   const contextTab = snapshot.activeThreadId ? contextTabByThread.get(snapshot.activeThreadId) ?? "activity" : "activity";
   const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
-  const draftPresent = input.trim().length > 0;
-  const primaryComposerAction = composerAction(runningForSelected, draftPresent);
-  const inputLineCount = composerLineCount(input);
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
@@ -967,38 +965,23 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
                 </button>
               )}
             </div>
-            <form className={`composer${canChat ? "" : " disabled"}`} onSubmit={onSend} autoComplete="off">
-              <textarea
-                className="composer-input"
-                value={input}
-                onChange={(event) => {
-                  setInput(event.target.value);
-                  orbRef.current?.nudge();
-                }}
-                placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message Proteus…" : `Configure ${selectedProvider?.name ?? "a provider"} in Settings to chat`}
-                aria-label="Message Proteus"
-                disabled={!canChat}
-                maxLength={32_000}
-                rows={inputLineCount}
-                onKeyDown={(event) => {
-                  if (!shouldSubmitComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return;
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }}
-              />
-              <div className="composer-footer">
-                <div className="composer-context">
-                  <span>{selectedModel?.name ?? snapshot.selectedModelId}</span>
-                  {selectedProvider?.verified !== true && <button className="btn-tertiary" type="button" onClick={onSettings}>Configure provider</button>}
-                </div>
-                <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
-                {primaryComposerAction === "stop" ? (
-                  <button className="composer-primary composer-primary-stop" type="button" aria-label="Stop response" onClick={onAbort}><Icon name="stop" size={17} /></button>
-                ) : (
-                  <button className="composer-primary" type="submit" aria-label={primaryComposerAction === "queue" ? "Queue message" : "Send"} disabled={!canChat || !draftPresent}><Icon name="send" size={18} /></button>
-                )}
-              </div>
-            </form>
+            <Composer
+              snapshot={snapshot}
+              input={input}
+              queuedDraftCount={queuedDrafts.length}
+              canChat={canChat}
+              runningForSelected={runningForSelected}
+              runningElsewhere={runningElsewhere}
+              providerName={selectedProvider?.name ?? "a provider"}
+              onInput={setInput}
+              onSubmit={onSend}
+              onAbort={onAbort}
+              onSettings={onSettings}
+              onNudge={() => orbRef.current?.nudge()}
+              onWorkspaceSelect={(workspaceBinding) => rpc.request["threads.workspace.select"]({ workspaceBinding })}
+              onModelSelect={(modelId) => rpc.request["models.select"]({ modelId }).then((result) => result.accepted)}
+              onReasoningSelect={(reasoningEffort) => rpc.request["models.reasoning.select"]({ reasoningEffort }).then((result) => result.accepted)}
+            />
           </div>
           {contextOpen && (
             <button
@@ -1125,7 +1108,7 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
         </section>)}
         <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
       </div> : section === "models" ? <section className="card settings-card model-settings-card">
-        <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection is remembered across conversations and app restarts.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
+        <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection applies to the current conversation and becomes the default for new chats.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
         <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}>{provider.name}</button>)}</div>
         <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
         <div className="model-card-list">{displayedModels.map((model) => { const isSelected = selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId); return <button type="button" className={`model-card ${isSelected ? "selected" : ""}`} key={model.id} onClick={() => chooseDisplayedModel(model)} disabled={snapshot.activeRun !== null}><span className="model-card-copy"><strong>{model.providerId === "codex" ? model.baseModelId : model.name}</strong><small>{model.description ?? model.rawId}</small></span>{isSelected && <Check size={17} />}</button>; })}</div>

@@ -13,7 +13,7 @@ Proteus uses the installed Mastra `Agent` as its run, queue, suspension, history
 
 ## Workspace boundary
 
-Each conversation has an immutable workspace binding: either the private Proteus app workspace or one attached project folder. Existing conversations migrate to the app workspace. Project records live in a Mastra `FactoryStorageDomain`; conversation metadata stores only the binding. If an attached folder is moved, deleted, or forgotten, the chat becomes explicitly unavailable until the user reconnects it. Proteus never silently redirects it to the app workspace.
+Each conversation has a workspace binding: either the private Proteus app workspace or one attached project folder. `threads.workspace.select` can change that binding only while the conversation is canonically empty and idle; `TextRuntime` rejects busy, queued, suspended, optimistic, non-empty, and unavailable-project cases. After the first message, the binding is immutable. Existing conversations migrate to the app workspace. Project records live in a Mastra `FactoryStorageDomain`; conversation metadata stores only the binding. If an attached folder is moved, deleted, or forgotten, the chat becomes explicitly unavailable until the user reconnects it. Proteus never silently redirects it to the app workspace.
 
 `RequestContext` carries the trusted thread ID, workspace kind, and canonical root from the Bun runtime into `Agent.queueMessage()` through `ifIdle.streamOptions`. A dynamic `LocalFilesystem` is constructed with `contained: true`, so traversal and symlink escapes outside that root are rejected by Mastra.
 
@@ -57,7 +57,7 @@ Historical rendering removes only artifacts emitted by the retired task-loop gua
 
 ## Providers
 
-OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with the conversation; there is no silent fallback to OpenRouter.
+OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with each conversation; the most recently chosen combination seeds new conversations without changing existing ones. There is no silent fallback to OpenRouter.
 
 Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: false`. MastraCode owns ChatGPT OAuth and model construction. Credentials remain in Windows Credential Manager and never enter IPC snapshots, messages, diagnostics, thread metadata, or plan files.
 

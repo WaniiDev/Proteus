@@ -31,6 +31,22 @@ export function composerLineCount(value: string): number {
   return Math.max(1, value.split(/\r\n|\r|\n/).length);
 }
 
+export function canChooseComposerWorkspace(snapshot: RuntimeSnapshot, queuedDraftCount: number): boolean {
+  return snapshot.activeThreadId !== null
+    && snapshot.messages.length === 0
+    && snapshot.activeRun === null
+    && snapshot.interactions.length === 0
+    && snapshot.workbench.queuedFollowUpCount === 0
+    && queuedDraftCount === 0;
+}
+
+export function composerModelLabel(snapshot: RuntimeSnapshot): string {
+  const model = snapshot.models.find((candidate) => candidate.id === snapshot.selectedModelId);
+  const provider = snapshot.providers.find((candidate) => candidate.id === (model?.providerId ?? snapshot.selectedProviderId));
+  const segments = [provider?.name, model?.name ?? snapshot.selectedModelId, snapshot.selectedReasoningEffort].filter(Boolean);
+  return segments.join(" · ");
+}
+
 export function reconcileQueuedDrafts(drafts: QueuedDraft[], messages: ChatMessage[], activeThreadId: string | null, queuedCount: number): QueuedDraft[] {
   if (!activeThreadId) return [];
   const active = drafts.filter((draft) => draft.threadId === activeThreadId).sort((left, right) => left.createdAt.localeCompare(right.createdAt));

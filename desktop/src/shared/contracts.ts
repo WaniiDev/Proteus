@@ -231,6 +231,14 @@ export const workspaceBindingSchema = z.discriminatedUnion("kind", [
 ]);
 export type WorkspaceBinding = z.infer<typeof workspaceBindingSchema>;
 
+export type WorkspaceBindingUpdateResult =
+  | { accepted: true }
+  | {
+      accepted: false;
+      code: "busy" | "not-empty" | "project-unavailable" | "failed";
+      message: string;
+    };
+
 export const projectSummarySchema = z.object({
   id: z.string().min(1), name: z.string().min(1), rootPath: z.string().min(1),
   availability: z.enum(["ready", "missing"]), createdAt: z.string(), updatedAt: z.string(), lastOpenedAt: z.string(),
@@ -425,6 +433,10 @@ export const proteusRpcSchema = {
       "threads.create": {
         params: {} as { title?: string; workspaceBinding?: WorkspaceBinding } | undefined,
         response: {} as { threadId: string },
+      },
+      "threads.workspace.select": {
+        params: {} as { workspaceBinding: WorkspaceBinding },
+        response: {} as WorkspaceBindingUpdateResult,
       },
       "threads.switch": {
         params: {} as { threadId: string },

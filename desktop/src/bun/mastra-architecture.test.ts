@@ -56,7 +56,7 @@ describe("Mastra-first architecture boundaries", () => {
     expect(app).not.toContain("TypingDots");
   });
 
-  it("keeps workspace roots server-owned and chat bindings immutable", async () => {
+  it("keeps workspace roots server-owned and allows rebinding only through the guarded empty-chat contract", async () => {
     const [runtime, contracts, entry] = await Promise.all([
       readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
@@ -65,8 +65,21 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("requestContextFor(threadId)");
     expect(runtime).toContain("The selected project folder is unavailable");
     expect(contracts).toContain("workspaceBindingSchema");
-    expect(contracts).not.toContain('"threads.workspace.update"');
+    expect(contracts).toContain('"threads.workspace.select"');
+    expect(runtime).toContain("workspaceSelectionBlocker");
+    expect(runtime).toContain("this.threads.recall(threadId)");
     expect(entry).not.toContain("rootPath }");
+  });
+
+  it("keeps model selection conversation-owned while retaining a new-chat default", async () => {
+    const runtime = await readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8");
+    expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.preferredModelSelection");
+    expect(runtime).toContain("const shouldBackfillModelSelection = !parseAppModelSelection(nextThreadState.modelSelection)");
+    expect(runtime).toContain("modelSelection: this.defaultModelSelection()");
+    expect(runtime).toContain("this.preferredModelSelection = selection");
+    expect(runtime).toContain("this.threadState = { ...this.threadState, modelSelection: selection }");
+    expect(runtime).toContain("const retryState: PersistedThreadState = {");
+    expect(runtime).toContain("...sourceState,");
   });
 
   it("removes the retired ACP runtime and packaged adapter", async () => {

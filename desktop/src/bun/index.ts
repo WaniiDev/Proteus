@@ -143,6 +143,14 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
           return { threadId: "" };
         }
       },
+      "threads.workspace.select": async ({ workspaceBinding }) => {
+        try {
+          return await runtime.selectWorkspace(workspaceBinding);
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false, code: "failed" as const, message: "The project selection could not be saved." };
+        }
+      },
       "projects.attach": async () => {
         try { return { accepted: await runtime.attachProject() }; }
         catch (error) { runtime.reportError(error); return { accepted: false }; }

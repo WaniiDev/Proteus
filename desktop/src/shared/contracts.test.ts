@@ -99,6 +99,7 @@ describe("provider-neutral model contracts", () => {
     expect(auth).not.toHaveProperty("refresh");
     expect(Object.hasOwn(requests, "providers.connect")).toBe(true);
     expect(Object.hasOwn(requests, "providers.auth.submit")).toBe(true);
+    expect(Object.hasOwn(requests, "threads.workspace.select")).toBe(true);
     expect(Object.hasOwn(requests, "credentials.connect")).toBe(false);
   });
 });

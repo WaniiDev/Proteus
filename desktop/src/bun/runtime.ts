@@ -18,7 +18,7 @@ import { Memory } from "@mastra/memory";
 import { createWorkspaceTools, LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceScopeSummary } from "../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceBindingUpdateResult, WorkspaceScopeSummary } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
 import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
@@ -35,7 +35,7 @@ import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
 import { approvalFingerprint } from "./approval-policy";
 import { createProteusStorage, type ProteusStorageFoundation } from "./mastra-foundation";
 import { ensureProteusAppWorkspace, proteusAppWorkspaceRoot } from "./app-workspace";
-import { resolveRememberedModelSelection, type AppModelSelection, type ModelPreferencesStorage } from "./model-preferences";
+import { parseAppModelSelection, resolveRememberedModelSelection, type AppModelSelection, type ModelPreferencesStorage } from "./model-preferences";
 import { NativeThreadRepository } from "./native-thread-repository";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
 import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
@@ -51,6 +51,7 @@ import { resolveAskUserResponse } from "./ask-user-response";
 import { compatibleAskUserTool } from "./compatible-ask-user-tool";
 import { ScopedMemoryManager } from "./scoped-memory";
 import { createMemoryTools } from "./memory-tools";
+import { workspaceSelectionBlocker } from "./workspace-selection-policy";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -457,6 +458,7 @@ export class TextRuntime {
   private readonly hydratingPlans = new Set<string>();
   private readonly hydratedPlans = new Set<string>();
   private threadSwitchQueue: Promise<void> = Promise.resolve();
+  private composerMutationQueue: Promise<void> = Promise.resolve();
   private snapshot: RuntimeSnapshot = {
     status: "booting",
     credential: { configured: false, verified: false },
@@ -775,7 +777,7 @@ export class TextRuntime {
     }
     const empty: PersistedThreadState = { workspaceBinding: { kind: "app" } };
     this.threadStateCache.set(threadId, empty);
-    return {};
+    return structuredClone(empty);
   }
 
   private async loadNativeTasks(threadId: string): Promise<WorkbenchTask[]> {
@@ -838,7 +840,7 @@ export class TextRuntime {
     return structuredClone(next);
   }
 
-  private async persistThreadState(threadId: string, state = this.threadState): Promise<void> {
+  private async persistThreadState(threadId: string, state = this.threadState, failOnError = false): Promise<void> {
     if (!threadId) return;
     const { tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes, ...uiState } = state;
     const next = structuredClone(uiState);
@@ -856,6 +858,7 @@ export class TextRuntime {
             threadId,
             resourceId: RESOURCE_ID,
           });
+          if (failOnError && (!thread || !memoryStore)) throw new Error("Conversation metadata storage is unavailable");
           if (thread && memoryStore) {
             const { [LEGACY_THREAD_METADATA_KEY]: _legacy, ...metadata } = thread.metadata ?? {};
             await memoryStore.updateThread({
@@ -870,6 +873,7 @@ export class TextRuntime {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "end", threadId, durationMs: performance.now() - startedAt });
         } catch (error) {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "error", threadId, durationMs: performance.now() - startedAt, payload: error });
+          if (failOnError) throw error;
           // Workbench metadata must never make text chat fail.
         }
       });
@@ -1259,7 +1263,14 @@ export class TextRuntime {
         return activity ? { ...summary, ...activity } : summary;
       })
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-    if (threads.length === 0) threads = [mapThread(await this.threads.create("New chat", { [THREAD_METADATA_KEY]: { workspaceBinding: { kind: "app" } } }))];
+    if (threads.length === 0) {
+      threads = [mapThread(await this.threads.create("New chat", {
+        [THREAD_METADATA_KEY]: {
+          workspaceBinding: { kind: "app" },
+          modelSelection: this.defaultModelSelection(),
+        },
+      }))];
+    }
     const activeThreadId = this.selectedThreadId && threads.some((thread) => thread.id === this.selectedThreadId) ? this.selectedThreadId : threads[0].id;
     if (selectionGeneration !== this.threadSelectionGeneration || syncGeneration !== this.threadStateSyncGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)) return;
     const nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
@@ -1268,26 +1279,19 @@ export class TextRuntime {
       if (optimistic.threadId !== activeThreadId) this.optimisticUserMessages.delete(id);
     }
     this.selectedThreadId = activeThreadId;
-    this.threadState = nextThreadState;
     let modelSelection = resolveRememberedModelSelection(
-      this.preferredModelSelection,
       nextThreadState.modelSelection,
+      this.preferredModelSelection,
       DEFAULT_MODEL_SELECTION,
     );
     if (modelSelection.providerId === "codex") {
       const migrated = migrateCodexSelection(modelSelection.modelId, modelSelection.reasoningEffort);
       modelSelection = { providerId: "codex", ...migrated };
     }
-    const preferredModelSelection = this.preferredModelSelection;
-    if (
-      !preferredModelSelection
-      || preferredModelSelection.providerId !== modelSelection.providerId
-      || preferredModelSelection.modelId !== modelSelection.modelId
-      || preferredModelSelection.reasoningEffort !== modelSelection.reasoningEffort
-    ) {
-      await this.modelPreferences.save(modelSelection);
-      this.preferredModelSelection = modelSelection;
-    }
+    const shouldBackfillModelSelection = !parseAppModelSelection(nextThreadState.modelSelection);
+    this.threadState = shouldBackfillModelSelection
+      ? { ...nextThreadState, modelSelection }
+      : nextThreadState;
     const nextSnapshot: Partial<RuntimeSnapshot> = {
       threads,
       activeThreadId,
@@ -1295,7 +1299,7 @@ export class TextRuntime {
       selectedModelId: modelSelection.modelId,
       selectedReasoningEffort: modelSelection.reasoningEffort ?? null,
       projects: projectSummaries,
-      activeWorkspace: this.scopeFor(nextThreadState.workspaceBinding ?? { kind: "app" }, projectSummaries),
+      activeWorkspace: this.scopeFor(this.threadState.workspaceBinding ?? { kind: "app" }, projectSummaries),
       messages: [],
       events: nextThreadState.events ?? [],
       interactions: nextThreadState.pendingInteractions ?? [],
@@ -1303,6 +1307,9 @@ export class TextRuntime {
     };
     if (options.clearError !== false) nextSnapshot.error = null;
     this.publish(nextSnapshot);
+    if (shouldBackfillModelSelection && activeThreadId) {
+      await this.persistThreadState(activeThreadId, this.threadState);
+    }
     await this.syncMessages(activeThreadId ?? undefined, {
       selectionGeneration,
       syncGeneration,
@@ -1313,6 +1320,20 @@ export class TextRuntime {
     const next = this.threadSwitchQueue.catch(() => undefined).then(operation);
     this.threadSwitchQueue = next.catch(() => undefined);
     return next;
+  }
+
+  private enqueueComposerMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.composerMutationQueue.catch(() => undefined).then(operation);
+    this.composerMutationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private defaultModelSelection(): AppModelSelection {
+    return this.preferredModelSelection ?? {
+      providerId: this.snapshot.selectedProviderId,
+      modelId: this.snapshot.selectedModelId,
+      ...(this.snapshot.selectedReasoningEffort ? { reasoningEffort: this.snapshot.selectedReasoningEffort } : {}),
+    };
   }
 
   private nextPlanVersion(): number {
@@ -1648,22 +1669,16 @@ export class TextRuntime {
   }
 
   async selectProvider(providerId: ProviderId): Promise<void> {
-    await this.ensureInitialized();
-    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
-    const model = this.snapshot.models.find((candidate) => candidate.providerId === providerId);
-    if (!model) throw makeRuntimeError("model-unavailable");
-    await this.selectModel(model.id);
+    return this.enqueueComposerMutation(async () => {
+      await this.ensureInitialized();
+      if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+      const model = this.snapshot.models.find((candidate) => candidate.providerId === providerId);
+      if (!model) throw makeRuntimeError("model-unavailable");
+      await this.selectModelNow(model.id);
+    });
   }
 
-  private async persistModelSelection(selection: AppModelSelection): Promise<void> {
-    await this.modelPreferences.save(selection);
-    this.preferredModelSelection = selection;
-    if (!this.selectedThreadId) return;
-    this.threadState = { ...this.threadState, modelSelection: selection };
-    await this.persistThreadState(this.selectedThreadId);
-  }
-
-  async selectModel(modelId: ProviderModelId): Promise<void> {
+  private async selectModelNow(modelId: ProviderModelId): Promise<void> {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     const model = this.snapshot.models.find((candidate) => candidate.id === modelId);
@@ -1685,19 +1700,33 @@ export class TextRuntime {
     });
   }
 
+  private async persistModelSelection(selection: AppModelSelection): Promise<void> {
+    await this.modelPreferences.save(selection);
+    this.preferredModelSelection = selection;
+    if (!this.selectedThreadId) return;
+    this.threadState = { ...this.threadState, modelSelection: selection };
+    await this.persistThreadState(this.selectedThreadId);
+  }
+
+  async selectModel(modelId: ProviderModelId): Promise<void> {
+    return this.enqueueComposerMutation(() => this.selectModelNow(modelId));
+  }
+
   async selectReasoning(reasoningEffort: ReasoningEffort | null): Promise<void> {
-    await this.ensureInitialized();
-    if (this.startingRun || this.runId) throw makeRuntimeError("busy");
-    const selected = this.snapshot.models.find((model) => model.id === this.snapshot.selectedModelId);
-    if (!selected) throw makeRuntimeError("model-unavailable");
-    if (reasoningEffort && !selected.reasoningOptions?.includes(reasoningEffort)) throw makeRuntimeError("model-unavailable");
-    const nextReasoningEffort = selected.providerId === "codex" ? reasoningEffort ?? DEFAULT_CODEX_REASONING : reasoningEffort;
-    await this.persistModelSelection({
-      providerId: selected.providerId,
-      modelId: selected.id,
-      ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
+    return this.enqueueComposerMutation(async () => {
+      await this.ensureInitialized();
+      if (this.startingRun || this.runId) throw makeRuntimeError("busy");
+      const selected = this.snapshot.models.find((model) => model.id === this.snapshot.selectedModelId);
+      if (!selected) throw makeRuntimeError("model-unavailable");
+      if (reasoningEffort && !selected.reasoningOptions?.includes(reasoningEffort)) throw makeRuntimeError("model-unavailable");
+      const nextReasoningEffort = selected.providerId === "codex" ? reasoningEffort ?? DEFAULT_CODEX_REASONING : reasoningEffort;
+      await this.persistModelSelection({
+        providerId: selected.providerId,
+        modelId: selected.id,
+        ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
+      });
+      this.publish({ selectedReasoningEffort: nextReasoningEffort, error: null });
     });
-    this.publish({ selectedReasoningEffort: nextReasoningEffort, error: null });
   }
 
   private async selectedWorkspaceRoot(): Promise<string> {
@@ -1706,6 +1735,59 @@ export class TextRuntime {
     const root = context.get("proteus-workspace-root");
     if (typeof root !== "string") throw new Error("The selected workspace is unavailable");
     return root;
+  }
+
+  async selectWorkspace(workspaceBinding: WorkspaceBinding): Promise<WorkspaceBindingUpdateResult> {
+    return this.enqueueComposerMutation(async () => {
+      await this.ensureInitialized();
+      const threadId = this.selectedThreadId ?? this.snapshot.activeThreadId;
+      if (!threadId) return { accepted: false, code: "failed", message: "No conversation is selected." };
+      const runtimeBusy = this.startingRun || this.runId !== null || this.pendingThreadSelectionId !== null || this.snapshot.activeRun !== null;
+      const queuedCount = this.nativeDriver.queuedCount(threadId);
+      const busyBlocker = workspaceSelectionBlocker({
+        runtimeBusy,
+        queuedCount,
+        storedMessageCount: 0,
+        hasOptimisticMessage: false,
+        suspensionCount: 0,
+        hasPendingInteraction: false,
+      });
+      if (busyBlocker) return busyBlocker;
+      const [messages, suspensions, state] = await Promise.all([
+        this.threads.recall(threadId),
+        this.nativeDriver.listSuspensions(threadId).catch(() => []),
+        this.loadThreadState(threadId),
+      ]);
+      const hasOptimisticMessage = [...this.optimisticUserMessages.values()].some((item) => item.threadId === threadId);
+      const hasPendingInteraction = (state.pendingInteractions ?? []).some((item) => item.status === "pending" || item.status === "resolving");
+      const blocker = workspaceSelectionBlocker({
+        runtimeBusy,
+        queuedCount,
+        storedMessageCount: messages.length,
+        hasOptimisticMessage,
+        suspensionCount: suspensions.length,
+        hasPendingInteraction,
+      });
+      if (blocker) return blocker;
+
+      if (workspaceBinding.kind === "project") {
+        const project = (await this.projectSummaries()).find((item) => item.id === workspaceBinding.projectId);
+        if (!project || project.availability !== "ready") {
+          return { accepted: false, code: "project-unavailable", message: "Reconnect this project folder before using it in a conversation." };
+        }
+      }
+
+      const nextState: PersistedThreadState = { ...state, workspaceBinding };
+      try {
+        await this.persistThreadState(threadId, nextState, true);
+      } catch {
+        this.threadStateCache.set(threadId, structuredClone(state));
+        return { accepted: false, code: "failed", message: "The project selection could not be saved." };
+      }
+      this.threadState = nextState;
+      await this.syncThreadState();
+      return { accepted: true };
+    });
   }
 
   async workspaceTree(path?: string, depth?: number, includeHidden?: boolean) { return this.workspaceRegistry.tree(await this.selectedWorkspaceRoot(), path, depth, includeHidden); }
@@ -1726,7 +1808,7 @@ export class TextRuntime {
       const project = (await this.projectSummaries()).find((item) => item.id === workspaceBinding.projectId);
       if (!project || project.availability !== "ready") throw new Error("The selected project folder is unavailable");
     }
-    const state: PersistedThreadState = { workspaceBinding };
+    const state: PersistedThreadState = { workspaceBinding, modelSelection: this.defaultModelSelection() };
     const thread = await this.threads.create(title?.trim() || "New chat", { [THREAD_METADATA_KEY]: state });
     this.threadStateCache.set(thread.id, state);
     this.selectedThreadId = thread.id;
@@ -1821,24 +1903,26 @@ export class TextRuntime {
   }
 
   async selectThread(threadId: string): Promise<void> {
-    if (this.startingRun) throw makeRuntimeError("busy");
-    const generation = ++this.threadSelectionGeneration;
-    this.pendingThreadSelectionId = threadId;
-    try {
-      await this.ensureInitialized();
-      const thread = await this.threads.get(threadId);
-      if (!thread) throw new Error("Conversation not found");
-      if (generation !== this.threadSelectionGeneration) return;
-      await this.enqueueThreadSwitch(async () => {
+    return this.enqueueComposerMutation(async () => {
+      if (this.startingRun) throw makeRuntimeError("busy");
+      const generation = ++this.threadSelectionGeneration;
+      this.pendingThreadSelectionId = threadId;
+      try {
+        await this.ensureInitialized();
+        const thread = await this.threads.get(threadId);
+        if (!thread) throw new Error("Conversation not found");
         if (generation !== this.threadSelectionGeneration) return;
-        this.selectedThreadId = threadId;
-        await this.syncThreadState({}, generation);
-        await this.nativeDriver.ensureSubscription(threadId);
-        if (generation === this.threadSelectionGeneration) this.pendingThreadSelectionId = null;
-      });
-    } finally {
-      if (generation === this.threadSelectionGeneration && this.pendingThreadSelectionId === threadId) this.pendingThreadSelectionId = null;
-    }
+        await this.enqueueThreadSwitch(async () => {
+          if (generation !== this.threadSelectionGeneration) return;
+          this.selectedThreadId = threadId;
+          await this.syncThreadState({}, generation);
+          await this.nativeDriver.ensureSubscription(threadId);
+          if (generation === this.threadSelectionGeneration) this.pendingThreadSelectionId = null;
+        });
+      } finally {
+        if (generation === this.threadSelectionGeneration && this.pendingThreadSelectionId === threadId) this.pendingThreadSelectionId = null;
+      }
+    });
   }
 
   async switchThread(threadId: string): Promise<void> {
@@ -1862,24 +1946,31 @@ export class TextRuntime {
     this.nativeDriver.dispose(threadId);
     const remaining = (await this.threads.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     if (this.selectedThreadId === threadId || !this.selectedThreadId) {
-      const next = remaining[0] ?? mapThread(await this.threads.create("New chat"));
+      const next = remaining[0] ?? mapThread(await this.threads.create("New chat", {
+        [THREAD_METADATA_KEY]: {
+          workspaceBinding: { kind: "app" },
+          modelSelection: this.defaultModelSelection(),
+        },
+      }));
       this.selectedThreadId = next.id;
     }
     await this.syncThreadState();
   }
 
   async send(text: string, clientMessageId?: string): Promise<{ runId: string }> {
-    const candidate = text.trim();
-    if (!candidate) throw new Error("Message cannot be empty");
-    if (candidate.length > MAX_INPUT_LENGTH) throw new Error(`Message must be ${MAX_INPUT_LENGTH} characters or fewer`);
-    const messageId = clientMessageId?.trim() || randomUUID();
-    if (this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
-    await this.ensureInitialized();
-    if (this.snapshot.selectedProviderId === "openrouter" && (!this.snapshot.credential.configured || !this.snapshot.credential.verified)) throw makeRuntimeError("invalid-credential");
-    if (this.snapshot.selectedProviderId === "codex" && this.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
-    let threadId = this.selectedThreadId ?? this.snapshot.activeThreadId;
-    if (!threadId) threadId = await this.createThread("New chat");
-    return this.queueNativeMessage(threadId, candidate, { clientMessageId: messageId, optimistic: true });
+    return this.enqueueComposerMutation(async () => {
+      const candidate = text.trim();
+      if (!candidate) throw new Error("Message cannot be empty");
+      if (candidate.length > MAX_INPUT_LENGTH) throw new Error(`Message must be ${MAX_INPUT_LENGTH} characters or fewer`);
+      const messageId = clientMessageId?.trim() || randomUUID();
+      if (this.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
+      await this.ensureInitialized();
+      if (this.snapshot.selectedProviderId === "openrouter" && (!this.snapshot.credential.configured || !this.snapshot.credential.verified)) throw makeRuntimeError("invalid-credential");
+      if (this.snapshot.selectedProviderId === "codex" && this.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
+      let threadId = this.selectedThreadId ?? this.snapshot.activeThreadId;
+      if (!threadId) threadId = await this.createThread("New chat");
+      return this.queueNativeMessage(threadId, candidate, { clientMessageId: messageId, optimistic: true });
+    });
   }
 
   private async queueNativeMessage(threadId: string, candidate: string, options: { clientMessageId?: string; optimistic?: boolean } = {}): Promise<{ runId: string }> {

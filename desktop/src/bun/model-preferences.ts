@@ -33,16 +33,16 @@ export function parseAppModelSelection(value: unknown): AppModelSelection | null
 }
 
 export function resolveRememberedModelSelection(
+  conversationSelection: unknown,
   preferred: unknown,
-  legacyThreadSelection: unknown,
   fallback: AppModelSelection,
 ): AppModelSelection {
-  return parseAppModelSelection(preferred)
-    ?? parseAppModelSelection(legacyThreadSelection)
+  return parseAppModelSelection(conversationSelection)
+    ?? parseAppModelSelection(preferred)
     ?? appModelSelectionSchema.parse(fallback);
 }
 
-/** App-wide model preference stored through Mastra's native FactoryStorage API. */
+/** Last-used model selection stored as the default for new conversations. */
 export class ModelPreferencesStorage extends FactoryStorageDomain {
   constructor() {
     super("proteus-model-preferences");

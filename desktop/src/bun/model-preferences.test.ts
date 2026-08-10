@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createProteusStorage } from "./mastra-foundation";
 import { parseAppModelSelection, resolveRememberedModelSelection } from "./model-preferences";
 
-describe("app-wide model preferences", () => {
+describe("conversation model defaults", () => {
   test("remembers provider, model, and reasoning across app storage restarts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "proteus-model-preferences-"));
     const selected = {
@@ -42,15 +42,15 @@ describe("app-wide model preferences", () => {
     expect(parseAppModelSelection({ providerId: "codex", modelId: "openrouter/auto" })).toBeNull();
   });
 
-  test("keeps the app preference authoritative over a conversation's old default", () => {
+  test("keeps a conversation selection authoritative over the new-chat default", () => {
     expect(resolveRememberedModelSelection(
+      { providerId: "openrouter", modelId: "openrouter/auto" },
       { providerId: "codex", modelId: "codex/gpt-5.6-sol", reasoningEffort: "high" },
       { providerId: "openrouter", modelId: "openrouter/auto" },
-      { providerId: "openrouter", modelId: "openrouter/auto" },
-    )).toEqual({ providerId: "codex", modelId: "codex/gpt-5.6-sol", reasoningEffort: "high" });
+    )).toEqual({ providerId: "openrouter", modelId: "openrouter/auto" });
   });
 
-  test("migrates a conversation selection when no app preference exists yet", () => {
+  test("uses the app preference as the default when a conversation has no selection", () => {
     expect(resolveRememberedModelSelection(
       null,
       { providerId: "codex", modelId: "codex/gpt-5.6-sol", reasoningEffort: "medium" },
