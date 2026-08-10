@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { runtimeSnapshotSchema, type ProteusRPCSchema, type RuntimeSnapshot } from "./contracts";
-import { decodeRuntimeSnapshot, encodeRuntimeSnapshot } from "./runtime-snapshot-codec";
+import { runtimeSnapshotDecodeReportSchema, runtimeSnapshotSchema, type ProteusRPCSchema, type RuntimeSnapshot } from "./contracts";
+import { decodeRuntimeSnapshot, describeRuntimeSnapshotDecodeFailure, encodeRuntimeSnapshot } from "./runtime-snapshot-codec";
 
 const unicodeMarkdown = ["It looks like “awd” may have been a typo.", "That’s sweet—thank you! I think you meant “I love you.”", "ไทย: สวัสดีครับ", "日本語: こんにちは", "Emoji: 😀 🧑‍💻", "", "```ts", 'const greeting = "สวัสดี 😀";', "```"].join("\n");
 
@@ -157,8 +157,25 @@ describe("RuntimeSnapshot Unicode transport", () => {
   it("rejects corrupted or unsupported envelopes", () => {
     const envelope = encodeRuntimeSnapshot(snapshot);
 
-    expect(() => decodeRuntimeSnapshot({ ...envelope, version: 2 })).toThrow();
-    expect(() => decodeRuntimeSnapshot({ ...envelope, data: "%%%%" })).toThrow();
-    expect(() => decodeRuntimeSnapshot({ ...envelope, data: "eyJpbnZhbGlkIjp0cnVlfQ==" })).toThrow();
+    const cases = [
+      { input: { ...envelope, version: 2 }, stage: "envelope" },
+      { input: { ...envelope, data: "%%%%" }, stage: "base64" },
+      { input: { ...envelope, data: "/w==" }, stage: "utf8" },
+      { input: { ...envelope, data: "bm90LWpzb24=" }, stage: "json" },
+      { input: { ...envelope, data: "eyJpbnZhbGlkIjp0cnVlfQ==" }, stage: "snapshot" },
+    ] as const;
+
+    for (const item of cases) {
+      try {
+        decodeRuntimeSnapshot(item.input);
+        throw new Error("Expected decoding to fail");
+      } catch (error) {
+        const diagnostic = describeRuntimeSnapshotDecodeFailure(error, item.input);
+        expect(diagnostic.stage).toBe(item.stage);
+        expect(diagnostic.envelope.dataLength).toBe(item.input.data.length);
+        expect(JSON.stringify(diagnostic)).not.toContain(item.input.data);
+        expect(runtimeSnapshotDecodeReportSchema.safeParse({ origin: "runtime.changed", ...diagnostic }).success).toBeTrue();
+      }
+    }
   });
 });

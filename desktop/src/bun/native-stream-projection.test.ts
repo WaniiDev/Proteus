@@ -37,7 +37,11 @@ describe("native Mastra stream projection", () => {
     projector.apply("thread-1", { type: "text-delta", runId: "run-1", payload: { id: "text-1", text: "Hel" } });
     expect(projector.apply("thread-1", { type: "text-delta", runId: "run-1", payload: { id: "text-1", text: "lo" } })?.message.text).toBe("Hello");
     expect(projector.apply("thread-1", { type: "abort", runId: "run-1", payload: {} })?.message.status).toBe("interrupted");
-    expect(projector.apply("thread-2", { type: "error", runId: "run-2", payload: { error: new Error("boom") } })?.message.status).toBe("error");
+    expect(projector.apply("thread-2", { type: "error", runId: "run-2", payload: { error: { details: { errorMessage: "boom" } } } })).toMatchObject({
+      terminal: "error",
+      terminalError: "boom",
+      message: { status: "error" },
+    });
   });
 
   test("keeps native approval calls visibly waiting until Mastra resumes them", () => {

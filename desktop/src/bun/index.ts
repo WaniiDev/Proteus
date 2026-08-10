@@ -1,5 +1,5 @@
 import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater, app } from "electrobun/bun";
-import type { ProviderId, ProviderModelId, ProteusRPCSchema } from "../shared/contracts";
+import { runtimeSnapshotDecodeReportSchema, type ProviderId, type ProviderModelId, type ProteusRPCSchema } from "../shared/contracts";
 import { encodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { TextRuntime } from "./runtime";
 
@@ -269,6 +269,16 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       "diagnostics.set-enabled": async ({ enabled }) => runtime.setDiagnosticsEnabled(enabled),
       "diagnostics.clear": async () => runtime.clearDiagnostics(),
       "diagnostics.export": async () => runtime.exportDiagnostics(),
+      "diagnostics.report-runtime-snapshot-decode": async (params) => {
+        const report = runtimeSnapshotDecodeReportSchema.parse(params);
+        runtime.traceDiagnostic({
+          source: "rpc",
+          type: "runtime_snapshot_decode_failed",
+          phase: report.origin,
+          payload: report,
+        });
+        return { accepted: true as const };
+      },
     },
     messages: {},
   },

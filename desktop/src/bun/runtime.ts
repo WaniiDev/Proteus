@@ -33,6 +33,7 @@ import { reconcileProviderAuth } from "./provider-auth";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./diagnostics";
 import { approvalFingerprint } from "./approval-policy";
 import { createProteusStorage, type ProteusStorageFoundation } from "./mastra-foundation";
+import { ensureProteusAppWorkspace, proteusAppWorkspaceRoot } from "./app-workspace";
 import { resolveRememberedModelSelection, type AppModelSelection, type ModelPreferencesStorage } from "./model-preferences";
 import { NativeThreadRepository } from "./native-thread-repository";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
@@ -43,6 +44,8 @@ import { createWorkingTools } from "./working-tools";
 import { createCompatibleWorkspaceTools } from "./workspace-tool-compat";
 import { WorkspaceRegistry } from "./workspace-registry";
 import { toolResultError } from "./tool-result-error";
+import { extractSafeErrorMessage } from "./error-message";
+import { workspaceRuntimeError } from "./runtime-error-mapping";
 
 const AGENT_ID = "proteus-text-agent";
 const RESOURCE_ID = "local-user";
@@ -113,6 +116,10 @@ const USER_FACING_ERRORS: Record<ProviderErrorCode, { message: string; retryable
   },
   "catalog-unavailable": {
     message: "The OpenRouter model catalog could not be refreshed.",
+    retryable: true,
+  },
+  "workspace-unavailable": {
+    message: "The selected workspace is unavailable.",
     retryable: true,
   },
   unknown: {
@@ -359,6 +366,8 @@ function normalizeError(error: unknown): RuntimeError {
     return error as RuntimeError;
   }
   if (error instanceof SecureStoreUnavailableError) return makeRuntimeError("secure-store-unavailable");
+  const workspaceError = workspaceRuntimeError(error);
+  if (workspaceError) return workspaceError;
 
   const status = findStatus(error);
   if (status === 401) return makeRuntimeError("invalid-credential");
@@ -374,7 +383,8 @@ function normalizeError(error: unknown): RuntimeError {
   if (/no verified|api key|credential/i.test(message)) return makeRuntimeError("invalid-credential");
   if (/abort|cancel/i.test(message)) return makeRuntimeError("aborted");
   if (/network|fetch|connect|socket|offline|timed out/i.test(message)) return makeRuntimeError("offline");
-  return makeRuntimeError("unknown");
+  const safeMessage = extractSafeErrorMessage(error, "");
+  return safeMessage ? { code: "unknown", message: safeMessage, retryable: true } : makeRuntimeError("unknown");
 }
 
 function mapThread(thread: { id: string; title?: string | null; createdAt: Date; updatedAt: Date; metadata?: Record<string, unknown> | null }): ThreadSummary {
@@ -421,7 +431,7 @@ export class TextRuntime {
   private readonly planFilesystem: LocalFilesystem;
   private readonly workspace: Workspace;
   private readonly workspaceRegistry: WorkspaceRegistry;
-  private readonly appWorkspaceRoot = join(Utils.paths.userData, "proteus-workspace-v1");
+  private readonly appWorkspaceRoot = proteusAppWorkspaceRoot(Utils.paths.userData);
   private readonly agent: Agent;
   private readonly mastra: Mastra;
   private readonly codexGateway: MastraCodeGateway;
@@ -607,7 +617,7 @@ export class TextRuntime {
       onQueueChanged: (threadId) => {
         if (threadId === this.selectedThreadId) this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
       },
-      onError: (error) => this.reportError(error),
+      onError: (error, threadId) => this.handleNativeDriverError(error, threadId),
     });
 
     this.mastra = new Mastra({
@@ -1076,12 +1086,22 @@ export class TextRuntime {
 
     if (chunk.type === "tool-result") void this.refreshNativeTasks(threadId);
 
-    if (threadId === this.selectedThreadId && projection.message.parts.length > 0) {
+    const terminalError = projection.terminal === "error"
+      ? normalizeError(projection.terminalError)
+      : projection.terminal === "interrupted"
+        ? makeRuntimeError("aborted")
+        : null;
+
+    if (threadId === this.selectedThreadId && (projection.message.parts.length > 0 || projection.terminal === "error")) {
       this.lastAssistantId = projection.message.id;
+      const projectedMessage = terminalError
+        ? { ...projection.message, retryable: terminalError.retryable }
+        : projection.message;
       this.publish({
         status: projection.terminal === "error" ? "error" : projection.terminal ? this.idleStatus() : "running",
         activeRun: projection.terminal ? null : { runId, threadId, status: "running" },
-        messages: upsertChatMessage(this.snapshot.messages, projection.message),
+        messages: upsertChatMessage(this.snapshot.messages, projectedMessage),
+        ...(projection.terminal === "complete" ? { error: null } : terminalError ? { error: terminalError } : {}),
         ...(projection.usage ? { workbench: { ...this.workbenchFromState(this.threadState, null), tokenUsage: projection.usage } } : {}),
       });
     }
@@ -1089,19 +1109,32 @@ export class TextRuntime {
     if (projection.terminal) {
       if (this.runId === runId) this.runId = null;
       this.runOutcome = projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error";
+      this.runError = terminalError;
       this.updateThreadActivity(threadId, projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error", 0);
-      void this.settleNativeRun(threadId);
+      void this.settleNativeRun(threadId, projection.terminal, terminalError);
     }
   }
 
-  private async settleNativeRun(threadId: string): Promise<void> {
+  private handleNativeDriverError(error: unknown, threadId: string): void {
+    const normalized = normalizeError(error);
+    this.diagnostics.record({ source: "mastra", type: "stream_consume_error", threadId, runId: this.runId, payload: error });
+    this.runOutcome = "error";
+    this.runError = normalized;
+    this.runId = null;
+    this.updateThreadActivity(threadId, "error", 0);
+    if (threadId === this.selectedThreadId) this.publish({ status: "error", activeRun: null, error: normalized });
+    void this.settleNativeRun(threadId, "error", normalized);
+  }
+
+  private async settleNativeRun(threadId: string, outcome: NativeStreamProjection["terminal"], error: RuntimeError | null): Promise<void> {
     await this.refreshNativeTasks(threadId);
     await this.syncMessagesSafely(threadId);
     await this.refreshThreadSummaries();
     if (threadId === this.selectedThreadId) {
       this.publish({
-        status: this.idleStatus(),
+        status: outcome === "error" ? "error" : this.idleStatus(),
         activeRun: null,
+        ...(outcome === "complete" ? { error: null } : error ? { error } : {}),
         workbench: this.workbenchFromState(this.threadState, null),
       });
     }
@@ -1371,7 +1404,8 @@ export class TextRuntime {
   async initialize(): Promise<RuntimeSnapshot> {
     this.initializePromise ??= (async () => {
       try {
-        await ensureUserDataDirectory();
+        const userDataRoot = await ensureUserDataDirectory();
+        await ensureProteusAppWorkspace(userDataRoot);
         await this.appStorage.init();
         this.preferredModelSelection = await this.modelPreferences.load();
         await this.diagnostics.initialize();

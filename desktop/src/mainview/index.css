@@ -111,6 +111,7 @@ main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direct
 .run-error-card { display: flex; align-items: center; justify-content: space-between; gap: var(--s-base); padding: 13px 15px; border: 1px solid rgba(220,38,38,.18); border-radius: var(--r-lg); background: rgba(220,38,38,.06); color: #991b1b; }
 .run-error-card strong { font-size: 13px; }
 .run-error-card p { margin-top: 3px; font-size: 12.5px; line-height: 1.4; }
+.transport-error-card { border-color: rgba(180,83,9,.22); background: rgba(245,158,11,.08); color: #92400e; }
 .run-stopped-note { padding: 10px 12px; border-radius: var(--r-md); background: var(--canvas-soft); color: var(--muted); font-size: 12.5px; }
 .latest-btn { position: absolute; right: 12px; bottom: 86px; z-index: 2; display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; border: 1px solid var(--hairline-strong); border-radius: var(--r-pill); background: var(--surface-card); color: var(--body-strong); box-shadow: var(--shadow-soft); font-size: 12px; }
 .latest-btn:hover { border-color: var(--ink); }

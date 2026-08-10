@@ -6,7 +6,7 @@ import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, Inte
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
-import { decodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
+import { createRuntimeSnapshotTransport } from "./runtime-snapshot-transport";
 import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
 import { InteractionActions, InteractionFrame, interactionVariant } from "./InteractionPrimitives";
@@ -801,7 +801,7 @@ function QueuedMessageBubble({ draft }: { draft: QueuedDraft }) {
   );
 }
 
-function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSend, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
+function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onCreate, onSwitch, onRename, onDeleteRequest, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onCreate: () => void; onSwitch: (threadId: string) => void; onRename: (threadId: string, title: string) => void; onDeleteRequest: (thread: ThreadSummary) => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -931,6 +931,17 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, onSen
                 </div>
               ))}
               {snapshot.interactions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} onApproval={onToolApproval} onDismiss={onInteractionDismiss} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />)}
+              {transportError && (
+                <div className="run-error-card transport-error-card">
+                  <div>
+                    <strong>Desktop connection needs attention.</strong>
+                    <p>{transportError}</p>
+                  </div>
+                  <button type="button" className="btn-outline sm" onClick={onTransportRetry}>
+                    <Icon name="retry" size={14} /> Reconnect
+                  </button>
+                </div>
+              )}
               {snapshot.error && snapshot.error.code !== "aborted" && (
                 <div className="run-error-card">
                   <div>
@@ -1157,31 +1168,21 @@ export default function App() {
   const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
-  const latestRevisionRef = useRef(0);
+  const [transportError, setTransportError] = useState<string | null>(null);
+  const transportRetryRef = useRef<() => void>(() => undefined);
   useEffect(() => {
-    const applyEnvelope = (envelope: RuntimeSnapshotEnvelope) => {
-      try {
-        const next = decodeRuntimeSnapshot(envelope);
-        if (next.revision <= latestRevisionRef.current) return;
-        latestRevisionRef.current = next.revision;
-        setSnapshot(next);
-      } catch {
-        setSnapshot((current) => ({
-          ...current,
-          status: "error",
-          error: {
-            code: "unknown",
-            message: "A runtime update could not be decoded. Restart Proteus and try again.",
-            retryable: true,
-          },
-        }));
-      }
-    };
-    const onChanged = (next: RuntimeSnapshotEnvelope) => applyEnvelope(next);
-    rpc.addMessageListener("runtime.changed", onChanged);
-    void rpc.request["runtime.bootstrap"]()
-      .then(applyEnvelope)
-      .catch(() =>
+    const transport = createRuntimeSnapshotTransport({
+      fetchBootstrap: () => rpc.request["runtime.bootstrap"](),
+      reportDecodeFailure: (report) => {
+        void rpc.request["diagnostics.report-runtime-snapshot-decode"](report).catch(() => undefined);
+      },
+      onSnapshot: setSnapshot,
+      onTransportError: setTransportError,
+      onRuntimeUnavailable: (hasValidSnapshot) => {
+        if (hasValidSnapshot) {
+          setTransportError("The desktop runtime could not be reached. Your last valid conversation state is still visible.");
+          return;
+        }
         setSnapshot((current) => ({
           ...current,
           status: "offline",
@@ -1190,9 +1191,18 @@ export default function App() {
             message: "The desktop runtime is not reachable.",
             retryable: true,
           },
-        })),
-      );
-    return () => rpc.removeMessageListener("runtime.changed", onChanged);
+        }));
+      },
+    });
+    const onChanged = (next: RuntimeSnapshotEnvelope) => transport.accept(next, "runtime.changed");
+    rpc.addMessageListener("runtime.changed", onChanged);
+    transportRetryRef.current = () => void transport.requestBootstrap("manual");
+    void transport.requestBootstrap("initial");
+    return () => {
+      transport.dispose();
+      transportRetryRef.current = () => undefined;
+      rpc.removeMessageListener("runtime.changed", onChanged);
+    };
   }, []);
   useEffect(() => {
     if (localMessages.size === 0) return;
@@ -1312,6 +1322,8 @@ export default function App() {
               input={input}
               setInput={setInput}
               queuedDrafts={queuedDrafts.filter((draft) => draft.threadId === renderedSnapshot.activeThreadId)}
+              transportError={transportError}
+              onTransportRetry={() => transportRetryRef.current()}
               onSend={handleSend}
               onAbort={() => ignoreRpc(rpc.request["chat.abort"]())}
               onSettings={() => handleNavigate("settings")}

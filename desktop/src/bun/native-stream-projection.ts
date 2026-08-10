@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatMessagePart, ChatToolPart } from "../shared/contracts";
 import { toolResultError } from "./tool-result-error";
+import { extractSafeErrorMessage } from "./error-message";
 
 export type NativeAgentChunk = {
   type: string;
@@ -12,18 +13,12 @@ export type NativeStreamProjection = {
   threadId: string;
   message: ChatMessage;
   terminal: "complete" | "interrupted" | "error" | null;
+  terminalError?: string;
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number; reasoningTokens?: number };
 };
 
 function labelForTool(name: string): string {
   return name.replace(/^mastra_workspace_/, "").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function errorText(value: unknown): string {
-  if (value instanceof Error) return value.message;
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object" && typeof (value as { message?: unknown }).message === "string") return (value as { message: string }).message;
-  return "The operation failed.";
 }
 
 function usageFrom(payload: Record<string, unknown> | undefined): NativeStreamProjection["usage"] {
@@ -90,7 +85,7 @@ export class NativeStreamProjector {
         status: chunk.type === "tool-call-input-streaming-start" ? "streaming_input" : chunk.type === "tool-call" ? "running" : chunk.type === "tool-call-approval" || chunk.type === "tool-call-suspended" ? "waiting" : chunk.type === "tool-error" || payload.isError === true || resultError ? "error" : "completed",
         ...(payload.args === undefined ? (prior?.input === undefined ? {} : { input: prior.input }) : { input: payload.args }),
         ...(chunk.type === "tool-result" ? { output: payload.result } : prior?.output === undefined ? {} : { output: prior.output }),
-        ...(chunk.type === "tool-error" ? { error: errorText(payload.error) } : resultError ? { error: resultError } : {}),
+        ...(chunk.type === "tool-error" ? { error: extractSafeErrorMessage(payload.error) } : resultError ? { error: resultError } : {}),
       };
       if (index >= 0) parts[index] = next;
       else parts.push(next);
@@ -107,6 +102,7 @@ export class NativeStreamProjector {
       ...current,
       message: { ...current.message, parts, text, status: terminal ?? "streaming" },
       terminal,
+      ...(chunk.type === "error" ? { terminalError: extractSafeErrorMessage(payload.error) } : current.terminalError ? { terminalError: current.terminalError } : {}),
       ...(usage ? { usage } : {}),
     };
     this.turns.set(runId, next);

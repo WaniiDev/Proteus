@@ -42,7 +42,7 @@ export const providerAuthSchema = z.object({
 });
 export type ProviderAuth = z.infer<typeof providerAuthSchema>;
 
-export const providerErrorCodeSchema = z.enum(["invalid-credential", "insufficient-credits", "forbidden", "model-unavailable", "context-too-large", "rate-limited", "timeout", "offline", "aborted", "busy", "secure-store-unavailable", "catalog-unavailable", "unknown"]);
+export const providerErrorCodeSchema = z.enum(["invalid-credential", "insufficient-credits", "forbidden", "model-unavailable", "context-too-large", "rate-limited", "timeout", "offline", "aborted", "busy", "secure-store-unavailable", "catalog-unavailable", "workspace-unavailable", "unknown"]);
 export type ProviderErrorCode = z.infer<typeof providerErrorCodeSchema>;
 
 export const runtimeErrorSchema = z.object({
@@ -324,6 +324,22 @@ export const runtimeSnapshotEnvelopeSchema = z
   .strict();
 export type RuntimeSnapshotEnvelope = z.infer<typeof runtimeSnapshotEnvelopeSchema>;
 
+export const runtimeSnapshotDecodeReportSchema = z.object({
+  origin: z.enum(["runtime.changed", "runtime.bootstrap"]),
+  stage: z.enum(["envelope", "base64", "utf8", "json", "snapshot"]),
+  envelope: z.object({
+    version: z.union([z.string().max(64), z.number()]).optional(),
+    encoding: z.string().max(64).optional(),
+    dataLength: z.number().int().nonnegative().optional(),
+  }).strict(),
+  issues: z.array(z.object({
+    path: z.string().max(200),
+    code: z.string().max(80),
+    message: z.string().max(300),
+  }).strict()).max(20).optional(),
+}).strict();
+export type RuntimeSnapshotDecodeReport = z.infer<typeof runtimeSnapshotDecodeReportSchema>;
+
 export const workspacePathSchema = z.string().max(1_024).refine((value) => !value.includes("\0") && !/^(?:[a-zA-Z]:[\\/]|[\\/]{1,2})/.test(value) && !value.split(/[\\/]+/).includes(".."), "Path must stay inside the workspace");
 export const workspaceTreeEntrySchema: z.ZodType<WorkspaceTreeEntry> = z.lazy(() => z.object({ path: workspacePathSchema, name: z.string().min(1), kind: z.enum(["file", "directory", "symlink"]), size: z.number().int().nonnegative().optional(), modifiedAt: z.string().optional(), children: z.array(workspaceTreeEntrySchema).optional() }).strict());
 export type WorkspaceTreeEntry = { path: string; name: string; kind: "file" | "directory" | "symlink"; size?: number; modifiedAt?: string; children?: WorkspaceTreeEntry[] };
@@ -449,6 +465,10 @@ export const proteusRpcSchema = {
       "diagnostics.export": {
         params: undefined as undefined,
         response: {} as { path: string },
+      },
+      "diagnostics.report-runtime-snapshot-decode": {
+        params: {} as RuntimeSnapshotDecodeReport,
+        response: {} as { accepted: true },
       },
     },
     messages: {},
