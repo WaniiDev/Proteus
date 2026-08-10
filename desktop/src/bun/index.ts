@@ -159,6 +159,12 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         try { await runtime.openProject(projectId); return { accepted: true }; }
         catch (error) { runtime.reportError(error); return { accepted: false }; }
       },
+      "memory.get": async (params) => runtime.getMemoryState(params?.scope),
+      "memory.set-enabled": async ({ enabled }) => runtime.setMemoryEnabled(enabled),
+      "memory.create": async ({ scope, category, content }) => runtime.createMemory(scope, category, content),
+      "memory.update": async ({ scope, id, category, content }) => runtime.updateMemory(scope, id, category, content),
+      "memory.delete": async ({ scope, id }) => runtime.deleteMemory(scope, id),
+      "memory.reset": async ({ scope }) => runtime.resetMemory(scope),
       "threads.switch": async ({ threadId }) => {
         try {
           await runtime.switchThread(threadId);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { orbStates } from "../shared/contracts";
-import { ORB_CAMERA_DISTANCE } from "./orb3d";
+import { ORB_CAMERA_DISTANCE, ORB_INITIAL_FX } from "./orb3d";
 import { ORB_STATES } from "./orb-spec";
 
 describe("orb visual contract", () => {
@@ -51,21 +51,57 @@ describe("orb visual contract", () => {
     expect(css).toContain(".orb-float { transition: none !important; }");
   });
 
-  it("lets the visual orb bleed beyond its stable layout frame", async () => {
+  it("keeps one prototype-sized surface across hero and header anchors", async () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
 
-    expect(css).toContain("--orb-bleed: 16%");
-    expect(css).toContain("overflow: visible");
-    expect(css).toContain(".orb-frame > .orb-float");
-    expect(css).toContain("inset: calc(0px - var(--orb-bleed))");
-    expect(css).toContain("--orb-bleed: 14%");
+    expect(css).toContain(".persistent-orb-surface");
+    expect(css).toContain("width: 220px");
+    expect(css).toContain(".orb-presence-docked .orb-anchor { width: 76px; height: 76px; }");
   });
 
-  it("keeps the orb core clear of its square canvas edge", async () => {
+  it("matches the prototype fallback geometry", async () => {
     const css = await Bun.file(new URL("./proteus.css", import.meta.url)).text();
 
-    expect(ORB_CAMERA_DISTANCE).toBeGreaterThanOrEqual(3.6);
-    expect(css).toContain("position: absolute; inset: 14%; border-radius: 50%");
-    expect(css).toContain("position: absolute; inset: 12%; border-radius: 50%; opacity: 0");
+    expect(css).toContain("position: absolute; inset: 6%; border-radius: 50%");
+    expect(css).toContain("position: absolute; inset: 4%; border-radius: 50%; opacity: 0");
+  });
+
+  it("matches the prototype camera and initial liquid values", () => {
+    expect(ORB_CAMERA_DISTANCE).toBe(3.15);
+    expect(ORB_INITIAL_FX).toMatchObject({ amp: 0.14, speed: 0.45, freq: 1.15 });
+  });
+
+  it("exposes whether the live renderer is WebGL or the CSS fallback", async () => {
+    const source = await Bun.file(new URL("./orb3d.ts", import.meta.url)).text();
+
+    expect(source).toContain('floatEl.dataset.renderer = "webgl"');
+    expect(source).toContain('floatEl.dataset.renderer = "fallback"');
+  });
+
+  it("keeps one WebGL orb mounted while its surface changes anchors", async () => {
+    const source = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
+
+    expect(source.match(/<Orb ref=/g)).toHaveLength(1);
+    expect(source).toContain("function PersistentOrbSurface");
+    expect(source).toContain("docked ? dockAnchor : heroAnchor");
+    expect(source).toContain('anchor.closest<HTMLElement>(".companion-view")');
+    expect(source).toContain("measureOrbPlacement(anchor.getBoundingClientRect(), companion.getBoundingClientRect())");
+    expect(source).toContain("advanceOrbPlacement(current, target");
+    expect(source).toContain("requestAnimationFrame(placeSurface)");
+    expect(source).not.toContain('querySelector<HTMLElement>(".orb-float")');
+  });
+
+  it("moves a fixed-resolution WebGL surface without resizing its drawing buffer", async () => {
+    const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
+
+    expect(css).toMatch(/\.persistent-orb-surface\s*\{[^}]*width:\s*220px;[^}]*height:\s*220px;/s);
+    expect(css).toContain("will-change: transform, opacity");
+    expect(css).not.toContain("transition: left 820ms");
+  });
+
+  it("does not deliberately lose the WebGL context during React cleanup", async () => {
+    const source = await Bun.file(new URL("./orb3d.ts", import.meta.url)).text();
+
+    expect(source).not.toContain("forceContextLoss");
   });
 });

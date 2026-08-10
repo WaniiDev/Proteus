@@ -1,13 +1,13 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode } from "react";
-import { ArrowDown, ArrowRight, Brain, Check, ChevronDown, Copy, FolderOpen, Globe, HardDrive, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Settings2, ShieldCheck, Square, Trash2, X } from "lucide-react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode } from "react";
+import { ArrowDown, ArrowRight, Brain, Check, ChevronDown, Copy, Globe, HardDrive, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Settings2, ShieldCheck, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkbenchTask, WorkspaceBinding } from "../shared/contracts";
+import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, MemoryScope, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkbenchTask, WorkspaceBinding } from "../shared/contracts";
 import { ORB_STATES } from "./orb-spec";
 import { mountOrb, type OrbFX } from "./orb3d";
 import { rpc } from "./bridge";
 import { createRuntimeSnapshotTransport } from "./runtime-snapshot-transport";
-import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
+import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime } from "./ui-helpers";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
 import { InteractionActions, InteractionFrame, interactionVariant } from "./InteractionPrimitives";
 import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
@@ -15,6 +15,9 @@ import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
 import { ContextPane, type ContextPaneTab } from "./ContextPane";
 import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform, type OrbPlacement } from "./orb-motion";
+import { MemorySettingsPanel } from "./MemorySettingsPanel";
+import { ProjectsView } from "./ProjectsView";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -112,7 +115,7 @@ const Orb = forwardRef<OrbHandle, { state: OrbState }>(function Orb({ state }, r
     controllerRef.current?.setState(state);
   }, [state]);
   return (
-    <div className="orb-float" ref={floatRef} data-state={state}>
+    <div className="orb-float" ref={floatRef} data-state={state} data-renderer="pending">
       <div className="orb-shadow" aria-hidden="true" />
       <canvas className="orb-canvas" ref={canvasRef} aria-hidden="true" />
       <div className="orb-css" aria-hidden="true">
@@ -347,49 +350,55 @@ function ignoreRpc(promise: Promise<unknown>): void {
   void promise.catch(() => undefined);
 }
 
-function OrbPresence({ state, docked, animateDock, pulseVersion, orbRef }: { state: OrbState; docked: boolean; animateDock: boolean; pulseVersion: number; orbRef: MutableRefObject<OrbHandle | null> }) {
-  const presenceRef = useRef<HTMLDivElement>(null);
-  const previousRef = useRef<{
-    docked: boolean;
-    orbRect: DOMRect;
-    presenceRect: DOMRect;
-  } | null>(null);
-  const previousPulseRef = useRef(pulseVersion);
+type OrbAnchorRef = (element: HTMLDivElement | null) => void;
+
+function OrbPresence({ state, docked, anchorRef }: { state: OrbState; docked: boolean; anchorRef: OrbAnchorRef }) {
   const spec = ORB_STATES[state];
-  useLayoutEffect(() => {
-    const presence = presenceRef.current;
-    const orb = presence?.querySelector<HTMLElement>(".orb-float");
-    if (!presence || !orb) return;
-    const previous = previousRef.current;
-    const nextOrbRect = orb.getBoundingClientRect();
-    const nextPresenceRect = presence.getBoundingClientRect();
-    if (animateDock && docked && previous && !previous.docked) {
-      const animation = orb.animate(
-        [
-          {
-            transform: `translate(${previous.orbRect.left - nextOrbRect.left}px, ${previous.orbRect.top - nextOrbRect.top}px) scale(${previous.orbRect.width / Math.max(nextOrbRect.width, 1)})`,
-          },
-          { transform: "translate(0px, 0px) scale(1)" },
-        ],
-        { duration: 820, easing: "cubic-bezier(.25, 1.3, .4, 1)" },
-      );
-      animation.onfinish = () => {
-        orb.style.transform = "";
-      };
-      presence.animate(
-        [
-          { height: `${previous.presenceRect.height}px`, opacity: 1 },
-          { height: `${nextPresenceRect.height}px`, opacity: 1 },
-        ],
-        { duration: 640, easing: "cubic-bezier(.5, 0, .8, .35)" },
-      );
-      orbRef.current?.pulse();
-    }
-    previousRef.current = {
-      docked,
-      orbRect: nextOrbRect,
-      presenceRect: nextPresenceRect,
+  return (
+    <div className={`orb-presence ${docked ? "orb-presence-docked" : "orb-presence-hero"}`}>
+      <div className="orb-anchor" ref={anchorRef} aria-hidden="true" />
+      <div className="orb-meta">
+        <span className="orb-state-label">{spec.label}</span>
+        {spec.description && <span className="orb-state-desc">{spec.description}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PersistentOrbSurface({ state, docked, animateDock, pulseVersion, orbRef, heroAnchor, dockAnchor }: { state: OrbState; docked: boolean; animateDock: boolean; pulseVersion: number; orbRef: MutableRefObject<OrbHandle | null>; heroAnchor: HTMLDivElement | null; dockAnchor: HTMLDivElement | null }) {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const placementRef = useRef<OrbPlacement | null>(null);
+  const previousDockedRef = useRef(docked);
+  const previousPulseRef = useRef(pulseVersion);
+  useEffect(() => {
+    const anchor = docked ? dockAnchor : heroAnchor;
+    if (!anchor) return undefined;
+    const companion = anchor.closest<HTMLElement>(".companion-view");
+    if (!companion) return undefined;
+    let frameId = 0;
+    let previousTime = performance.now();
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const placeSurface = (time: number) => {
+      const target = measureOrbPlacement(anchor.getBoundingClientRect(), companion.getBoundingClientRect());
+      const surface = surfaceRef.current;
+      if (target && surface) {
+        const current = placementRef.current;
+        const next = current ? advanceOrbPlacement(current, target, time - previousTime, reducedMotion) : target;
+        placementRef.current = next;
+        surface.style.transform = orbPlacementTransform(next);
+        surface.style.opacity = "1";
+      }
+      previousTime = time;
+      frameId = requestAnimationFrame(placeSurface);
     };
+    frameId = requestAnimationFrame(placeSurface);
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [docked, dockAnchor, heroAnchor]);
+  useLayoutEffect(() => {
+    if (animateDock && docked && !previousDockedRef.current) orbRef.current?.pulse();
+    previousDockedRef.current = docked;
   }, [animateDock, docked, orbRef]);
   useEffect(() => {
     if (pulseVersion !== previousPulseRef.current) {
@@ -398,14 +407,8 @@ function OrbPresence({ state, docked, animateDock, pulseVersion, orbRef }: { sta
     }
   }, [orbRef, pulseVersion]);
   return (
-    <div ref={presenceRef} className={`orb-presence ${docked ? "orb-presence-docked" : "orb-presence-hero"}`}>
-      <div className="orb-frame">
-        <Orb ref={orbRef} state={state} />
-      </div>
-      <div className="orb-meta">
-        <span className="orb-state-label">{spec.label}</span>
-        {spec.description && <span className="orb-state-desc">{spec.description}</span>}
-      </div>
+    <div ref={surfaceRef} className={`persistent-orb-surface ${docked ? "is-docked" : "is-hero"}`} aria-hidden="true">
+      <Orb ref={orbRef} state={state} />
     </div>
   );
 }
@@ -691,6 +694,7 @@ function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue
 function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDismiss }: { interaction: PendingInteraction; onRespond: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult>; onResubmit: (messageId: string) => Promise<boolean>; onDismiss: (toolCallId: string) => Promise<InteractionResponseResult> }) {
   const [answer, setAnswer] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [otherSelected, setOtherSelected] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [submittingAction, setSubmittingAction] = useState<InteractionSubmissionAction>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -720,7 +724,18 @@ function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDis
       setSubmittingAction(null);
     }
   };
-  const submit = () => void send(isPlan ? { action: "approved", feedback: feedback.trim() || undefined } : interaction.options.length > 0 && interaction.selectionMode === "multi_select" ? selected : interaction.options.length > 0 ? (selected[0] ?? "") : answer.trim(), isPlan ? "approve" : "answer");
+  const submit = () => void send(
+    isPlan
+      ? { action: "approved", feedback: feedback.trim() || undefined }
+      : interaction.options.length > 0 && otherSelected
+        ? { kind: "other", value: answer.trim(), ...(interaction.selectionMode === "multi_select" ? { selections: selected } : {}) }
+        : interaction.options.length > 0 && interaction.selectionMode === "multi_select"
+          ? selected
+          : interaction.options.length > 0
+            ? (selected[0] ?? "")
+            : answer.trim(),
+    isPlan ? "approve" : "answer",
+  );
   const toggle = (label: string) => setSelected((current) => (current.includes(label) ? current.filter((value) => value !== label) : [...current, label]));
   return (
     <InteractionFrame variant={variant} resolving={resolving} failed={failed} id={`interaction-${interaction.id}`} kicker={submissionUi.kicker ?? (failed ? "Response failed" : isPlan ? "Plan approval" : isApproval ? "Tool approval" : "Your input needed")} title={interaction.title}>
@@ -757,15 +772,35 @@ function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDis
         <div className={`interaction-options ${interaction.selectionMode === "multi_select" ? "multi" : ""}`}>
           {interaction.options.map((option) => (
             <label key={option.label} className={`interaction-option${selected.includes(option.label) ? " selected" : ""}`}>
-              <input disabled={resolving} type={interaction.selectionMode === "multi_select" ? "checkbox" : "radio"} name={interaction.id} checked={selected.includes(option.label)} onChange={() => (interaction.selectionMode === "multi_select" ? toggle(option.label) : setSelected([option.label]))} />
+              <input disabled={resolving} type={interaction.selectionMode === "multi_select" ? "checkbox" : "radio"} name={interaction.id} checked={selected.includes(option.label)} onChange={() => {
+                if (interaction.selectionMode === "multi_select") toggle(option.label);
+                else {
+                  setSelected([option.label]);
+                  setOtherSelected(false);
+                }
+              }} />
               <span>
                 <b>{option.label}</b>
                 {option.description && <small>{option.description}</small>}
               </span>
             </label>
           ))}
+          <label className={`interaction-option interaction-option-other${otherSelected ? " selected" : ""}`}>
+            <input disabled={resolving} type={interaction.selectionMode === "multi_select" ? "checkbox" : "radio"} name={interaction.id} checked={otherSelected} onChange={() => {
+              if (interaction.selectionMode === "multi_select") setOtherSelected((current) => !current);
+              else {
+                setSelected([]);
+                setOtherSelected(true);
+              }
+            }} />
+            <span>
+              <b>Other</b>
+              <small>Type your own answer</small>
+            </span>
+          </label>
         </div>
       )}
+      {!failed && !isPlan && !isApproval && interaction.options.length > 0 && otherSelected && <textarea autoFocus disabled={resolving} className="interaction-input interaction-other-input" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your own answer…" rows={2} />}
       {!failed && !isPlan && !isApproval && interaction.options.length === 0 && <textarea disabled={resolving} className="interaction-input" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
       {!failed && isPlan && <textarea disabled={resolving} className="interaction-input" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback or requested changes" rows={2} />}
       {(localError || interaction.error) && <p className="interaction-error" role="alert">{localError ?? interaction.error?.message}</p>}
@@ -784,7 +819,7 @@ function InteractionCard({ interaction, onRespond, onApproval, onResubmit, onDis
         onPrimary={failed
           ? interaction.originMessageId ? () => void onResubmit(interaction.originMessageId as string) : undefined
           : isApproval ? () => void decideApproval(true) : submit}
-        primaryDisabled={!failed && !isPlan && !isApproval && (interaction.options.length > 0 ? selected.length === 0 : !answer.trim())}
+        primaryDisabled={!failed && !isPlan && !isApproval && (interaction.options.length > 0 ? (otherSelected ? !answer.trim() : selected.length === 0) : !answer.trim())}
       />
     </InteractionFrame>
   );
@@ -810,14 +845,16 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
   const canChat = selectedProviderCanChat(snapshot) && snapshot.activeThreadId !== null && !runningElsewhere;
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
+  const [heroOrbAnchor, setHeroOrbAnchor] = useState<HTMLDivElement | null>(null);
+  const [dockOrbAnchor, setDockOrbAnchor] = useState<HTMLDivElement | null>(null);
+  const heroOrbAnchorRef = useCallback((element: HTMLDivElement | null) => setHeroOrbAnchor(element), []);
+  const dockOrbAnchorRef = useCallback((element: HTMLDivElement | null) => setDockOrbAnchor(element), []);
   const contextToggleRef = useRef<HTMLButtonElement>(null);
   const [contextOpenByThread, setContextOpenByThread] = useState<Map<string, boolean>>(() => new Map());
   const [contextTabByThread, setContextTabByThread] = useState<Map<string, ContextPaneTab>>(() => new Map());
-  const [autoOpenedContextThreads, setAutoOpenedContextThreads] = useState<Set<string>>(() => new Set());
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
-  const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
   const contextOpen = !!snapshot.activeThreadId && contextOpenByThread.get(snapshot.activeThreadId) === true;
   const contextTab = snapshot.activeThreadId ? contextTabByThread.get(snapshot.activeThreadId) ?? "activity" : "activity";
   const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
@@ -842,13 +879,6 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [contextOpen, snapshot.activeThreadId]);
-  useEffect(() => {
-    const threadId = snapshot.activeThreadId;
-    if (!threadId || !workbenchHasContent || autoOpenedContextThreads.has(threadId)) return;
-    setAutoOpenedContextThreads((current) => new Set(current).add(threadId));
-    setContextTabByThread((current) => new Map(current).set(threadId, "activity"));
-    setContextOpenByThread((current) => new Map(current).set(threadId, true));
-  }, [autoOpenedContextThreads, snapshot.activeThreadId, workbenchHasContent]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
@@ -862,7 +892,7 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
     <section className="view active companion-view">
       <div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag">
         <div className="chat-title-copy">
-          {docked && <OrbPresence state={state} docked animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} />}
+          {docked && <OrbPresence state={state} docked anchorRef={dockOrbAnchorRef} />}
           <div className="chat-title-text">
             <h1 className="chat-title">{activeTitle}</h1>
             <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
@@ -870,11 +900,12 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
         </div>
         <button ref={contextToggleRef} type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${contextOpen ? " active" : ""}`} aria-label={contextOpen ? "Close context" : "Open context"} aria-expanded={contextOpen} aria-controls="conversation-context" disabled={!snapshot.activeThreadId} onClick={() => { if (!snapshot.activeThreadId) return; setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, !contextOpen)); }}><PanelRight size={16} /><span>Context</span>{workbenchAttention > 0 && <b>{workbenchAttention}</b>}</button>
       </div>
+      <PersistentOrbSurface state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} heroAnchor={heroOrbAnchor} dockAnchor={dockOrbAnchor} />
       <div className="text-chat-layout">
         <div className={`companion-grid ${contextOpen ? "context-present" : "context-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
-            {!docked && <OrbPresence state={state} docked={false} animateDock={false} pulseVersion={pulseVersion} orbRef={orbRef} />}
+            {!docked && <OrbPresence state={state} docked={false} anchorRef={heroOrbAnchorRef} />}
             {!docked && <section className="command-home-copy" aria-label="Start with Proteus">
               <span className="caption-uppercase">Your thinking companion</span>
               <h2>What can we work on?</h2>
@@ -1041,8 +1072,9 @@ function DiagnosticsPanel() {
   </section>;
 }
 
-export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: (providerId: "openrouter" | "codex") => void; onStartCodexAuth: (mode: "browser" | "device") => void; onSubmitCodexAuth: (value: string) => void; onCancelCodexAuth: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
-  const [tab, setTab] = useState<"providers" | "models" | "developer">("providers");
+export type SettingsSection = "providers" | "models" | "memory" | "developer";
+
+export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; section: SettingsSection; onSection: (section: SettingsSection) => void; memoryScope?: MemoryScope; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: (providerId: "openrouter" | "codex") => void; onStartCodexAuth: (mode: "browser" | "device") => void; onSubmitCodexAuth: (value: string) => void; onCancelCodexAuth: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
   const [modelSearch, setModelSearch] = useState("");
   const [authorizationCode, setAuthorizationCode] = useState("");
   const selected = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -1063,12 +1095,13 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
       <PageHeader kicker="Yours to control" title="Settings" subtitle="Choose how Proteus connects, which model thinks, and how deeply it reasons." />
       <div className="settings-layout">
       <nav className="settings-tabs" aria-label="Settings sections">
-        <button type="button" className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}><ShieldCheck size={16} /><span><strong>Providers</strong><small>Connections and accounts</small></span></button>
-        <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><Settings2 size={16} /><span><strong>Models & thinking</strong><small>Intelligence and effort</small></span></button>
-        <button type="button" className={tab === "developer" ? "active" : ""} onClick={() => setTab("developer")}><HardDrive size={16} /><span><strong>Developer</strong><small>Diagnostics and exports</small></span></button>
+        <button type="button" className={section === "providers" ? "active" : ""} onClick={() => onSection("providers")}><ShieldCheck size={16} /><span><strong>Providers</strong><small>Connections and accounts</small></span></button>
+        <button type="button" className={section === "models" ? "active" : ""} onClick={() => onSection("models")}><Settings2 size={16} /><span><strong>Models & thinking</strong><small>Intelligence and effort</small></span></button>
+        <button type="button" className={section === "memory" ? "active" : ""} onClick={() => onSection("memory")}><Brain size={16} /><span><strong>Memory</strong><small>Saved context you control</small></span></button>
+        <button type="button" className={section === "developer" ? "active" : ""} onClick={() => onSection("developer")}><HardDrive size={16} /><span><strong>Developer</strong><small>Diagnostics and exports</small></span></button>
       </nav>
       <div className="settings-content">
-      {tab === "providers" ? <div className="provider-grid">
+      {section === "providers" ? <div className="provider-grid">
         {snapshot.providers.map((provider) => <section className={`card provider-card ${snapshot.selectedProviderId === provider.id ? "selected" : ""}`} key={provider.id}>
           <div className="provider-card-head"><div><span className="settings-eyebrow">{provider.id === "codex" ? "ChatGPT OAuth" : "Universal gateway"}</span><h2 className="title-md">{provider.name}</h2></div><span className={`provider-badge ${provider.availability}`}>{provider.availability.replace("-", " ")}</span></div>
           <p className="settings-intro">{provider.id === "codex" ? "Connect a ChatGPT Plus or Pro subscription. Tokens stay in Windows Credential Manager." : "Use one OpenRouter key to access your account's text-model catalog."}</p>
@@ -1091,56 +1124,27 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
           <button className={snapshot.selectedProviderId === provider.id ? "btn-primary sm" : "btn-outline sm"} type="button" disabled={!provider.verified || snapshot.activeRun !== null || snapshot.selectedProviderId === provider.id} onClick={() => onSelectProvider(provider.id)}>{snapshot.selectedProviderId === provider.id ? "Current provider" : `Use ${provider.name}`}</button>
         </section>)}
         <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
-      </div> : tab === "models" ? <section className="card settings-card model-settings-card">
+      </div> : section === "models" ? <section className="card settings-card model-settings-card">
         <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection is remembered across conversations and app restarts.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
         <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}>{provider.name}</button>)}</div>
         <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
         <div className="model-card-list">{displayedModels.map((model) => { const isSelected = selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId); return <button type="button" className={`model-card ${isSelected ? "selected" : ""}`} key={model.id} onClick={() => chooseDisplayedModel(model)} disabled={snapshot.activeRun !== null}><span className="model-card-copy"><strong>{model.providerId === "codex" ? model.baseModelId : model.name}</strong><small>{model.description ?? model.rawId}</small></span>{isSelected && <Check size={17} />}</button>; })}</div>
         {selected?.reasoningOptions?.length ? <div className="reasoning-control"><div><span className="settings-eyebrow">Thinking</span><strong>Reasoning effort</strong></div><div className="reasoning-options">{selected.reasoningOptions.map((effort) => <button type="button" key={effort} className={snapshot.selectedReasoningEffort === effort ? "active" : ""} onClick={() => onSelectReasoning(effort)} disabled={snapshot.activeRun !== null}>{effort}</button>)}</div></div> : <p className="settings-note">This model does not advertise adjustable reasoning.</p>}
         {selected && <div className="model-meta"><span>{selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}</span>{selected.providerId === "openrouter" && <><span>Prompt {price(selected.promptPrice)}</span><span>Completion {price(selected.completionPrice)}</span></>}</div>}
-      </section> : <DiagnosticsPanel />}
+      </section> : section === "memory" ? <MemorySettingsPanel focusScope={memoryScope} /> : <DiagnosticsPanel />}
       </div>
       </div>
     </div></section>
   );
 }
 
-function Projects({ snapshot }: { snapshot: RuntimeSnapshot }) {
-  return (
-    <section className="view active">
-      <div className="page-narrow">
-        <PageHeader kicker="Your contexts" title="Projects" subtitle="Keep longer-running work organized around the conversations that matter." />
-        <div className="projects-heading"><p>Attach a folder once, then choose it when starting a chat.</p><button className="btn-primary sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.attach"]())}><Icon name="plus" size={15} /> Attach folder</button></div>
-        <div className="project-list">{snapshot.projects.length === 0 ? <div className="empty-page-card"><span className="empty-page-icon"><FolderOpen size={24} /></span><h2>No projects attached</h2><p>Attach a folder to give Proteus a trusted place to read, search, and work. Chats can still use the private app workspace.</p><button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.attach"]())}><Icon name="plus" size={15} /> Attach your first folder</button></div> : snapshot.projects.map((project) => <article className="card project-card" key={project.id}>
-          <div><span className="caption-uppercase">{project.availability === "ready" ? "Available" : "Folder missing"}</span><h2>{project.name}</h2><p>{project.rootPath}</p></div>
-          <div className="project-actions">{project.availability === "ready" ? <button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.open"]({ projectId: project.id }))}>Open folder</button> : <button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.reconnect"]({ projectId: project.id }))}>Reconnect</button>}<button className="btn-danger-ghost" type="button" onClick={() => ignoreRpc(rpc.request["projects.remove"]({ projectId: project.id }))}>Forget</button></div>
-        </article>)}</div>
-      </div>
-    </section>
-  );
-}
-
 function NewChatModal({ snapshot, onCancel, onCreate }: { snapshot: RuntimeSnapshot; onCancel: () => void; onCreate: (binding: WorkspaceBinding) => void }) {
   return <div className="modal-backdrop" role="presentation"><section className="modal-card workspace-picker" role="dialog" aria-modal="true" aria-labelledby="workspace-picker-title"><div className="modal-head"><div><span className="caption-uppercase">New chat</span><h2 id="workspace-picker-title">Where should Proteus work?</h2></div><button className="icon-btn" type="button" onClick={onCancel} aria-label="Close"><Icon name="close" /></button></div><p>The workspace is fixed after the first message so tools always use the same trusted folder.</p><div className="workspace-options"><button type="button" onClick={() => onCreate({ kind: "app" })}><strong>Don’t work in any project</strong><span>Use Proteus’s private app workspace.</span></button>{snapshot.projects.map((project) => <button type="button" key={project.id} disabled={project.availability !== "ready"} onClick={() => onCreate({ kind: "project", projectId: project.id })}><strong>{project.name}</strong><span>{project.availability === "ready" ? project.rootPath : "Reconnect this folder in Projects first."}</span></button>)}</div></section></div>;
 }
-function Memory() {
-  return (
-    <section className="view active">
-      <div className="page-narrow">
-        <PageHeader kicker="Conversation history" title="Memory" subtitle="Conversation history stays on this device. You decide what should be kept for later." />
-        <div className="empty-page-card memory-empty">
-          <span className="empty-page-icon"><Brain size={24} /></span>
-          <h2>Memory stays intentional</h2>
-          <p>Long-term memory is not enabled yet. Your conversation history remains available inside each chat, stored on this device.</p>
-          <div className="memory-principles"><span><ShieldCheck size={15} /> Local by default</span><span><Check size={15} /> Nothing saved silently</span></div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function App() {
   const [view, setView] = useState<View>("companion");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
+  const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const remembered = localStorage.getItem("proteus.ui.nav-collapsed");
     if (remembered !== null) return remembered !== "true";
@@ -1215,7 +1219,6 @@ export default function App() {
   const activeTitle = useMemo(() => snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId)?.title ?? "New chat", [snapshot.threads, snapshot.activeThreadId]);
   const handleNavigate = (next: View) => {
     setView(next);
-    setSidebarOpen(false);
   };
   const handleSend = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1270,7 +1273,6 @@ export default function App() {
   };
   const handleCreate = () => {
     if (snapshot.activeRun) return;
-    setSidebarOpen(false);
     setNewChatOpen(true);
   };
   const createWithWorkspace = (workspaceBinding: WorkspaceBinding) => {
@@ -1285,6 +1287,23 @@ export default function App() {
     const target = deleteTarget;
     setDeleteTarget(null);
     ignoreRpc(rpc.request["threads.delete"]({ threadId: target.id }));
+  };
+  const handleCreateProjectChat = (projectId: string) => {
+    if (snapshot.activeRun) return;
+    void rpc.request["threads.create"]({ title: "New chat", workspaceBinding: { kind: "project", projectId } }).then((result) => {
+      if (!result.threadId) return;
+      setView("companion");
+    });
+  };
+  const handleSelectProjectThread = (threadId: string) => {
+    void rpc.request["threads.select"]({ threadId }).then((result) => {
+      if (result.accepted) setView("companion");
+    });
+  };
+  const handleOpenProjectMemory = (projectId: string) => {
+    setSettingsMemoryScope({ kind: "project", projectId });
+    setSettingsSection("memory");
+    setView("settings");
   };
   const renderedSnapshot = useMemo<RuntimeSnapshot>(() => {
     if (localMessages.size === 0) return snapshot;
@@ -1331,9 +1350,8 @@ export default function App() {
               }
             />
           )}
-          {view === "projects" && <Projects snapshot={snapshot} />}
-          {view === "memory" && <Memory />}
-          {view === "settings" && <SettingsView snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          {view === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
+          {view === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
         </main>
       </div>
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}

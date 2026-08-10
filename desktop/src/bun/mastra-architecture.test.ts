@@ -29,6 +29,8 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("memory: this.memory");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
+    expect(runtime).toContain("this.nativeDriver.approve(threadId, nativeSuspension.runId");
+    expect(runtime).toContain("requestContext: await this.requestContextFor(threadId)");
     expect(runtime).toContain("createCompatibleWorkspaceTools(await this.workspaceRegistry.resolveFromContext(requestContext)");
     expect(runtime).toContain("new ToolSearchProcessor({");
     expect(runtime).toContain('storage: "context"');
@@ -36,7 +38,9 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("inputProcessors: [toolSearch, nativeToolCallGuard]");
     expect(runtime).toContain("web_fetch: webFetchTool");
     expect(runtime).toContain('this.snapshot.selectedProviderId === "codex"');
-    expect(runtime).toContain("? webSearchTool");
+    expect(runtime).toContain("const codexTools = createOpenAI({}).tools");
+    expect(runtime).toContain("? codexTools.webSearch()");
+    expect(runtime).not.toContain("? webSearchTool");
     expect(runtime).toContain('openRouterTools.webSearch({ engine: "auto", maxResults: 5 })');
     expect(runtime).toContain("new RequestContext(");
     expect(registry).toContain("contained: true");

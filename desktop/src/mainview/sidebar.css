@@ -149,7 +149,7 @@
 .app-nav__session-more { position: absolute; top: 50%; right: 5px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--r-sm); color: var(--muted); opacity: 0; transform: translateY(-50%); }
 .app-nav__session:hover .app-nav__session-more, .app-nav__session:focus-within .app-nav__session-more { opacity: 1; }
 .app-nav__session-more:hover { background: var(--surface-strong); color: var(--ink); }
-.app-nav__session-menu { position: absolute; right: 4px; top: calc(100% - 2px); z-index: 3; width: 126px; padding: 5px; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--surface-card); box-shadow: var(--shadow-lift); }
+.app-nav__session-menu { position: fixed; z-index: 200; width: 126px; padding: 5px; border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--surface-card); box-shadow: var(--shadow-lift); }
 .app-nav__session-menu button { width: 100%; display: flex; align-items: center; gap: 7px; padding: 7px 8px; border-radius: var(--r-sm); color: var(--body-strong); font-size: 11px; text-align: left; }
 .app-nav__session-menu button:hover { background: var(--canvas-soft); }
 .app-nav__session-menu button.danger { color: var(--error); }

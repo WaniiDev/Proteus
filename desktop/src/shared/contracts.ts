@@ -349,6 +349,40 @@ export const workspaceSearchModeSchema = z.enum(["bm25", "vector", "hybrid"]);
 export const workspaceSearchResultSchema = z.object({ id: z.string(), content: z.string(), score: z.number(), lineRange: z.object({ start: z.number(), end: z.number() }).optional(), metadata: z.record(z.string(), z.unknown()).optional(), scoreDetails: z.object({ vector: z.number().optional(), bm25: z.number().optional() }).optional() }).strict();
 export const workspaceSkillSchema = z.object({ name: z.string(), description: z.string(), path: workspacePathSchema, source: workspacePathSchema, conflict: z.boolean(), content: z.string().optional() }).strict();
 
+export const memoryCategories = ["profile", "preference", "work-style", "goal", "project-context", "decision"] as const;
+export const memoryCategorySchema = z.enum(memoryCategories);
+export type MemoryCategory = z.infer<typeof memoryCategorySchema>;
+
+export const memoryScopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("global") }).strict(),
+  z.object({ kind: z.literal("project"), projectId: z.string().min(1).max(200) }).strict(),
+]);
+export type MemoryScope = z.infer<typeof memoryScopeSchema>;
+
+export const memoryEntrySchema = z.object({
+  id: z.string().min(1).max(200),
+  category: memoryCategorySchema,
+  content: z.string().trim().min(1).max(500),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+}).strict();
+export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
+
+export const memoryScopeStateSchema = z.object({
+  scope: memoryScopeSchema,
+  key: z.string().min(1),
+  label: z.string().min(1),
+  status: z.enum(["active", "archived"]),
+  entries: z.array(memoryEntrySchema),
+}).strict();
+export type MemoryScopeState = z.infer<typeof memoryScopeStateSchema>;
+
+export const memorySettingsStateSchema = z.object({
+  enabled: z.boolean(),
+  scopes: z.array(memoryScopeStateSchema),
+}).strict();
+export type MemorySettingsState = z.infer<typeof memorySettingsStateSchema>;
+
 export const proteusRpcSchema = {
   bun: {
     requests: {
@@ -440,6 +474,12 @@ export const proteusRpcSchema = {
       "projects.reconnect": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
       "projects.remove": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
       "projects.open": { params: {} as { projectId: string }, response: {} as { accepted: boolean } },
+      "memory.get": { params: {} as { scope?: MemoryScope } | undefined, response: {} as MemorySettingsState },
+      "memory.set-enabled": { params: {} as { enabled: boolean }, response: {} as MemorySettingsState },
+      "memory.create": { params: {} as { scope: MemoryScope; category: MemoryCategory; content: string }, response: {} as MemorySettingsState },
+      "memory.update": { params: {} as { scope: MemoryScope; id: string; category: MemoryCategory; content: string }, response: {} as MemorySettingsState },
+      "memory.delete": { params: {} as { scope: MemoryScope; id: string }, response: {} as MemorySettingsState },
+      "memory.reset": { params: {} as { scope: MemoryScope }, response: {} as MemorySettingsState },
       "workspace.tree": { params: {} as { path?: string; depth?: number; includeHidden?: boolean } | undefined, response: [] as WorkspaceTreeEntry[] },
       "workspace.read": { params: {} as { path: string; lineStart?: number; lineEnd?: number }, response: {} as WorkspaceFile },
       "workspace.write": { params: {} as { path: string; content: string; expectedVersion?: string }, response: {} as WorkspaceFile },

@@ -95,6 +95,18 @@ describe("tool activity descriptions", () => {
     expect(describeToolActivity(tool("ask_user", "waiting", { question: "Which design should we use?" })).title).toBe("Waiting for answer: Which design should we use?");
   });
 
+  it("describes durable memory changes without exposing raw tool names", () => {
+    expect(describeToolActivity(tool("remember", "completed", {
+      scope: "current_project",
+      category: "decision",
+      content: "Use native Mastra approvals",
+    })).title).toBe("Remembered Use native Mastra approvals");
+    expect(describeToolActivity(tool("forget_memory", "waiting", {
+      scope: "global",
+      entryId: "memory-123",
+    })).title).toBe("Waiting for approval to forget memory-123");
+  });
+
   it("keeps unknown future tools readable without provider prefixes", () => {
     const activity = describeToolActivity(tool("mastra_workspace_future_inspect", "completed"));
     expect(activity.title).toBe("Used Future Inspect");

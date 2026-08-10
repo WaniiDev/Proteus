@@ -22,8 +22,9 @@ describe("application scrollbar system", () => {
     expect(css).toContain("scrollbar-color: auto;");
   });
 
-  it("preserves the deliberately hidden mobile sidebar scrollbar", () => {
-    expect(css).toMatch(/\.sb-menu[^}]*scrollbar-width:\s*none/s);
-    expect(css).toMatch(/\.sb-menu::\-webkit-scrollbar\s*\{\s*display:\s*none/s);
+  it("uses the current navigation's compact conversation scrollbar", () => {
+    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
+    expect(sidebarCss).toMatch(/\.app-nav__session-list[^}]*scrollbar-width:\s*thin/s);
+    expect(css).not.toContain(".sb-menu");
   });
 });

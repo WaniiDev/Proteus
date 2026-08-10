@@ -2,6 +2,7 @@ import type { ChatToolPart, WorkbenchTask } from "../shared/contracts";
 import { describeToolActivity, pluralizeCount, rawToolActivity, type ToolActivityDescriptor } from "./tool-activity";
 
 const INLINE_TOOL_LIMIT = 3;
+const COLLAPSED_GROUP_LIMIT = 3;
 
 type DescribedTool = {
   tool: ChatToolPart;
@@ -106,6 +107,8 @@ export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: C
 
   const described = describeTools(visible, tasks);
   const groups = groupRepeatedToolCalls(visible, tasks);
+  const summaryGroups = groups.slice(0, COLLAPSED_GROUP_LIMIT);
+  const remainingGroupCount = groups.length - summaryGroups.length;
   const collapsible = shouldCollapseToolCalls(visible, tasks);
   const requiresAttention = visible.some((tool) => tool.status !== "completed");
 
@@ -121,11 +124,12 @@ export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: C
           <summary>
             <TimelineHeading live={live} count={visible.length} />
             <span className="tool-group-summary">
-              {groups.map((group) => (
+              {summaryGroups.map((group) => (
                 <span className="tool-group-label" key={group.key}>
                   {group.label} {group.count} {pluralizeCount(group.countNoun, group.count)}
                 </span>
               ))}
+              {remainingGroupCount > 0 && <span className="tool-group-label tool-group-overflow">+{remainingGroupCount} more</span>}
             </span>
             <span className="tool-disclosure-chevron" aria-hidden="true" />
           </summary>

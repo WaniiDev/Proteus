@@ -17,6 +17,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/openai": "3.0.90",
     "@mastra/ai-sdk": "1.7.0",
     "@mastra/code-sdk": "1.1.2",
     "@mastra/core": "1.56.0",

@@ -9,9 +9,18 @@ export interface OrbFX {
   dispose(): void;
 }
 
-// Keep liquid deformation clear of the transparent canvas' square edge. The
-// outer frame can still overlap the surrounding layout independently.
-export const ORB_CAMERA_DISTANCE = 3.6;
+// These boot values intentionally match app/orb3d.js so the production orb
+// starts with the same framing and liquid character as the prototype.
+export const ORB_CAMERA_DISTANCE = 3.15;
+export const ORB_INITIAL_FX = {
+  amp: 0.14,
+  speed: 0.45,
+  freq: 1.15,
+  scale: 1,
+  voice: 0,
+  a: "#a7e5d3",
+  b: "#c8b8e0",
+} as const;
 
 const VERT = /* glsl */ `
 uniform float uTime;
@@ -160,13 +169,13 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
   let reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const clock = new THREE.Clock();
   const cur: CurrentFx = {
-    amp: target.amp,
-    speed: target.speed,
-    freq: target.freq,
-    scale: target.scale,
-    voice: target.voice,
-    a: new THREE.Color(target.a),
-    b: new THREE.Color(target.b),
+    amp: ORB_INITIAL_FX.amp,
+    speed: ORB_INITIAL_FX.speed,
+    freq: ORB_INITIAL_FX.freq,
+    scale: ORB_INITIAL_FX.scale,
+    voice: ORB_INITIAL_FX.voice,
+    a: new THREE.Color(ORB_INITIAL_FX.a),
+    b: new THREE.Color(ORB_INITIAL_FX.b),
   };
   const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -292,11 +301,9 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
       removeMotionListener?.();
       mesh?.geometry.dispose();
       mesh?.material.dispose();
-      if (renderer) {
-        renderer.dispose();
-        renderer.forceContextLoss?.();
-      }
+      renderer?.dispose();
       floatEl.classList.remove("webgl-on");
+      floatEl.dataset.renderer = "disposed";
       if (window.orbFX === controller) window.orbFX = undefined;
     },
   };
@@ -356,6 +363,7 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
     window.addEventListener("pointermove", onPointerMove, { passive: true });
     removePointerListener = () => window.removeEventListener("pointermove", onPointerMove);
     floatEl.classList.add("webgl-on");
+    floatEl.dataset.renderer = "webgl";
     if (reducedMotion) renderFrame(0);
     else frame();
   } catch {
@@ -365,6 +373,7 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
     camera = null;
     mesh = null;
     uniforms = null;
+    floatEl.dataset.renderer = "fallback";
   }
 
   return controller;

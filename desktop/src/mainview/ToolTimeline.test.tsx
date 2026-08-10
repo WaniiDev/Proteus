@@ -86,6 +86,31 @@ describe("ToolTimeline", () => {
     expect(html).not.toContain('open=""');
   });
 
+  it("caps the collapsed summary at three activity groups", () => {
+    const html = renderToStaticMarkup(
+      <ToolTimeline
+        tools={[
+          tool("read-one", "read_plan", "completed", { path: "plans/example.md" }),
+          tool("read-two", "read_plan", "completed", { path: "plans/example.md" }),
+          tool("write", "write_plan", "completed", { path: "plans/example.md" }),
+          tool("submit", "submit_plan", "completed", { path: "plans/example.md" }),
+          tool("check", "task_check", "completed", {}),
+          tool("grep", "mastra_workspace_grep", "completed", { path: "src", pattern: "TODO" }),
+        ]}
+        live={false}
+        pendingIds={new Set()}
+      />,
+    );
+
+    expect(html).toContain("Read 2 plans");
+    expect(html).toContain("Wrote 1 plan");
+    expect(html).toContain("Submitted 1 plan");
+    expect(html).toContain("+2 more");
+    expect(html).not.toContain("Checked 1 task");
+    expect(html).not.toContain("Searched 1 search");
+    expect(html.match(/tool-row-disclosure/g)).toHaveLength(6);
+  });
+
   it("keeps a repetitive group expanded while live or needing attention", () => {
     const tools = [
       tool("one", "task_update", "completed", { id: "one", content: "First task" }),

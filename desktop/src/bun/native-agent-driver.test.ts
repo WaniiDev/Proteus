@@ -55,6 +55,7 @@ describe("native Mastra agent driver", () => {
 
   test("acknowledges native suspension resumption without waiting for run completion", async () => {
     const resumes: unknown[] = [];
+    const context = new RequestContext([["proteus-thread-id", "thread-1"], ["proteus-workspace-root", "C:\\trusted"]]);
     const agent: NativeQueueAgent = {
       subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
       queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
@@ -64,12 +65,13 @@ describe("native Mastra agent driver", () => {
       },
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
-    expect(await driver.resume("thread-1", "run-1", "call-1", { action: "approved" }, { activeTools: ["task_write"] })).toEqual({ runId: "run-1" });
-    expect(resumes).toEqual([{ resourceId: "local-user", threadId: "thread-1", runId: "run-1", toolCallId: "call-1", resumeData: { action: "approved" }, streamOptions: { activeTools: ["task_write"] } }]);
+    expect(await driver.resume("thread-1", "run-1", "call-1", { action: "approved" }, { activeTools: ["task_write"], requestContext: context })).toEqual({ runId: "run-1" });
+    expect(resumes).toEqual([{ resourceId: "local-user", threadId: "thread-1", runId: "run-1", toolCallId: "call-1", resumeData: { action: "approved" }, streamOptions: { activeTools: ["task_write"], requestContext: context } }]);
   });
 
   test("rediscovers durable suspensions and uses native tool approval", async () => {
     const approvals: unknown[] = [];
+    const context = new RequestContext([["proteus-thread-id", "thread-1"], ["proteus-workspace-root", "C:\\trusted"]]);
     const agent: NativeQueueAgent = {
       subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }),
       queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
@@ -82,8 +84,8 @@ describe("native Mastra agent driver", () => {
     };
     const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
     expect(await driver.findSuspension("thread-1", "call-durable")).toEqual({ runId: "run-durable", toolCallId: "call-durable", requiresApproval: true });
-    expect(await driver.approve("thread-1", "call-durable", true)).toEqual({ runId: "run-durable" });
-    expect(approvals).toEqual([{ resourceId: "local-user", threadId: "thread-1", toolCallId: "call-durable", approved: true }]);
+    expect(await driver.approve("thread-1", "run-durable", "call-durable", true, context)).toEqual({ runId: "run-durable" });
+    expect(approvals).toEqual([{ resourceId: "local-user", threadId: "thread-1", runId: "run-durable", toolCallId: "call-durable", approved: true, requestContext: context }]);
   });
 
   test("keeps parallel approvals distinct by run and tool-call identity", async () => {

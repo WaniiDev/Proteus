@@ -25,8 +25,18 @@ describe("WorkspaceRegistry", () => {
   test("contains paths and rejects traversal and escaping symlinks", async () => {
     const { base, project, registry } = await fixture();
     await expect(registry.read(project, "../secret.txt")).rejects.toThrow("escapes");
-    await writeFile(join(base, "secret.txt"), "secret"); await symlink(join(base, "secret.txt"), join(project, "link.txt"));
-    await expect(registry.read(project, "link.txt")).rejects.toThrow("Symlink escapes");
+    await writeFile(join(base, "secret.txt"), "secret");
+    try {
+      await symlink(join(base, "secret.txt"), join(project, "link.txt"));
+      await expect(registry.read(project, "link.txt")).rejects.toThrow("Symlink escapes");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      // Ordinary Windows sessions may not have file-symlink permission. A
+      // junction exercises the same canonical-path escape boundary without
+      // requiring Developer Mode or elevation.
+      await symlink(base, join(project, "escape"), "junction");
+      await expect(registry.read(project, "escape/secret.txt")).rejects.toThrow("Symlink escapes");
+    }
     await registry.destroy();
   });
 

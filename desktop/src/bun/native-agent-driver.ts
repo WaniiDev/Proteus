@@ -22,11 +22,11 @@ export type NativeQueueAgent = {
     message: { contents: string; metadata?: Record<string, unknown> },
     options: { resourceId: string; threadId: string; ifIdle?: { streamOptions?: { requestContext?: RequestContext<any> } } },
   ): { accepted: Promise<NativeQueueAccepted> };
-  sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown; streamOptions?: { activeTools?: string[] } }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
+  sendStreamResume(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; resumeData: unknown; streamOptions?: { activeTools?: string[]; requestContext?: RequestContext<any> } }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
   listSuspendedRuns?(options: { resourceId: string; threadId: string }): Promise<{
     runs: Array<{ runId: string; toolCalls: Array<{ toolCallId?: string; toolName?: string; args?: unknown; requiresApproval: boolean; suspendPayload?: unknown }> }>;
   }>;
-  sendToolApproval?(options: { resourceId: string; threadId: string; toolCallId?: string; approved: boolean }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
+  sendToolApproval?(options: { resourceId: string; threadId: string; runId: string; toolCallId?: string; approved: boolean; requestContext: RequestContext<any> }): Promise<{ accepted: true; runId: string; toolCallId?: string }>;
 };
 
 export type NativeAgentDriverCallbacks = {
@@ -72,7 +72,7 @@ export class NativeAgentDriver {
     return this.subscriptions.get(threadId)?.abort() ?? false;
   }
 
-  async resume(threadId: string, runId: string, toolCallId: string, resumeData: unknown, streamOptions?: { activeTools?: string[] }): Promise<{ runId: string }> {
+  async resume(threadId: string, runId: string, toolCallId: string, resumeData: unknown, streamOptions?: { activeTools?: string[]; requestContext?: RequestContext<any> }): Promise<{ runId: string }> {
     await this.ensureSubscription(threadId);
     const result = await this.agent.sendStreamResume({ resourceId: this.resourceId, threadId, runId, toolCallId, resumeData, ...(streamOptions ? { streamOptions } : {}) });
     if (!result.accepted) throw new Error("Mastra did not accept the stream resume request.");
@@ -95,10 +95,10 @@ export class NativeAgentDriver {
     return null;
   }
 
-  async approve(threadId: string, toolCallId: string, approved: boolean): Promise<{ runId: string }> {
+  async approve(threadId: string, runId: string, toolCallId: string, approved: boolean, requestContext: RequestContext<any>): Promise<{ runId: string }> {
     await this.ensureSubscription(threadId);
     if (!this.agent.sendToolApproval) throw new Error("This agent does not support native tool approval.");
-    const result = await this.agent.sendToolApproval({ resourceId: this.resourceId, threadId, toolCallId, approved });
+    const result = await this.agent.sendToolApproval({ resourceId: this.resourceId, threadId, runId, toolCallId, approved, requestContext });
     return { runId: result.runId };
   }
 

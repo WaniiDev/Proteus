@@ -352,6 +352,27 @@ export function describeToolActivity(tool: ChatToolPart, context: ToolActivityCo
         fullTarget: stringField(input, "question"), groupKey: "ask_user", groupLabel: "Asked", countNoun: "questions", action, details: [detail("Question", stringField(input, "question"))],
       });
     }
+    case "remember": {
+      const content = truncate(redactToolText(stringField(input, "content") ?? "saved context"), 80);
+      const scope = stringField(input, "scope") === "current_project" ? "current project" : "all conversations";
+      return descriptor(tool, { base: "remember", ongoing: "Remembering", past: "Remembered" }, content, {
+        groupKey: "remember",
+        groupLabel: "Remembered",
+        countNoun: "memories",
+        details: [detail("Scope", scope), detail("Category", stringField(input, "category")), detail("Memory", stringField(input, "content"))],
+      });
+    }
+    case "forget_memory": {
+      const entryId = stringField(input, "entryId") ?? "saved memory";
+      const scope = stringField(input, "scope") === "current_project" ? "current project" : "all conversations";
+      return descriptor(tool, { base: "forget", ongoing: "Forgetting", past: "Forgot" }, entryId, {
+        groupKey: "forget_memory",
+        groupLabel: "Forgot",
+        countNoun: "memories",
+        approval: true,
+        details: [detail("Scope", scope), detail("Memory ID", entryId, true)],
+      });
+    }
     case "search_tools": {
       const query = truncate(stringField(input, "query") ?? stringField(input, "keywords") ?? "available capabilities", 80);
       return descriptor(tool, { base: "find tools for", ongoing: "Finding tools for", past: "Found tools for" }, query, {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ThreadSummary } from "../shared/contracts";
 import {
-  BookOpenText,
   ChevronLeft,
   House,
   MoreHorizontal,
@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { groupThreads } from "./ui-helpers";
 
-export type View = "companion" | "projects" | "memory" | "settings";
+export type View = "companion" | "projects" | "settings";
 
 type SidebarProps = {
   view: View;
@@ -33,11 +33,23 @@ type SidebarProps = {
 type PrimaryView = Exclude<View, "settings">;
 
 const proteusOrbIconUrl = new URL("./assets/proteus-orb-256.png", import.meta.url).href;
+const SESSION_MENU_WIDTH = 126;
+const SESSION_MENU_HEIGHT = 78;
+const SESSION_MENU_GAP = 4;
+const SESSION_MENU_EDGE = 8;
+
+export function sessionMenuPosition(rect: Pick<DOMRect, "top" | "bottom" | "right">, viewportWidth: number, viewportHeight: number) {
+  const left = Math.min(Math.max(SESSION_MENU_EDGE, rect.right - SESSION_MENU_WIDTH), Math.max(SESSION_MENU_EDGE, viewportWidth - SESSION_MENU_WIDTH - SESSION_MENU_EDGE));
+  const below = rect.bottom + SESSION_MENU_GAP;
+  const top = below + SESSION_MENU_HEIGHT <= viewportHeight - SESSION_MENU_EDGE
+    ? below
+    : Math.max(SESSION_MENU_EDGE, rect.top - SESSION_MENU_HEIGHT - SESSION_MENU_GAP);
+  return { left, top };
+}
 
 const PRIMARY_LINKS: ReadonlyArray<{ view: PrimaryView; label: string; icon: LucideIcon }> = [
   { view: "companion", label: "Home", icon: House },
   { view: "projects", label: "Projects", icon: PanelsTopLeft },
-  { view: "memory", label: "Memory", icon: BookOpenText },
 ];
 
 function NavIcon({ icon: Glyph }: { icon: LucideIcon }) {
@@ -52,8 +64,11 @@ function BrandMark() {
 
 export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, threads = [], activeThreadId, onSwitch, onRename, onDeleteRequest }: SidebarProps) {
   const brandButtonRef = useRef<HTMLButtonElement>(null);
+  const sessionMenuRef = useRef<HTMLDivElement>(null);
+  const sessionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(open);
   const [menuThreadId, setMenuThreadId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 });
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const groups = useMemo(() => groupThreads(threads), [threads]);
@@ -88,6 +103,24 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, thre
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editingThreadId, menuThreadId, onToggle, open]);
 
+  useEffect(() => {
+    if (!menuThreadId) return undefined;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (sessionMenuRef.current?.contains(target) || sessionMenuButtonRef.current?.contains(target)) return;
+      setMenuThreadId(null);
+    };
+    const close = () => setMenuThreadId(null);
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menuThreadId]);
+
   const beginRename = (thread: ThreadSummary) => {
     setMenuThreadId(null);
     setEditingThreadId(thread.id);
@@ -98,8 +131,18 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, thre
     if (next) onRename?.(threadId, next);
     setEditingThreadId(null);
   };
+  const toggleSessionMenu = (threadId: string, button: HTMLButtonElement) => {
+    if (menuThreadId === threadId) {
+      setMenuThreadId(null);
+      return;
+    }
+    sessionMenuButtonRef.current = button;
+    setMenuPosition(sessionMenuPosition(button.getBoundingClientRect(), window.innerWidth, window.innerHeight));
+    setMenuThreadId(threadId);
+  };
+  const menuThread = menuThreadId ? threads.find((thread) => thread.id === menuThreadId) : undefined;
 
-  return <aside className={`app-nav${open ? " app-nav--open" : ""}`} aria-label="Main navigation">
+  return <><aside className={`app-nav${open ? " app-nav--open" : ""}`} aria-label="Main navigation">
     <div className="app-nav__surface">
       <header className="app-nav__header window-drag-region electrobun-webkit-app-region-drag">
         <button
@@ -161,11 +204,7 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, thre
                 <span className="app-nav__session-copy"><strong>{thread.title}</strong><small>{thread.workspace.label}</small></span>
                 {thread.attention > 0 && <b>{thread.attention}</b>}
               </button>}
-              {editingThreadId !== thread.id && <button type="button" className="app-nav__session-more" aria-label={`Actions for ${thread.title}`} aria-expanded={menuThreadId === thread.id} onClick={() => setMenuThreadId((current) => current === thread.id ? null : thread.id)}><MoreHorizontal size={15} /></button>}
-              {menuThreadId === thread.id && <div className="app-nav__session-menu">
-                <button type="button" onClick={() => beginRename(thread)}><Pencil size={13} /> Rename</button>
-                <button type="button" className="danger" onClick={() => { setMenuThreadId(null); onDeleteRequest?.(thread); }}><Trash2 size={13} /> Delete</button>
-              </div>}
+              {editingThreadId !== thread.id && <button type="button" className="app-nav__session-more" aria-label={`Actions for ${thread.title}`} aria-expanded={menuThreadId === thread.id} onClick={(event) => toggleSessionMenu(thread.id, event.currentTarget)}><MoreHorizontal size={15} /></button>}
             </div>)}
           </div>)}
         </div>
@@ -186,5 +225,8 @@ export function Sidebar({ view, open, disabled, onView, onToggle, onCreate, thre
         </button>
       </footer>
     </div>
-  </aside>;
+  </aside>{menuThread && createPortal(<div ref={sessionMenuRef} className="app-nav__session-menu" style={menuPosition} role="menu">
+    <button type="button" role="menuitem" onClick={() => beginRename(menuThread)}><Pencil size={13} /> Rename</button>
+    <button type="button" role="menuitem" className="danger" onClick={() => { setMenuThreadId(null); onDeleteRequest?.(menuThread); }}><Trash2 size={13} /> Delete</button>
+  </div>, document.body)}</>;
 }
