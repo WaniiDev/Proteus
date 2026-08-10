@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Check, File, Files, Folder, FolderOpen, Gauge, ListChecks, LoaderCircle, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import type { RuntimeSnapshot, WorkbenchTask, WorkspaceFile, WorkspaceTreeEntry } from "../shared/contracts";
+import { rpc } from "./bridge";
 import { goalFromMessages } from "./ui-helpers";
 
 export type ContextPaneTab = "activity" | "files" | "search" | "skills" | "details";
@@ -51,7 +52,6 @@ export function ContextPane({ snapshot, tab, onTabChange, onClose, onJump }: Pro
     setBusy(true);
     setError(null);
     try {
-      const { rpc } = await import("./bridge");
       setTree(await rpc.request["workspace.tree"]({ path: "", depth: 4 }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Workspace is unavailable");
@@ -73,7 +73,6 @@ export function ContextPane({ snapshot, tab, onTabChange, onClose, onJump }: Pro
     setBusy(true);
     setError(null);
     try {
-      const { rpc } = await import("./bridge");
       const next = await rpc.request["workspace.read"]({ path });
       setSelectedPath(path);
       setFile(next);
@@ -91,7 +90,6 @@ export function ContextPane({ snapshot, tab, onTabChange, onClose, onJump }: Pro
     setBusy(true);
     setError(null);
     try {
-      const { rpc } = await import("./bridge");
       const next = await rpc.request["workspace.write"]({ path: file.path, content: draft, expectedVersion: file.version });
       setFile(next);
       setDirty(false);
@@ -108,7 +106,6 @@ export function ContextPane({ snapshot, tab, onTabChange, onClose, onJump }: Pro
     setBusy(true);
     setError(null);
     try {
-      const { rpc } = await import("./bridge");
       setResults(await rpc.request["workspace.search"]({ query: query.trim(), mode: searchMode, topK: 20 }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Search failed");
@@ -121,7 +118,6 @@ export function ContextPane({ snapshot, tab, onTabChange, onClose, onJump }: Pro
     setBusy(true);
     setError(null);
     try {
-      const { rpc } = await import("./bridge");
       setSkills(await rpc.request["workspace.skills"]({ load: true }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Skills could not be loaded");
@@ -159,7 +155,7 @@ export function ContextPane({ snapshot, tab, onTabChange, onClose, onJump }: Pro
 
       {tab === "files" && <>{file ? <section className="file-preview"><div className="file-preview__bar"><button type="button" onClick={() => { setFile(null); setSelectedPath(null); }}>Back to files</button><span title={file.path}>{file.path}</span>{file.kind === "text" && <button type="button" disabled={!dirty || busy} onClick={() => void save()}>Save</button>}</div>{file.kind === "text" ? <textarea aria-label={`Edit ${file.path}`} value={draft} onChange={(event) => { setDraft(event.target.value); setDirty(event.target.value !== file.content); }} spellCheck={false} /> : file.kind === "image" ? <img src={file.dataUrl} alt={file.path} /> : file.kind === "pdf" ? <iframe src={file.dataUrl} title={file.path} /> : <div className="context-empty">Binary preview is unavailable.</div>}<footer>{formatBytes(file.size)} · {new Date(file.modifiedAt).toLocaleString()}{file.truncated ? " · Preview truncated" : ""}</footer></section> : <section className="file-browser"><div className="workspace-toolbar"><span>{files.length} files</span><button type="button" onClick={() => void refresh()}><RefreshCw size={14} /> Refresh</button></div>{!workspaceReady ? <div className="context-empty"><FolderOpen size={26} /><p>Reconnect this project folder before browsing files.</p></div> : tree.length === 0 && !busy ? <div className="context-empty"><FolderOpen size={26} /><p>This workspace has no visible files.</p></div> : <Tree entries={tree} selected={selectedPath} onOpen={(path) => void openFile(path)} />}</section>}</>}
 
-      {tab === "search" && <section className="workspace-search"><form onSubmit={(event) => { event.preventDefault(); void search(); }}><div className="workspace-search__input"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search this workspace" aria-label="Search workspace" /><button type="submit">Search</button></div><div className="workspace-search__modes">{(["bm25", "vector", "hybrid"] as const).map((item) => <button type="button" className={searchMode === item ? "active" : ""} onClick={() => setSearchMode(item)} key={item}>{item === "bm25" ? "Keyword" : item === "vector" ? "Semantic" : "Hybrid"}</button>)}</div></form>{results.length === 0 ? <div className="context-empty"><Search size={26} /><p>Index workspace files, then search by keyword or meaning.</p><button type="button" disabled={!files.length} onClick={() => void import("./bridge").then(({ rpc }) => rpc.request["workspace.index"]({ paths: files.map((item) => item.path) }))}>Index {files.length} files</button></div> : <ul className="search-results">{results.map((result) => <li key={result.id}><button type="button" onClick={() => { onTabChange("files"); void openFile(result.id); }}><strong>{result.id}</strong><span>{Math.round(result.score * 100)}%</span><p>{result.content.slice(0, 240)}</p></button></li>)}</ul>}</section>}
+      {tab === "search" && <section className="workspace-search"><form onSubmit={(event) => { event.preventDefault(); void search(); }}><div className="workspace-search__input"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search this workspace" aria-label="Search workspace" /><button type="submit">Search</button></div><div className="workspace-search__modes">{(["bm25", "vector", "hybrid"] as const).map((item) => <button type="button" className={searchMode === item ? "active" : ""} onClick={() => setSearchMode(item)} key={item}>{item === "bm25" ? "Keyword" : item === "vector" ? "Semantic" : "Hybrid"}</button>)}</div></form>{results.length === 0 ? <div className="context-empty"><Search size={26} /><p>Index workspace files, then search by keyword or meaning.</p><button type="button" disabled={!files.length} onClick={() => void rpc.request["workspace.index"]({ paths: files.map((item) => item.path) })}>Index {files.length} files</button></div> : <ul className="search-results">{results.map((result) => <li key={result.id}><button type="button" onClick={() => { onTabChange("files"); void openFile(result.id); }}><strong>{result.id}</strong><span>{Math.round(result.score * 100)}%</span><p>{result.content.slice(0, 240)}</p></button></li>)}</ul>}</section>}
 
       {tab === "skills" && <section>{skills.length === 0 && !busy ? <div className="context-empty"><Sparkles size={26} /><strong>No project skills found</strong><p>Skills discovered in this workspace will appear here.</p></div> : <ul className="skill-list">{skills.map((skill) => <li key={`${skill.source}:${skill.name}`}><details><summary><span><strong>{skill.name}</strong><small>{skill.description}</small></span>{skill.conflict && <b>Conflict</b>}</summary><code>{skill.path}</code><pre>{skill.content}</pre></details></li>)}</ul>}</section>}
 
