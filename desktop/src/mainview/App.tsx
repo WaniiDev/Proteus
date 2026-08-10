@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode } from "react";
-import { ArrowDown, ArrowRight, Check, ChevronDown, Copy, Globe, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Square, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Brain, Check, ChevronDown, Copy, FolderOpen, Globe, HardDrive, KeyRound, PanelRight, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Send, Settings2, ShieldCheck, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkbenchTask, WorkspaceBinding } from "../shared/contracts";
@@ -1061,11 +1061,13 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
   return (
     <section className="view active"><div className="page-narrow settings-page">
       <PageHeader kicker="Yours to control" title="Settings" subtitle="Choose how Proteus connects, which model thinks, and how deeply it reasons." />
+      <div className="settings-layout">
       <nav className="settings-tabs" aria-label="Settings sections">
-        <button type="button" className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers</button>
-        <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}>Models & thinking</button>
-        <button type="button" className={tab === "developer" ? "active" : ""} onClick={() => setTab("developer")}>Developer</button>
+        <button type="button" className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}><ShieldCheck size={16} /><span><strong>Providers</strong><small>Connections and accounts</small></span></button>
+        <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><Settings2 size={16} /><span><strong>Models & thinking</strong><small>Intelligence and effort</small></span></button>
+        <button type="button" className={tab === "developer" ? "active" : ""} onClick={() => setTab("developer")}><HardDrive size={16} /><span><strong>Developer</strong><small>Diagnostics and exports</small></span></button>
       </nav>
+      <div className="settings-content">
       {tab === "providers" ? <div className="provider-grid">
         {snapshot.providers.map((provider) => <section className={`card provider-card ${snapshot.selectedProviderId === provider.id ? "selected" : ""}`} key={provider.id}>
           <div className="provider-card-head"><div><span className="settings-eyebrow">{provider.id === "codex" ? "ChatGPT OAuth" : "Universal gateway"}</span><h2 className="title-md">{provider.name}</h2></div><span className={`provider-badge ${provider.availability}`}>{provider.availability.replace("-", " ")}</span></div>
@@ -1097,6 +1099,8 @@ export function SettingsView({ snapshot, apiKey, setApiKey, onConnect, onDisconn
         {selected?.reasoningOptions?.length ? <div className="reasoning-control"><div><span className="settings-eyebrow">Thinking</span><strong>Reasoning effort</strong></div><div className="reasoning-options">{selected.reasoningOptions.map((effort) => <button type="button" key={effort} className={snapshot.selectedReasoningEffort === effort ? "active" : ""} onClick={() => onSelectReasoning(effort)} disabled={snapshot.activeRun !== null}>{effort}</button>)}</div></div> : <p className="settings-note">This model does not advertise adjustable reasoning.</p>}
         {selected && <div className="model-meta"><span>{selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}</span>{selected.providerId === "openrouter" && <><span>Prompt {price(selected.promptPrice)}</span><span>Completion {price(selected.completionPrice)}</span></>}</div>}
       </section> : <DiagnosticsPanel />}
+      </div>
+      </div>
     </div></section>
   );
 }
@@ -1107,7 +1111,7 @@ function Projects({ snapshot }: { snapshot: RuntimeSnapshot }) {
       <div className="page-narrow">
         <PageHeader kicker="Your contexts" title="Projects" subtitle="Keep longer-running work organized around the conversations that matter." />
         <div className="projects-heading"><p>Attach a folder once, then choose it when starting a chat.</p><button className="btn-primary sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.attach"]())}><Icon name="plus" size={15} /> Attach folder</button></div>
-        <div className="project-list">{snapshot.projects.length === 0 ? <div className="card"><p>No project folders are attached. Chats can still use the private Proteus workspace.</p></div> : snapshot.projects.map((project) => <article className="card project-card" key={project.id}>
+        <div className="project-list">{snapshot.projects.length === 0 ? <div className="empty-page-card"><span className="empty-page-icon"><FolderOpen size={24} /></span><h2>No projects attached</h2><p>Attach a folder to give Proteus a trusted place to read, search, and work. Chats can still use the private app workspace.</p><button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.attach"]())}><Icon name="plus" size={15} /> Attach your first folder</button></div> : snapshot.projects.map((project) => <article className="card project-card" key={project.id}>
           <div><span className="caption-uppercase">{project.availability === "ready" ? "Available" : "Folder missing"}</span><h2>{project.name}</h2><p>{project.rootPath}</p></div>
           <div className="project-actions">{project.availability === "ready" ? <button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.open"]({ projectId: project.id }))}>Open folder</button> : <button className="btn-outline sm" type="button" onClick={() => ignoreRpc(rpc.request["projects.reconnect"]({ projectId: project.id }))}>Reconnect</button>}<button className="btn-danger-ghost" type="button" onClick={() => ignoreRpc(rpc.request["projects.remove"]({ projectId: project.id }))}>Forget</button></div>
         </article>)}</div>
@@ -1124,8 +1128,11 @@ function Memory() {
     <section className="view active">
       <div className="page-narrow">
         <PageHeader kicker="Conversation history" title="Memory" subtitle="Conversation history stays on this device. You decide what should be kept for later." />
-        <div className="card">
-          <p>Long-term memory is not enabled yet. Your conversation history remains available in its chat.</p>
+        <div className="empty-page-card memory-empty">
+          <span className="empty-page-icon"><Brain size={24} /></span>
+          <h2>Memory stays intentional</h2>
+          <p>Long-term memory is not enabled yet. Your conversation history remains available inside each chat, stored on this device.</p>
+          <div className="memory-principles"><span><ShieldCheck size={15} /> Local by default</span><span><Check size={15} /> Nothing saved silently</span></div>
         </div>
       </div>
     </section>

@@ -8,7 +8,8 @@ const cssSource = readFileSync(join(import.meta.dir, "index.css"), "utf8");
 describe("Settings provider and model UI", () => {
   it("uses tabbed provider/model sections and a custom model list", () => {
     expect(appSource).toContain('className="settings-tabs"');
-    expect(appSource).toContain('>Developer</button>');
+    expect(appSource).toContain("Diagnostics and exports");
+    expect(appSource).toContain('className="settings-layout"');
     expect(appSource).toContain('Runtime diagnostics');
     expect(appSource).toContain("Models & thinking");
     expect(appSource).toContain('className="provider-grid"');
@@ -22,6 +23,7 @@ describe("Settings provider and model UI", () => {
     expect(appSource).toContain('rpc.request["models.reasoning.select"]');
     expect(cssSource).toContain(".reasoning-options");
     expect(cssSource).toContain(".provider-grid, .model-card-list { grid-template-columns: 1fr; }");
+    expect(cssSource).toContain("grid-template-columns: 210px minmax(0, 1fr)");
   });
 
   it("offers upstream ChatGPT OAuth browser, device, manual, and cancel controls", () => {
