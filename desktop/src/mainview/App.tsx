@@ -13,8 +13,7 @@ import { InteractionActions, InteractionFrame, interactionVariant } from "./Inte
 import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
 import { Sidebar, type View } from "./Sidebar";
 import { ToolTimeline } from "./ToolTimeline";
-import { Workbench } from "./Workbench";
-import { WorkspacePane } from "./WorkspacePane";
+import { ContextPane, type ContextPaneTab } from "./ContextPane";
 import { composerAction, composerLineCount, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
@@ -811,14 +810,16 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
   const canChat = selectedProviderCanChat(snapshot) && snapshot.activeThreadId !== null && !runningElsewhere;
   const { state, pulseVersion } = useConversationOrbState(snapshot);
   const orbRef = useRef<OrbHandle>(null);
-  const workbenchToggleRef = useRef<HTMLButtonElement>(null);
-  const [workbenchOpenByThread, setWorkbenchOpenByThread] = useState<Map<string, boolean>>(() => new Map());
-  const [workspaceOpen, setWorkspaceOpen] = useState(() => localStorage.getItem("proteus.workspace.open") === "true");
+  const contextToggleRef = useRef<HTMLButtonElement>(null);
+  const [contextOpenByThread, setContextOpenByThread] = useState<Map<string, boolean>>(() => new Map());
+  const [contextTabByThread, setContextTabByThread] = useState<Map<string, ContextPaneTab>>(() => new Map());
+  const [autoOpenedContextThreads, setAutoOpenedContextThreads] = useState<Set<string>>(() => new Set());
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
   const workbenchHasContent = shouldShowWorkbench(snapshot.workbench);
-  const workbenchOpen = !!snapshot.activeThreadId && workbenchHasContent && workbenchOpenByThread.get(snapshot.activeThreadId) === true;
+  const contextOpen = !!snapshot.activeThreadId && contextOpenByThread.get(snapshot.activeThreadId) === true;
+  const contextTab = snapshot.activeThreadId ? contextTabByThread.get(snapshot.activeThreadId) ?? "activity" : "activity";
   const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
   const draftPresent = input.trim().length > 0;
   const primaryComposerAction = composerAction(runningForSelected, draftPresent);
@@ -826,22 +827,28 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
-  useEffect(() => { localStorage.setItem("proteus.workspace.open", String(workspaceOpen)); }, [workspaceOpen]);
   useEffect(() => {
     if (!snapshot.activeThreadId || (!snapshot.messages.length && !snapshot.activeRun)) return;
     setDockedThreads((current) => (current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)));
   }, [snapshot.activeRun, snapshot.messages.length, snapshot.activeThreadId]);
   useEffect(() => {
-    if (!workbenchOpen) return undefined;
+    if (!contextOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (snapshot.activeThreadId) setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-      requestAnimationFrame(() => workbenchToggleRef.current?.focus());
+      if (snapshot.activeThreadId) setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
+      requestAnimationFrame(() => contextToggleRef.current?.focus());
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [snapshot.activeThreadId, workbenchOpen]);
+  }, [contextOpen, snapshot.activeThreadId]);
+  useEffect(() => {
+    const threadId = snapshot.activeThreadId;
+    if (!threadId || !workbenchHasContent || autoOpenedContextThreads.has(threadId)) return;
+    setAutoOpenedContextThreads((current) => new Set(current).add(threadId));
+    setContextTabByThread((current) => new Map(current).set(threadId, "activity"));
+    setContextOpenByThread((current) => new Map(current).set(threadId, true));
+  }, [autoOpenedContextThreads, snapshot.activeThreadId, workbenchHasContent]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
@@ -861,28 +868,10 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
             <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
           </div>
         </div>
-        <button type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${workspaceOpen ? " active" : ""}`} aria-label={workspaceOpen ? "Close workspace" : "Open workspace"} aria-expanded={workspaceOpen} aria-controls="workspace-pane" onClick={() => { setWorkspaceOpen((value) => !value); if (!workspaceOpen && snapshot.activeThreadId) setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false)); }}><PanelRight size={16} /><span>Workspace</span></button>
-        {workbenchHasContent && (
-          <button
-            ref={workbenchToggleRef}
-            type="button"
-            className={`workbench-toggle electrobun-webkit-app-region-no-drag${workbenchOpen ? " active" : ""}`}
-            aria-label={workbenchOpen ? "Close Workbench" : "Open Workbench"}
-            aria-expanded={workbenchOpen}
-            aria-controls="conversation-workbench"
-            onClick={() => {
-              if (!snapshot.activeThreadId) return;
-              setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, !workbenchOpen));
-            }}
-          >
-            <Icon name="panel" size={16} />
-            <span>Workbench</span>
-            {workbenchAttention > 0 && <b>{workbenchAttention}</b>}
-          </button>
-        )}
+        <button ref={contextToggleRef} type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${contextOpen ? " active" : ""}`} aria-label={contextOpen ? "Close context" : "Open context"} aria-expanded={contextOpen} aria-controls="conversation-context" disabled={!snapshot.activeThreadId} onClick={() => { if (!snapshot.activeThreadId) return; setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, !contextOpen)); }}><PanelRight size={16} /><span>Context</span>{workbenchAttention > 0 && <b>{workbenchAttention}</b>}</button>
       </div>
       <div className="text-chat-layout">
-        <div className={`companion-grid ${workbenchOpen || workspaceOpen ? "workbench-present" : "workbench-absent"}`}>
+        <div className={`companion-grid ${contextOpen ? "context-present" : "context-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             {!docked && <OrbPresence state={state} docked={false} animateDock={false} pulseVersion={pulseVersion} orbRef={orbRef} />}
@@ -980,23 +969,24 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
               </div>
             </form>
           </div>
-          {workspaceOpen && <WorkspacePane snapshot={snapshot} onJump={jumpToInteraction} onClose={() => setWorkspaceOpen(false)} />}
-          {workbenchOpen && (
+          {contextOpen && (
             <button
               type="button"
-              className="workbench-backdrop"
-              aria-label="Close Workbench"
+              className="context-backdrop"
+              aria-label="Close context pane"
               onClick={() => {
                 if (!snapshot.activeThreadId) return;
-                setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-                requestAnimationFrame(() => workbenchToggleRef.current?.focus());
+                setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
+                requestAnimationFrame(() => contextToggleRef.current?.focus());
               }}
             />
           )}
-          {workbenchOpen && <Workbench snapshot={snapshot} onJump={jumpToInteraction} onClose={() => {
+          {contextOpen && <ContextPane snapshot={snapshot} tab={contextTab} onTabChange={(tab) => {
+            if (snapshot.activeThreadId) setContextTabByThread((current) => new Map(current).set(snapshot.activeThreadId as string, tab));
+          }} onJump={jumpToInteraction} onClose={() => {
             if (!snapshot.activeThreadId) return;
-            setWorkbenchOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-            requestAnimationFrame(() => workbenchToggleRef.current?.focus());
+            setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
+            requestAnimationFrame(() => contextToggleRef.current?.focus());
           }} />}
         </div>
       </div>
