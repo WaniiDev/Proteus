@@ -20,7 +20,9 @@ describe("supporting page layout", () => {
 
   test("keeps explicit desktop, tablet, and compact layouts for new surfaces", async () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
-    expect(css).toContain(".memory-workspace { display: grid; grid-template-columns: 190px minmax(0,1fr)");
+    expect(css).toMatch(/\.memory-group__items\s*\{[^}]*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)[\s\S]*?\.memory-group__items\s*\{[^}]*grid-template-columns:\s*1fr/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*?\.memory-control__header\s*\{[^}]*flex-direction:\s*column/);
     expect(css).toContain(".project-detail-grid { display: grid; grid-template-columns:");
     expect(css).toContain("@media (max-width: 860px)");
     expect(css).toContain("@media (max-width: 620px)");
