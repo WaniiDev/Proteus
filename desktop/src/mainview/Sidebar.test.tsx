@@ -51,7 +51,20 @@ describe("Sidebar", () => {
 
     expect(navigateHandler).toContain("setView(next)");
     expect(navigateHandler).not.toContain("setSidebarOpen(false)");
-    expect(createHandler).toContain("setNewChatOpen(true)");
+    expect(createHandler).toContain("snapshot.activeWorkspace");
+    expect(createHandler).toContain("createChat(workspace.binding, workspace.label, workspace.availability)");
     expect(createHandler).not.toContain("setSidebarOpen(false)");
+  });
+
+  it("creates directly in the inherited workspace without the removed chooser", async () => {
+    const source = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
+
+    expect(source).not.toContain("Where should Proteus work?");
+    expect(source).not.toContain("NewChatModal");
+    expect(source).not.toContain("newChatOpen");
+    expect(source).toContain("creatingChatRef.current");
+    expect(source).toContain('workspaceBinding.kind === "project"');
+    expect(source).toContain('setView("companion")');
+    expect(source).toContain("Reconnect ${workspaceLabel} in Projects");
   });
 });

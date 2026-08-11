@@ -36,6 +36,7 @@ describe("OpenRouter contracts", () => {
       error: null,
     });
     expect(snapshot.selectedModelId).toBe("openrouter/auto");
+    expect(snapshot.continuation).toBeNull();
   });
 
   it("keeps resumable interaction and raw plan history data", () => {

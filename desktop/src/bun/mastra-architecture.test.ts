@@ -72,7 +72,7 @@ describe("Mastra-first architecture boundaries", () => {
   });
 
   it("keeps model selection conversation-owned while retaining a new-chat default", async () => {
-    const runtime = await readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8");
+    const runtime = (await readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8")).replaceAll("\r\n", "\n");
     expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.preferredModelSelection");
     expect(runtime).toContain("const shouldBackfillModelSelection = !parseAppModelSelection(nextThreadState.modelSelection)");
     expect(runtime).toContain("modelSelection: this.defaultModelSelection()");

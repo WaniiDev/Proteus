@@ -30,6 +30,7 @@ describe("composer UI policy", () => {
       threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
       workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
       activeRun: null,
+      continuation: null,
       error: { code: "model-unavailable", message: "Stale OpenRouter error", retryable: true },
     } satisfies RuntimeSnapshot;
 
@@ -64,7 +65,7 @@ describe("composer UI policy", () => {
       projects: [], activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
       threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
       workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
-      activeRun: null, error: null,
+      activeRun: null, continuation: null, error: null,
     } satisfies RuntimeSnapshot;
 
     expect(canChooseComposerWorkspace(snapshot, 0)).toBe(true);
@@ -82,7 +83,7 @@ describe("composer UI policy", () => {
       projects: [], activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
       threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
       workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
-      activeRun: null, error: null,
+      activeRun: null, continuation: null, error: null,
     } satisfies RuntimeSnapshot;
     expect(composerModelLabel(snapshot)).toBe("Codex · GPT-5.6 Sol · high");
   });
@@ -97,10 +98,18 @@ describe("composer UI policy", () => {
     expect(app).toContain("<Composer");
     expect(composer).toContain("composer-project-popover");
     expect(composer).toContain("composer-model-popover");
+    expect(composer).toContain('aria-label={provider.name}');
+    expect(composer).toContain('src={PROVIDER_LOGOS[provider.id]}');
+    expect(composer).toContain("<span>{provider.name}</span>");
+    expect(composer).not.toContain("model.description ?? model.rawId");
+    expect(composer).not.toContain('<i className={provider.availability}');
     expect(css).toContain(".composer-primary { position: absolute; top: 50%; right: 11px;");
     expect(css).toContain("border-radius: 20px");
-    expect(css).toContain(".composer-popover { position: absolute; bottom: calc(100% + 10px)");
-    expect(css).toContain(".composer-model-popover { width: min(560px, calc(100% - 28px))");
+    expect(css).toContain(".composer-controls { position: absolute; top: calc(100% + 8px); left: 4px");
+    expect(css).toContain(".composer-popover { position: absolute; bottom: calc(100% + 8px)");
+    expect(css).toContain(".composer-model-popover { width: 560px; max-width: calc(100vw - 48px)");
+    expect(css).toContain(".composer-provider-tabs img { width: 22px; height: 22px");
+    expect(css).not.toContain(".composer-provider-tabs i.ready");
   });
 
   it("reconciles identical queued text FIFO and marks a draining item", () => {

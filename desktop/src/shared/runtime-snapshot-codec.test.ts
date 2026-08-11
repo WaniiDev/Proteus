@@ -108,6 +108,17 @@ const snapshot = runtimeSnapshotSchema.parse({
     activeTools: [{ id: "tool-2", name: "submit_plan", status: "running" }],
   },
   activeRun: { runId: "run-1", threadId: "thread-1", status: "running" },
+  continuation: {
+    interactionId: "interaction-1",
+    toolCallId: "tool-1",
+    threadId: "thread-1",
+    runId: "run-1",
+    kind: "tool_approval",
+    decision: "declined",
+    phase: "slow",
+    startedAt: "2026-08-03T00:00:02.000Z",
+    lastProgressAt: "2026-08-03T00:00:32.000Z",
+  },
   error: null,
 }) as RuntimeSnapshot;
 

@@ -19,6 +19,9 @@ import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform, type O
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
 import { ProjectsView } from "./ProjectsView";
 import { Composer } from "./Composer";
+import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "./model-sorting";
+import { PROVIDER_LOGOS } from "./provider-assets";
+import { ProviderSettings } from "./ProviderSettings";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
@@ -58,6 +61,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   },
   activeRun: null,
+  continuation: null,
   error: null,
 };
 
@@ -933,6 +937,15 @@ function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, trans
                   {event.text}
                 </div>
               ))}
+              {snapshot.continuation && snapshot.continuation.threadId === snapshot.activeThreadId && snapshot.continuation.phase !== "resuming" && (
+                <div className={`continuation-notice continuation-${snapshot.continuation.phase}`} role="status">
+                  <div>
+                    <strong>{snapshot.continuation.phase === "slow" ? "Still continuing…" : "Checking the latest run state…"}</strong>
+                    <p>{snapshot.continuation.phase === "slow" ? "Proteus has not reported new progress yet." : "Proteus is reconciling this decision with Mastra’s durable run history."}</p>
+                  </div>
+                  <button type="button" className="btn-outline sm" onClick={onAbort}><Icon name="stop" size={13} /> Stop</button>
+                </div>
+              )}
               {snapshot.interactions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} onRespond={onInteraction} onApproval={onToolApproval} onDismiss={onInteractionDismiss} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />)}
               {transportError && (
                 <div className="run-error-card transport-error-card">
@@ -1059,15 +1072,15 @@ export type SettingsSection = "providers" | "models" | "memory" | "developer";
 
 export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: { snapshot: RuntimeSnapshot; section: SettingsSection; onSection: (section: SettingsSection) => void; memoryScope?: MemoryScope; apiKey: string; setApiKey: (value: string) => void; onConnect: (event: FormEvent<HTMLFormElement>) => void; onDisconnect: (providerId: "openrouter" | "codex") => void; onStartCodexAuth: (mode: "browser" | "device") => void; onSubmitCodexAuth: (value: string) => void; onCancelCodexAuth: () => void; onRefresh: () => void; onSelectProvider: (providerId: "openrouter" | "codex") => void; onSelectModel: (modelId: ProviderModel["id"]) => void; onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void }) {
   const [modelSearch, setModelSearch] = useState("");
-  const [authorizationCode, setAuthorizationCode] = useState("");
+  const [modelSort, setModelSort] = useState<ModelSort>("recommended");
   const selected = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
   const price = (value: number | undefined) => (value === undefined ? "—" : `$${(value * 1_000_000).toFixed(2)}/M`);
   const providerModels = snapshot.models.filter((model) => model.providerId === snapshot.selectedProviderId);
-  const displayedModels = providerModels.filter((model, index, all) => {
+  const displayedModels = sortProviderModels(providerModels.filter((model, index, all) => {
     if (model.providerId === "codex" && all.findIndex((candidate) => candidate.baseModelId === model.baseModelId) !== index) return false;
     const query = modelSearch.trim().toLowerCase();
     return !query || `${model.name} ${model.baseModelId ?? model.rawId}`.toLowerCase().includes(query);
-  });
+  }), modelSort, snapshot.selectedModelId);
   const chooseDisplayedModel = (model: ProviderModel) => {
     if (model.providerId !== "codex") return onSelectModel(model.id);
     const preferred = snapshot.models.find((candidate) => candidate.providerId === "codex" && candidate.baseModelId === model.baseModelId && candidate.reasoningEffort === snapshot.selectedReasoningEffort);
@@ -1084,33 +1097,15 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
         <button type="button" className={section === "developer" ? "active" : ""} onClick={() => onSection("developer")}><HardDrive size={16} /><span><strong>Developer</strong><small>Diagnostics and exports</small></span></button>
       </nav>
       <div className="settings-content">
-      {section === "providers" ? <div className="provider-grid">
-        {snapshot.providers.map((provider) => <section className={`card provider-card ${snapshot.selectedProviderId === provider.id ? "selected" : ""}`} key={provider.id}>
-          <div className="provider-card-head"><div><span className="settings-eyebrow">{provider.id === "codex" ? "ChatGPT OAuth" : "Universal gateway"}</span><h2 className="title-md">{provider.name}</h2></div><span className={`provider-badge ${provider.availability}`}>{provider.availability.replace("-", " ")}</span></div>
-          <p className="settings-intro">{provider.id === "codex" ? "Connect a ChatGPT Plus or Pro subscription. Tokens stay in Windows Credential Manager." : "Use one OpenRouter key to access your account's text-model catalog."}</p>
-          {provider.id === "openrouter" ? <>
-            <form className="key-form" onSubmit={onConnect}><Icon name="key" size={18} /><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.credential.configured ? "Enter a replacement key" : "sk-or-v1-…"} autoComplete="off" aria-label="OpenRouter API key" /><button className="btn-primary sm" type="submit" disabled={!apiKey.trim() || snapshot.status === "validating-key"}>{snapshot.status === "validating-key" ? "Checking…" : snapshot.credential.configured ? "Replace" : "Connect"}</button></form>
-            {snapshot.credential.configured && <button className="btn-danger-ghost" type="button" onClick={() => onDisconnect("openrouter")}>Disconnect key</button>}
-          </> : <div className="provider-auth-controls">
-            <p className="provider-detail">{provider.detail}</p>
-            {!provider.configured && !snapshot.providerAuth && <div className="provider-auth-actions"><button className="btn-primary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Connect in browser</button><button className="btn-outline sm" type="button" onClick={() => onStartCodexAuth("device")}>Use device code</button></div>}
-            {!provider.verified && snapshot.providerAuth?.providerId === "codex" && <div className={`provider-auth-progress ${snapshot.providerAuth.status}`} role="status">
-              <strong>{snapshot.providerAuth.status === "failed" ? "Authorization failed" : snapshot.providerAuth.status === "waiting" ? "Waiting for you" : "Connecting…"}</strong>
-              <p>{snapshot.providerAuth.error ?? snapshot.providerAuth.instructions}</p>
-              {snapshot.providerAuth.code && <code>{snapshot.providerAuth.code}</code>}
-              {snapshot.providerAuth.url && <a href={snapshot.providerAuth.url} target="_blank" rel="noreferrer">Open authorization page</a>}
-              {snapshot.providerAuth.mode === "browser" && snapshot.providerAuth.status === "waiting" && <form className="key-form" onSubmit={(event) => { event.preventDefault(); onSubmitCodexAuth(authorizationCode); setAuthorizationCode(""); }}><input value={authorizationCode} onChange={(event) => setAuthorizationCode(event.target.value)} placeholder="Paste callback URL or code" aria-label="ChatGPT authorization code" /><button className="btn-primary sm" type="submit" disabled={!authorizationCode.trim()}>Submit</button></form>}
-              {snapshot.providerAuth.status !== "failed" ? <button className="btn-danger-ghost" type="button" onClick={onCancelCodexAuth}>Cancel</button> : <div className="provider-auth-actions"><button className="btn-primary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Try browser again</button><button className="btn-outline sm" type="button" onClick={() => onStartCodexAuth("device")}>Try device code</button></div>}
-            </div>}
-            {provider.configured && <button className="btn-danger-ghost" type="button" onClick={() => onDisconnect("codex")}>Disconnect ChatGPT</button>}
-          </div>}
-          <button className={snapshot.selectedProviderId === provider.id ? "btn-primary sm" : "btn-outline sm"} type="button" disabled={!provider.verified || snapshot.activeRun !== null || snapshot.selectedProviderId === provider.id} onClick={() => onSelectProvider(provider.id)}>{snapshot.selectedProviderId === provider.id ? "Current provider" : `Use ${provider.name}`}</button>
-        </section>)}
-        <div className="settings-wide-actions"><button className="btn-outline sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}><Icon name="refresh" size={15} /> Refresh connections</button></div>{errorForUi(snapshot.error)}
-      </div> : section === "models" ? <section className="card settings-card model-settings-card">
+      {section === "providers" ? <><ProviderSettings snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={onConnect} onDisconnect={onDisconnect} onStartCodexAuth={onStartCodexAuth} onSubmitCodexAuth={onSubmitCodexAuth} onCancelCodexAuth={onCancelCodexAuth} onRefresh={onRefresh} onSelectProvider={onSelectProvider} />{errorForUi(snapshot.error)}</> : section === "models" ? <section className="card settings-card model-settings-card">
         <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection applies to the current conversation and becomes the default for new chats.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
-        <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}>{provider.name}</button>)}</div>
-        <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
+        <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}><img src={PROVIDER_LOGOS[provider.id]} alt="" aria-hidden="true" /><span>{provider.name}</span></button>)}</div>
+        <div className="model-catalog-tools">
+          <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
+          <select value={modelSort} onChange={(event) => setModelSort(event.target.value as ModelSort)} aria-label="Sort models">
+            {MODEL_SORT_OPTIONS.map((sort) => <option value={sort} key={sort}>{modelSortLabel(sort)}</option>)}
+          </select>
+        </div>
         <div className="model-card-list">{displayedModels.map((model) => { const isSelected = selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId); return <button type="button" className={`model-card ${isSelected ? "selected" : ""}`} key={model.id} onClick={() => chooseDisplayedModel(model)} disabled={snapshot.activeRun !== null}><span className="model-card-copy"><strong>{model.providerId === "codex" ? model.baseModelId : model.name}</strong><small>{model.description ?? model.rawId}</small></span>{isSelected && <Check size={17} />}</button>; })}</div>
         {selected?.reasoningOptions?.length ? <div className="reasoning-control"><div><span className="settings-eyebrow">Thinking</span><strong>Reasoning effort</strong></div><div className="reasoning-options">{selected.reasoningOptions.map((effort) => <button type="button" key={effort} className={snapshot.selectedReasoningEffort === effort ? "active" : ""} onClick={() => onSelectReasoning(effort)} disabled={snapshot.activeRun !== null}>{effort}</button>)}</div></div> : <p className="settings-note">This model does not advertise adjustable reasoning.</p>}
         {selected && <div className="model-meta"><span>{selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}</span>{selected.providerId === "openrouter" && <><span>Prompt {price(selected.promptPrice)}</span><span>Completion {price(selected.completionPrice)}</span></>}</div>}
@@ -1121,9 +1116,6 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
   );
 }
 
-function NewChatModal({ snapshot, onCancel, onCreate }: { snapshot: RuntimeSnapshot; onCancel: () => void; onCreate: (binding: WorkspaceBinding) => void }) {
-  return <div className="modal-backdrop" role="presentation"><section className="modal-card workspace-picker" role="dialog" aria-modal="true" aria-labelledby="workspace-picker-title"><div className="modal-head"><div><span className="caption-uppercase">New chat</span><h2 id="workspace-picker-title">Where should Proteus work?</h2></div><button className="icon-btn" type="button" onClick={onCancel} aria-label="Close"><Icon name="close" /></button></div><p>The workspace is fixed after the first message so tools always use the same trusted folder.</p><div className="workspace-options"><button type="button" onClick={() => onCreate({ kind: "app" })}><strong>Don’t work in any project</strong><span>Use Proteus’s private app workspace.</span></button>{snapshot.projects.map((project) => <button type="button" key={project.id} disabled={project.availability !== "ready"} onClick={() => onCreate({ kind: "project", projectId: project.id })}><strong>{project.name}</strong><span>{project.availability === "ready" ? project.rootPath : "Reconnect this folder in Projects first."}</span></button>)}</div></section></div>;
-}
 export default function App() {
   const [view, setView] = useState<View>("companion");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
@@ -1143,7 +1135,9 @@ export default function App() {
   const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
   const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
-  const [newChatOpen, setNewChatOpen] = useState(false);
+  const [creatingChat, setCreatingChat] = useState(false);
+  const creatingChatRef = useRef(false);
+  const [newChatError, setNewChatError] = useState<string | null>(null);
   const [transportError, setTransportError] = useState<string | null>(null);
   const transportRetryRef = useRef<() => void>(() => undefined);
   useEffect(() => {
@@ -1254,13 +1248,32 @@ export default function App() {
     setApiKey("");
     ignoreRpc(rpc.request["providers.connect"]({ providerId: "openrouter", mode: "api-key", apiKey: candidate }));
   };
-  const handleCreate = () => {
-    if (snapshot.activeRun) return;
-    setNewChatOpen(true);
+  const createChat = async (workspaceBinding: WorkspaceBinding, workspaceLabel: string, availability: "ready" | "missing") => {
+    if (snapshot.activeRun || creatingChatRef.current) return;
+    if (availability !== "ready") {
+      setNewChatError(`Reconnect ${workspaceLabel} in Projects before starting another chat.`);
+      return;
+    }
+    creatingChatRef.current = true;
+    setCreatingChat(true);
+    setNewChatError(null);
+    try {
+      const result = await rpc.request["threads.create"]({ title: "New chat", workspaceBinding });
+      if (!result.threadId) {
+        setNewChatError(workspaceBinding.kind === "project" ? `Reconnect ${workspaceLabel} in Projects before starting another chat.` : "The new chat could not be created. Try again.");
+        return;
+      }
+      setView("companion");
+    } catch {
+      setNewChatError("The new chat could not be created. Try again.");
+    } finally {
+      creatingChatRef.current = false;
+      setCreatingChat(false);
+    }
   };
-  const createWithWorkspace = (workspaceBinding: WorkspaceBinding) => {
-    setNewChatOpen(false);
-    ignoreRpc(rpc.request["threads.create"]({ title: "New chat", workspaceBinding }));
+  const handleCreate = () => {
+    const workspace = snapshot.activeWorkspace;
+    void createChat(workspace.binding, workspace.label, workspace.availability);
   };
   const handleRename = (threadId: string, title: string) => {
     ignoreRpc(rpc.request["threads.rename"]({ threadId, title }));
@@ -1272,11 +1285,8 @@ export default function App() {
     ignoreRpc(rpc.request["threads.delete"]({ threadId: target.id }));
   };
   const handleCreateProjectChat = (projectId: string) => {
-    if (snapshot.activeRun) return;
-    void rpc.request["threads.create"]({ title: "New chat", workspaceBinding: { kind: "project", projectId } }).then((result) => {
-      if (!result.threadId) return;
-      setView("companion");
-    });
+    const project = snapshot.projects.find((item) => item.id === projectId);
+    void createChat({ kind: "project", projectId }, project?.name ?? "this project", project?.availability ?? "missing");
   };
   const handleSelectProjectThread = (threadId: string) => {
     void rpc.request["threads.select"]({ threadId }).then((result) => {
@@ -1303,7 +1313,7 @@ export default function App() {
         <div className="ambient-orb amb-sky" />
       </div>
       <div className="app-shell">
-        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onDeleteRequest={setDeleteTarget} />
+        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onDeleteRequest={setDeleteTarget} />
         {sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
         <main>
           {view === "companion" && (
@@ -1337,8 +1347,8 @@ export default function App() {
           {view === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
         </main>
       </div>
+      {newChatError && <div className="app-shell-notice" role="alert"><span>{newChatError}</span><button type="button" onClick={() => setNewChatError(null)} aria-label="Dismiss new chat error"><X size={14} /></button></div>}
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}
-      {newChatOpen && <NewChatModal snapshot={snapshot} onCancel={() => setNewChatOpen(false)} onCreate={createWithWorkspace} />}
     </>
   );
 }

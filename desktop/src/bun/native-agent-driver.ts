@@ -33,6 +33,7 @@ export type NativeAgentDriverCallbacks = {
   onProjection: (projection: NativeStreamProjection, chunk: NativeAgentChunk) => void;
   onQueueChanged?: (threadId: string, count: number) => void;
   onError?: (error: unknown, threadId: string) => void;
+  onClose?: (threadId: string, activeRunId: string | null) => void;
 };
 
 /** Thin lifecycle bridge over Mastra's native thread subscription and queue. */
@@ -70,6 +71,10 @@ export class NativeAgentDriver {
 
   abort(threadId: string): boolean {
     return this.subscriptions.get(threadId)?.abort() ?? false;
+  }
+
+  activeRunId(threadId: string): string | null {
+    return this.subscriptions.get(threadId)?.activeRunId() ?? null;
   }
 
   async resume(threadId: string, runId: string, toolCallId: string, resumeData: unknown, streamOptions?: { activeTools?: string[]; requestContext?: RequestContext<any> }): Promise<{ runId: string }> {
@@ -116,6 +121,7 @@ export class NativeAgentDriver {
   }
 
   private async consume(threadId: string, subscription: NativeThreadSubscription): Promise<void> {
+    let failed = false;
     try {
       for await (const chunk of subscription.stream) {
         if (chunk.type === "start" && this.queuedCount(threadId) > 0) this.setQueuedCount(threadId, this.queuedCount(threadId) - 1);
@@ -124,9 +130,11 @@ export class NativeAgentDriver {
         if (projection?.terminal) this.projector.delete(projection.runId);
       }
     } catch (error) {
+      failed = true;
       this.callbacks.onError?.(error, threadId);
     } finally {
       if (this.subscriptions.get(threadId) === subscription) this.subscriptions.delete(threadId);
+      if (!failed) this.callbacks.onClose?.(threadId, subscription.activeRunId());
     }
   }
 

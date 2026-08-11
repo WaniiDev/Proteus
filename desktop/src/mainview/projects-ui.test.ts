@@ -33,7 +33,7 @@ describe("projects library and detail", () => {
     const app = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
     expect(projectsView).toContain('rpc.request["memory.get"]({ scope: { kind: "project", projectId: selected.id } })');
     expect(projectsView).toContain("onOpenMemory(selected.id)");
-    expect(app).toContain('workspaceBinding: { kind: "project", projectId }');
+    expect(app).toContain('createChat({ kind: "project", projectId }');
     expect(app).toContain('setSettingsSection("memory")');
   });
 });

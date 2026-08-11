@@ -24,6 +24,7 @@ const snapshot = (): RuntimeSnapshot => ({
   threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
   workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
   activeRun: null,
+  continuation: null,
   error: null,
 });
 
@@ -51,6 +52,7 @@ describe("Claude-style composer", () => {
   test("shows workspace and conversation model controls for an empty chat", () => {
     const html = render(snapshot());
     expect(html).toContain("Proteus workspace");
+    expect(html).toContain("<span>GPT-5.6 Sol</span>");
     expect(html).toContain("Codex · GPT-5.6 Sol · high");
     expect(html).toContain("Enter to send · Shift+Enter for new line");
   });

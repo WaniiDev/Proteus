@@ -12,7 +12,7 @@ function snapshot(): RuntimeSnapshot {
     models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] }],
     selectedProviderId: "openrouter", selectedModelId: "openrouter/auto", selectedReasoningEffort: null, projects: [],
     activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
-    threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [], activeRun: null, error: null,
+    threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [], activeRun: null, continuation: null, error: null,
     workbench: { status: "waiting", goal: "Ship the context pane", tasks: [{ id: "one", content: "Build pane", activeForm: "Building pane", status: "in_progress" }], pendingInteractions: [{ id: "approval", toolCallId: "call", kind: "submit_plan", title: "Review", options: [], status: "pending", createdAt: "2026-08-10T00:00:00.000Z" }], queuedFollowUpCount: 1, tokenUsage: { promptTokens: 12, completionTokens: 8, totalTokens: 20 } },
   };
 }

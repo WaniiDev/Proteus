@@ -14,6 +14,8 @@ import {
   composerModelLabel,
   shouldSubmitComposerKey,
 } from "./composer-ui";
+import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "./model-sorting";
+import { PROVIDER_LOGOS } from "./provider-assets";
 
 type ComposerProps = {
   snapshot: RuntimeSnapshot;
@@ -81,6 +83,7 @@ export function Composer({
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [browseProviderId, setBrowseProviderId] = useState(snapshot.selectedProviderId);
   const [modelSearch, setModelSearch] = useState("");
+  const [modelSort, setModelSort] = useState<ModelSort>("recommended");
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const showProjectControl = canChooseComposerWorkspace(snapshot, queuedDraftCount);
@@ -121,11 +124,12 @@ export function Composer({
 
   const displayedModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase();
-    return snapshot.models.filter((model) => {
+    const filtered = snapshot.models.filter((model) => {
       if (model.providerId !== browseProviderId) return false;
       return !query || `${model.name} ${model.baseModelId ?? model.rawId}`.toLowerCase().includes(query);
     });
-  }, [browseProviderId, modelSearch, snapshot.models]);
+    return sortProviderModels(filtered, modelSort, snapshot.selectedModelId);
+  }, [browseProviderId, modelSearch, modelSort, snapshot.models, snapshot.selectedModelId]);
 
   const selectWorkspace = async (binding: WorkspaceBinding) => {
     if (sameBinding(binding, snapshot.activeWorkspace.binding)) {
@@ -256,7 +260,7 @@ export function Composer({
               onClick={() => setOpenMenu((current) => current === "model" ? null : "model")}
             >
               <Brain size={14} />
-              <span>{composerModelLabel(snapshot)}</span>
+              <span>{selectedModel?.name ?? "Choose model"}</span>
               <ChevronDown size={13} />
             </button>
             {openMenu === "model" && (
@@ -264,20 +268,25 @@ export function Composer({
                 <div className="composer-popover-head"><strong>Model & thinking</strong><small>Saved for this conversation</small></div>
                 <div className="composer-provider-tabs" role="tablist" aria-label="Providers" onKeyDown={(event) => moveMenuFocus(event, '[role="tab"]', true)}>
                   {snapshot.providers.map((provider) => (
-                    <button type="button" role="tab" aria-selected={browseProviderId === provider.id} className={browseProviderId === provider.id ? "active" : ""} key={provider.id} onClick={() => { setBrowseProviderId(provider.id); setModelSearch(""); setSelectionError(null); }}>
-                      {provider.name}
-                      <i className={provider.availability} />
+                    <button type="button" role="tab" aria-label={provider.name} title={provider.name} aria-selected={browseProviderId === provider.id} className={browseProviderId === provider.id ? "active" : ""} key={provider.id} onClick={() => { setBrowseProviderId(provider.id); setModelSearch(""); setSelectionError(null); }}>
+                      <img src={PROVIDER_LOGOS[provider.id]} alt="" aria-hidden="true" />
+                      <span>{provider.name}</span>
                     </button>
                   ))}
                 </div>
 
                 {browsedProvider?.verified && browsedProvider.availability === "ready" ? (
                   <>
-                    <label className="composer-model-search"><Search size={14} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></label>
+                    <div className="composer-model-tools">
+                      <label className="composer-model-search"><Search size={14} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></label>
+                      <select value={modelSort} onChange={(event) => setModelSort(event.target.value as ModelSort)} aria-label="Sort models">
+                        {MODEL_SORT_OPTIONS.map((sort) => <option value={sort} key={sort}>{modelSortLabel(sort)}</option>)}
+                      </select>
+                    </div>
                     <div className="composer-model-list" role="listbox" aria-label={`${browsedProvider.name} models`} onKeyDown={(event) => moveMenuFocus(event, '[role="option"]')}>
                       {displayedModels.map((model) => (
                         <button type="button" role="option" aria-selected={model.id === snapshot.selectedModelId} className={model.id === snapshot.selectedModelId ? "selected" : ""} key={model.id} disabled={selectionBusy} onClick={() => void selectModel(model.id)}>
-                          <span><strong>{model.name}</strong><small>{model.description ?? model.rawId}</small></span>
+                          <span><strong>{model.name}</strong></span>
                           {model.id === snapshot.selectedModelId && <Check size={15} />}
                         </button>
                       ))}

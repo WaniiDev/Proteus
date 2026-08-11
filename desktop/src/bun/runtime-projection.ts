@@ -108,7 +108,7 @@ export function normalizeLegacyTaskToolArtifacts(messages: ChatMessage[]): ChatM
 }
 
 export type ProjectedToolOutcome = {
-  status: Extract<ChatToolPart["status"], "completed" | "error" | "cancelled" | "declined">;
+  status: ChatToolPart["status"];
   output?: unknown;
   error?: string;
 };

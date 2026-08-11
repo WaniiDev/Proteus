@@ -41,7 +41,15 @@ The response RPC waits until Mastra accepts `sendToolApproval()` or `sendStreamR
 
 Pending actions use one UI model for approvals, questions, and plan review. Multiple tool calls remain distinct by `runId` plus `toolCallId`; resolving one cannot overwrite another. A refresh or process restart reconstructs them from Mastra storage.
 
+After Mastra acknowledges a decision, Proteus immediately removes the pending card and records one correlated continuation containing only interaction, tool-call, thread, run, decision kind, phase, and timestamps. Answers and tool arguments are never persisted in this record. Declines are projected before generic tool completion, including Mastra's canonical denial output, so a denied tool is visibly declined and cannot appear completed. Approved tool calls remain running until their real result arrives. Proteus never replays an accepted decision automatically.
+
+Only events after the decision count as continuation progress; the suspended step's trailing `step-finish` is ignored. After 30 seconds without progress the UI shows a non-blocking warning. After two minutes, and also after startup or an unterminated stream close/error, Proteus reconciles durable message history and `listSuspendedRuns()`: completed history settles the UI, an exact suspension restores an explicit retry card, an active subscription remains running with Stop available, and missing state becomes a retryable error. A successful continuation with no follow-up text returns to idle with a completion note.
+
 Session-scoped “trust this tool” grants remain backlog work. They must not be added until they can be made durable without reintroducing an independent approval lifecycle.
+
+## New-chat workspace behavior
+
+The sidebar New chat action has no workspace modal. It inherits the current conversation's binding exactly once, and the runtime revalidates project availability before creating and selecting the new conversation. Missing projects are blocked with reconnect guidance; creation failures retain the current conversation and view. The empty composer keeps its workspace selector until the first message, and the Projects view keeps its explicit project-bound New chat action.
 
 ## Plan boundary
 

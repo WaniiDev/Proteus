@@ -28,6 +28,7 @@ export default {
       // ONNX Runtime and DirectML DLLs at runtime.
       "node_modules/onnxruntime-node/bin/napi-v6/win32/x64": "bin/napi-v6/win32/x64",
     },
+    watch: ["src/mainview", "src/shared"],
     watchIgnore: ["dist/**"],
     win: {
       bundleCEF: false,
@@ -44,5 +45,10 @@ export default {
       bundleCEF: false,
       icon: "assets/proteus-orb.png",
     },
+  },
+  scripts: {
+    // Electrobun 1.18.1 kills only the Windows launcher during watch rebuilds.
+    // Clean up any surviving bundled child process before it removes the bundle.
+    preBuild: "scripts/prepare-electrobun-build.ts",
   },
 } satisfies ElectrobunConfig;

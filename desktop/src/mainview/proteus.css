@@ -753,13 +753,6 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 }
 .workspace-badge { display:inline-flex; align-items:center; max-width:220px; padding:5px 9px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .workspace-badge.missing { border-color:#d9a3a3; color:#a33; }
-.workspace-picker { width:min(560px, calc(100vw - 32px)); }
-.workspace-picker > p { color:var(--muted); }
-.workspace-options { display:grid; gap:10px; margin-top:20px; }
-.workspace-options > button { display:grid; gap:4px; width:100%; padding:16px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.65); text-align:left; color:inherit; cursor:pointer; }
-.workspace-options > button:hover:not(:disabled) { border-color:var(--ink); transform:translateY(-1px); }
-.workspace-options > button:disabled { opacity:.5; cursor:not-allowed; }
-.workspace-options span { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 .tool-approval-warning { padding:10px 12px; border:1px solid #dfb8a8; border-radius:10px; background:rgba(255,235,224,.7); color:#754230; font-size:12px; }
 
 /* Workspace surface: a responsive, real-data companion to the conversation. */

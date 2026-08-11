@@ -24,6 +24,7 @@ function snapshot(revision: number): RuntimeSnapshot {
     interactions: [],
     workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
     activeRun: null,
+    continuation: null,
     error: null,
   };
 }

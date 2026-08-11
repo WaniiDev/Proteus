@@ -69,6 +69,10 @@ export const providerModelSchema = z.object({
   contextLength: z.number().int().positive().optional(),
   promptPrice: z.number().nonnegative().optional(),
   completionPrice: z.number().nonnegative().optional(),
+  createdAt: z.string().datetime().optional(),
+  popularityRank: z.number().int().nonnegative().optional(),
+  lastUsedAt: z.string().datetime().optional(),
+  useCount: z.number().int().nonnegative().optional(),
   inputModalities: z.array(z.string()).default(["text"]),
   outputModalities: z.array(z.string()).default(["text"]),
   description: z.string().optional(),
@@ -268,6 +272,19 @@ export const activeRunSchema = z.object({
 });
 export type ActiveRun = z.infer<typeof activeRunSchema>;
 
+export const continuationStateSchema = z.object({
+  interactionId: z.string().min(1),
+  toolCallId: z.string().min(1),
+  threadId: z.string().min(1),
+  runId: z.string().min(1),
+  kind: interactionKindSchema,
+  decision: z.enum(["approved", "declined", "answered", "plan-approved", "plan-rejected"]),
+  phase: z.enum(["resuming", "slow", "recovery"]),
+  startedAt: z.string(),
+  lastProgressAt: z.string(),
+});
+export type ContinuationState = z.infer<typeof continuationStateSchema>;
+
 export const diagnosticSourceSchema = z.enum(["mastra", "runtime", "rpc", "storage"]);
 export type DiagnosticSource = z.infer<typeof diagnosticSourceSchema>;
 
@@ -312,6 +329,7 @@ export const runtimeSnapshotSchema = z.object({
   interactions: z.array(pendingInteractionSchema),
   workbench: workbenchSchema,
   activeRun: activeRunSchema.nullable(),
+  continuation: continuationStateSchema.nullable().default(null),
   error: runtimeErrorSchema.nullable(),
 });
 export type RuntimeSnapshot = z.infer<typeof runtimeSnapshotSchema>;

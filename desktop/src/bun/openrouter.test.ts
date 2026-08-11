@@ -36,11 +36,15 @@ describe("OpenRouter control-plane client", () => {
   });
 
   it("returns only text-capable account models and always includes auto routing", async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify({
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return new Response(JSON.stringify({
       data: [
         {
           id: "openai/gpt-4.1",
           name: "GPT-4.1",
+          created: 1_735_689_600,
           architecture: { input_modalities: ["text"], output_modalities: ["text"] },
           context_length: 128000,
           pricing: { prompt: "0.000002", completion: "0.000008" },
@@ -53,7 +57,8 @@ describe("OpenRouter control-plane client", () => {
         },
         { id: "broken-model", architecture: { input_modalities: ["text"] } },
       ],
-    }), { status: 200 })) as unknown as typeof fetch;
+    }), { status: 200 });
+    }) as unknown as typeof fetch;
 
     const models = await listOpenRouterTextModels("sk-or-v1-test");
     expect(models.map((model) => model.id)).toEqual(["openrouter/auto", "openrouter/openai/gpt-4.1"]);
@@ -61,6 +66,24 @@ describe("OpenRouter control-plane client", () => {
     expect(models[1]?.contextLength).toBe(128000);
     expect(models[1]?.reasoningOptions).toEqual(["low", "medium", "high"]);
     expect(models[1]?.reasoningEffort).toBe("medium");
+    expect(models[1]?.createdAt).toBe("2025-01-01T00:00:00.000Z");
+    expect(models[1]?.popularityRank).toBe(1);
+    expect(requestedUrls).toContain("https://openrouter.ai/api/v1/models/user");
+    expect(requestedUrls).toContain("https://openrouter.ai/api/v1/models?sort=most-popular");
+  });
+
+  it("keeps the private catalog when popularity ranking is unavailable", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => String(input).includes("sort=most-popular")
+      ? new Response("unavailable", { status: 503 })
+      : new Response(JSON.stringify({ data: [{
+        id: "anthropic/claude",
+        name: "Claude",
+        architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+      }] }), { status: 200 })) as unknown as typeof fetch;
+
+    const models = await listOpenRouterTextModels("sk-or-v1-test");
+    expect(models.map((model) => model.id)).toEqual(["openrouter/auto", "openrouter/anthropic/claude"]);
+    expect(models[1]?.popularityRank).toBeUndefined();
   });
 
   it("reads provider status from common error shapes", () => {

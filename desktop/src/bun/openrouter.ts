@@ -9,6 +9,7 @@ type RawOpenRouterModel = {
   id?: unknown;
   name?: unknown;
   description?: unknown;
+  created?: unknown;
   context_length?: unknown;
   architecture?: {
     input_modalities?: unknown;
@@ -108,6 +109,9 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
     contextLength,
     promptPrice: safeNumber(raw.pricing?.prompt),
     completionPrice: safeNumber(raw.pricing?.completion),
+    ...(typeof raw.created === "number" && Number.isFinite(raw.created) && raw.created > 0
+      ? { createdAt: new Date(raw.created * 1_000).toISOString() }
+      : {}),
     inputModalities,
     outputModalities,
     ...(supportedReasoning.length > 0 ? { reasoningOptions: supportedReasoning } : {}),
@@ -116,11 +120,17 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
 }
 
 export async function listOpenRouterTextModels(apiKey: string): Promise<OpenRouterModel[]> {
-  const response = await requestJson<OpenRouterModelsResponse>("/models/user", apiKey);
+  const [response, popularityResponse] = await Promise.all([
+    requestJson<OpenRouterModelsResponse>("/models/user", apiKey),
+    requestJson<OpenRouterModelsResponse>("/models?sort=most-popular", apiKey).catch(() => ({ data: [] })),
+  ]);
+  const popularityRanks = new Map(
+    (popularityResponse.data ?? []).flatMap((model, index) => typeof model.id === "string" ? [[model.id, index + 1] as const] : []),
+  );
   const mapped = (response.data ?? [])
     .map(mapModel)
     .filter((model): model is OpenRouterModel => model !== null)
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .map((model) => ({ ...model, ...(popularityRanks.has(model.rawId) ? { popularityRank: popularityRanks.get(model.rawId) } : {}) }));
 
   const autoRouter: OpenRouterModel = {
     id: "openrouter/auto",

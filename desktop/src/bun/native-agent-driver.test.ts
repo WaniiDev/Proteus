@@ -105,4 +105,20 @@ describe("native Mastra agent driver", () => {
       { runId: "run-b", toolCallId: "call-b", toolName: "write_file", args: { path: "b" }, requiresApproval: true },
     ]);
   });
+
+  test("reports a normal subscription close so an unterminated run can reconcile", async () => {
+    const closes: Array<{ threadId: string; runId: string | null }> = [];
+    const agent: NativeQueueAgent = {
+      subscribeToThread: async () => ({ stream: noChunks(), activeRunId: () => "run-unsettled", abort: () => false, unsubscribe: () => undefined }),
+      queueMessage: () => ({ accepted: Promise.resolve({ action: "discard" }) }),
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+    };
+    const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined, onClose: (threadId, runId) => closes.push({ threadId, runId }) });
+
+    await driver.ensureSubscription("thread-1");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(closes).toEqual([{ threadId: "thread-1", runId: "run-unsettled" }]);
+  });
 });
