@@ -75,4 +75,4 @@ The Electrobun bundle includes the MastraCode OAuth gateway runtime. Optional St
 
 ## Required gate
 
-Each implementation phase must pass its focused tests and typecheck before commit. The final phase runs `bun test`, `bun run typecheck`, the production build, and `graphify update .`.
+Each implementation phase must pass its focused tests and typecheck before commit. The final phase runs `bun test`, `bun run typecheck`, and the production build.
