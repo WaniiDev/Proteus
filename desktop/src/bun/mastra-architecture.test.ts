@@ -33,18 +33,18 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("return resolveCodexGatewayModel(modelId");
     expect(runtime).not.toContain("AgentController");
     expect(runtime).not.toContain("agentControllers:");
-    expect(runtime).toContain("memory: this.memory");
+    expect(runtime).toContain("memory: memory,");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
     expect(runtime).toContain("this.nativeDriver.approve(threadId, nativeSuspension.runId");
-    expect(runtime).toContain("requestContext: await this.requestContextFor(threadId)");
-    expect(runtime).toContain("createCompatibleWorkspaceTools(await this.workspaceRegistry.resolveFromContext(requestContext)");
+    expect(runtime).toContain("requestContext: await this.workspaces.requestContextFor(threadId)");
+    expect(runtime).toContain("createCompatibleWorkspaceTools(await workspaceRegistry.resolveFromContext(requestContext)");
     expect(runtime).toContain("new ToolSearchProcessor({");
     expect(runtime).toContain('storage: "context"');
     expect(runtime).toContain("search: { topK: 3, minScore: 0.1, autoLoad: true }");
     expect(runtime).toContain("inputProcessors: [toolSearch, nativeToolCallGuard]");
     expect(runtime).toContain("web_fetch: webFetchTool");
-    expect(runtime).toContain('this.snapshot.selectedProviderId === "codex"');
+    expect(runtime).toContain('ctx.snapshot.selectedProviderId === "codex"');
     expect(runtime).toContain("const codexTools = createOpenAI({}).tools");
     expect(runtime).toContain("? codexTools.webSearch()");
     expect(runtime).not.toContain("? webSearchTool");
@@ -74,17 +74,17 @@ describe("Mastra-first architecture boundaries", () => {
     expect(contracts).toContain("workspaceBindingSchema");
     expect(contracts).toContain('"threads.workspace.select"');
     expect(runtime).toContain("workspaceSelectionBlocker");
-    expect(runtime).toContain("this.threads.recall(threadId)");
+    expect(runtime).toContain("this.threadRepo.recall(threadId)");
     expect(entry).not.toContain("rootPath }");
   });
 
   it("keeps model selection conversation-owned while retaining a new-chat default", async () => {
     const runtime = (await readRuntimeSources()).replaceAll("\r\n", "\n");
-    expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.preferredModelSelection");
+    expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.ctx.preferredModelSelection");
     expect(runtime).toContain("const shouldBackfillModelSelection = !parseAppModelSelection(nextThreadState.modelSelection)");
     expect(runtime).toContain("modelSelection: this.defaultModelSelection()");
-    expect(runtime).toContain("this.preferredModelSelection = selection");
-    expect(runtime).toContain("this.threadState = { ...this.threadState, modelSelection: selection }");
+    expect(runtime).toContain("this.ctx.preferredModelSelection = selection");
+    expect(runtime).toContain("this.ctx.threadState = { ...this.ctx.threadState, modelSelection: selection }");
     expect(runtime).toContain("const retryState: PersistedThreadState = {");
     expect(runtime).toContain("...sourceState,");
   });
