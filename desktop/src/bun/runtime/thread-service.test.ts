@@ -59,7 +59,7 @@ function fixture() {
     create: async () => threadRow("new"),
     delete: async (id: string) => { deleted.push(id); rows.current = rows.current.filter((row) => row.id !== id); },
   });
-  const driver = { listSuspensions: async () => [] as unknown[], queuedCount: () => 0, ensureSubscription: async () => undefined, dispose: () => undefined, activeRunId: () => null as string | null, queue: async () => ({ runId: "r1", queued: false }) };
+  const driver = { listSuspensions: async () => [] as unknown[], queuedCount: () => 0, ensureSubscription: async (_threadId: string): Promise<void> => undefined, dispose: () => undefined, activeRunId: () => null as string | null, queue: async () => ({ runId: "r1", queued: false }) };
   for (const key of Object.keys(driver)) Object.defineProperty(rt.threads.nativeDriver, key, { configurable: true, get: () => (driver as Record<string, unknown>)[key] });
   const select = (id: string, state: Record<string, unknown>) => {
     rt.ctx.selectedThreadId = id;
