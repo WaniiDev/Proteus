@@ -6,7 +6,7 @@ status: accepted
 
 The desktop UI moves to direction C, "Island": a light window of floating cards (a sidebar card and one 720px conversation column), with a single dark capsule pinned to the foot of the stage. The Island is the composer, the live run status and the only place Proteus asks for approval, answers or plan sign-off. The orb lives in it once a conversation starts. We chose it over two other directions because it puts "nothing moves without you" in one fixed, unmissable place, and lets the thread stay a plain record of what happened.
 
-The design system that defines it (tokens for Day and Night, Plus Jakarta Sans and JetBrains Mono, the Island, Sidebar, StepList and the rest) is the Proteus design system artifact: https://claude.ai/artifact/LzFK4X4p6i68rg66ANb1yE. The clickable prototype is the "C · Island" board in https://claude.ai/artifact/2WafpTRXhRaTWrj4rNvWQJ. Neither is implemented in `desktop/src/mainview` yet.
+The design system that defines it (tokens for Day and Night, Plus Jakarta Sans and JetBrains Mono, the Island, Sidebar, StepList and the rest) is the Proteus design system artifact: https://claude.ai/artifact/LzFK4X4p6i68rg66ANb1yE. The playable prototype of the whole app, Tide included, is https://claude.ai/artifact/74AkzzkwVeB3CE3765QBfF; the direction was chosen from the "C · Island" board in https://claude.ai/artifact/2WafpTRXhRaTWrj4rNvWQJ. Neither is implemented in `desktop/src/mainview` yet.
 
 ## Material: Tide (liquid glass)
 
