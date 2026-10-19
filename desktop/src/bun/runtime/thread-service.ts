@@ -23,9 +23,9 @@ export function uiStateOf(state: PersistedThreadState): PersistedThreadState {
   return structuredClone(uiState);
 }
 
-/** Thread CRUD, selection and switching, persisted per-thread state and message sync. */
 const THREAD_LOAD_FAILED = "This conversation could not be loaded. Select it again to retry.";
 
+/** Thread CRUD, selection and switching, persisted per-thread state and message sync. */
 export class ThreadService {
   /** Last state the store accepted per thread; the target a failed save rolls the cache back to. */
   private readonly savedState = new Map<string, PersistedThreadState>();
