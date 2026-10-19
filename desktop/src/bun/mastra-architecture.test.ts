@@ -1,14 +1,21 @@
 import { describe, expect, it } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const sourceRoot = join(import.meta.dir, "..");
 
+/** The runtime facade plus every module split out of it (WAN-502). */
+async function readRuntimeSources(): Promise<string> {
+  const folder = join(sourceRoot, "bun", "runtime");
+  const files = [join(sourceRoot, "bun", "runtime.ts"), ...(await readdir(folder)).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).map((name) => join(folder, name))];
+  return (await Promise.all(files.map((path) => readFile(path, "utf8")))).join("\n");
+}
+
 describe("Mastra-first architecture boundaries", () => {
   it("does not reintroduce custom plan tools or follow-up queue RPCs", async () => {
     const [runtime, registry, contracts, bunEntry, app] = await Promise.all([
-      readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
+      readRuntimeSources(),
       readFile(join(sourceRoot, "bun", "workspace-registry.ts"), "utf8"),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
       readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
@@ -26,18 +33,18 @@ describe("Mastra-first architecture boundaries", () => {
     expect(runtime).toContain("return resolveCodexGatewayModel(modelId");
     expect(runtime).not.toContain("AgentController");
     expect(runtime).not.toContain("agentControllers:");
-    expect(runtime).toContain("memory: this.memory");
+    expect(runtime).toContain("memory: memory,");
     expect(runtime).toContain("this.nativeDriver.queue(");
     expect(runtime).toContain("this.nativeDriver.resume(");
     expect(runtime).toContain("this.nativeDriver.approve(threadId, nativeSuspension.runId");
-    expect(runtime).toContain("requestContext: await this.requestContextFor(threadId)");
-    expect(runtime).toContain("createCompatibleWorkspaceTools(await this.workspaceRegistry.resolveFromContext(requestContext)");
+    expect(runtime).toContain("requestContext: await this.workspaces.requestContextFor(threadId)");
+    expect(runtime).toContain("createCompatibleWorkspaceTools(await workspaceRegistry.resolveFromContext(requestContext)");
     expect(runtime).toContain("new ToolSearchProcessor({");
     expect(runtime).toContain('storage: "context"');
     expect(runtime).toContain("search: { topK: 3, minScore: 0.1, autoLoad: true }");
     expect(runtime).toContain("inputProcessors: [toolSearch, nativeToolCallGuard]");
     expect(runtime).toContain("web_fetch: webFetchTool");
-    expect(runtime).toContain('this.snapshot.selectedProviderId === "codex"');
+    expect(runtime).toContain('ctx.snapshot.selectedProviderId === "codex"');
     expect(runtime).toContain("const codexTools = createOpenAI({}).tools");
     expect(runtime).toContain("? codexTools.webSearch()");
     expect(runtime).not.toContain("? webSearchTool");
@@ -58,7 +65,7 @@ describe("Mastra-first architecture boundaries", () => {
 
   it("keeps workspace roots server-owned and allows rebinding only through the guarded empty-chat contract", async () => {
     const [runtime, contracts, entry] = await Promise.all([
-      readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
+      readRuntimeSources(),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
       readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
     ]);
@@ -67,17 +74,17 @@ describe("Mastra-first architecture boundaries", () => {
     expect(contracts).toContain("workspaceBindingSchema");
     expect(contracts).toContain('"threads.workspace.select"');
     expect(runtime).toContain("workspaceSelectionBlocker");
-    expect(runtime).toContain("this.threads.recall(threadId)");
+    expect(runtime).toContain("this.threadRepo.recall(threadId)");
     expect(entry).not.toContain("rootPath }");
   });
 
   it("keeps model selection conversation-owned while retaining a new-chat default", async () => {
-    const runtime = (await readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8")).replaceAll("\r\n", "\n");
-    expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.preferredModelSelection");
+    const runtime = (await readRuntimeSources()).replaceAll("\r\n", "\n");
+    expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.ctx.preferredModelSelection");
     expect(runtime).toContain("const shouldBackfillModelSelection = !parseAppModelSelection(nextThreadState.modelSelection)");
     expect(runtime).toContain("modelSelection: this.defaultModelSelection()");
-    expect(runtime).toContain("this.preferredModelSelection = selection");
-    expect(runtime).toContain("this.threadState = { ...this.threadState, modelSelection: selection }");
+    expect(runtime).toContain("this.ctx.preferredModelSelection = selection");
+    expect(runtime).toContain("this.ctx.threadState = { ...this.ctx.threadState, modelSelection: selection }");
     expect(runtime).toContain("const retryState: PersistedThreadState = {");
     expect(runtime).toContain("...sourceState,");
   });
