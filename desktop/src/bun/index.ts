@@ -57,83 +57,30 @@ async function getMainViewUrl(): Promise<string> {
   return "views://mainview/index.html";
 }
 
+/** Run an RPC action; a failure is reported to the runtime and answered as not accepted. */
+async function accepted(action: () => Promise<unknown>): Promise<{ accepted: boolean }> {
+  try {
+    await action();
+    return { accepted: true };
+  } catch (error) {
+    runtime.reportError(error);
+    return { accepted: false };
+  }
+}
+
 const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
   maxRequestTime: 60_000,
   handlers: {
     requests: {
       "runtime.bootstrap": async () => encodeRuntimeSnapshot(await runtime.initialize()),
-      "providers.connect": async ({ providerId, apiKey, mode }) => {
-        try {
-          await runtime.connectProvider(providerId, { apiKey, mode });
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "providers.disconnect": async ({ providerId }) => {
-        try {
-          await runtime.disconnectProvider(providerId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "providers.auth.submit": async ({ providerId, value }) => {
-        try {
-          await runtime.submitProviderAuth(providerId, value);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "providers.auth.cancel": async ({ providerId }) => {
-        try {
-          await runtime.cancelProviderAuth(providerId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "models.refresh": async () => {
-        try {
-          await runtime.refreshModels();
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "models.select": async ({ modelId }) => {
-        try {
-          await runtime.selectModel(modelId as ProviderModelId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "providers.select": async ({ providerId }) => {
-        try {
-          await runtime.selectProvider(providerId as ProviderId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "models.reasoning.select": async ({ reasoningEffort }) => {
-        try {
-          await runtime.selectReasoning(reasoningEffort);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
+      "providers.connect": async ({ providerId, apiKey, mode }) => accepted(() => runtime.connectProvider(providerId, { apiKey, mode })),
+      "providers.disconnect": async ({ providerId }) => accepted(() => runtime.disconnectProvider(providerId)),
+      "providers.auth.submit": async ({ providerId, value }) => accepted(() => runtime.submitProviderAuth(providerId, value)),
+      "providers.auth.cancel": async ({ providerId }) => accepted(() => runtime.cancelProviderAuth(providerId)),
+      "models.refresh": async () => accepted(() => runtime.refreshModels()),
+      "models.select": async ({ modelId }) => accepted(() => runtime.selectModel(modelId as ProviderModelId)),
+      "providers.select": async ({ providerId }) => accepted(() => runtime.selectProvider(providerId as ProviderId)),
+      "models.reasoning.select": async ({ reasoningEffort }) => accepted(() => runtime.selectReasoning(reasoningEffort)),
       "threads.create": async (params) => {
         try {
           const threadId = await runtime.createThread(params?.title, params?.workspaceBinding);
@@ -159,56 +106,18 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         try { return { accepted: await runtime.attachProject(projectId) }; }
         catch (error) { runtime.reportError(error); return { accepted: false }; }
       },
-      "projects.remove": async ({ projectId }) => {
-        try { await runtime.removeProject(projectId); return { accepted: true }; }
-        catch (error) { runtime.reportError(error); return { accepted: false }; }
-      },
-      "projects.open": async ({ projectId }) => {
-        try { await runtime.openProject(projectId); return { accepted: true }; }
-        catch (error) { runtime.reportError(error); return { accepted: false }; }
-      },
+      "projects.remove": async ({ projectId }) => accepted(() => runtime.removeProject(projectId)),
+      "projects.open": async ({ projectId }) => accepted(() => runtime.openProject(projectId)),
       "memory.get": async (params) => runtime.getMemoryState(params?.scope),
       "memory.set-enabled": async ({ enabled }) => runtime.setMemoryEnabled(enabled),
       "memory.create": async ({ scope, category, content }) => runtime.createMemory(scope, category, content),
       "memory.update": async ({ scope, id, category, content }) => runtime.updateMemory(scope, id, category, content),
       "memory.delete": async ({ scope, id }) => runtime.deleteMemory(scope, id),
       "memory.reset": async ({ scope }) => runtime.resetMemory(scope),
-      "threads.switch": async ({ threadId }) => {
-        try {
-          await runtime.switchThread(threadId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "threads.select": async ({ threadId }) => {
-        try {
-          await runtime.selectThread(threadId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "threads.rename": async ({ threadId, title }) => {
-        try {
-          await runtime.renameThread(threadId, title);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
-      "threads.delete": async ({ threadId }) => {
-        try {
-          await runtime.deleteThread(threadId);
-          return { accepted: true };
-        } catch (error) {
-          runtime.reportError(error);
-          return { accepted: false };
-        }
-      },
+      "threads.switch": async ({ threadId }) => accepted(() => runtime.switchThread(threadId)),
+      "threads.select": async ({ threadId }) => accepted(() => runtime.selectThread(threadId)),
+      "threads.rename": async ({ threadId, title }) => accepted(() => runtime.renameThread(threadId, title)),
+      "threads.delete": async ({ threadId }) => accepted(() => runtime.deleteThread(threadId)),
       "chat.send": async ({ text, clientMessageId }) => {
         try {
           const { runId } = await runtime.send(text, clientMessageId);
