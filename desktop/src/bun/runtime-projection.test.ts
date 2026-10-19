@@ -33,7 +33,7 @@ const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): Age
   tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   activeTools: new Map(),
   toolInputBuffers: new Map(),
-  pendingApproval: null,
+  pendingApprovals: new Map(),
   pendingSuspensions: new Map(),
   activeSubagents: new Map(),
   omProgress: {} as AgentControllerDisplayState["omProgress"],
