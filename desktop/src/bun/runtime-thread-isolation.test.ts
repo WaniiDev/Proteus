@@ -258,6 +258,18 @@ describe("runtime thread isolation (WAN-503)", () => {
   });
 });
 
+describe("review fixes (WAN-503)", () => {
+  test("R1: a failed continuation save is surfaced, not swallowed", async () => {
+    const { rt, driver, select } = fixture({ failWrites: true });
+    const pending = approvalFor("A");
+    select("A", { ...stateA, pendingInteractions: [pending] });
+    driver.findSuspension = async () => ({ runId: "r1", toolCallId: "t1", toolName: pending.toolName, args: { path: "a.txt" }, requiresApproval: true });
+    expect(await rt.respondToToolApproval("t1", true, approvalFingerprint(pending.toolName!, { path: "a.txt" }))).toEqual({ accepted: true });
+    expect(rt.ctx.snapshot.error?.message).toContain("could not be saved");
+    rt.continuation.clearContinuationTimers();
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);

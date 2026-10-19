@@ -98,8 +98,8 @@ export class ContinuationService {
     }
     this.armContinuationTimers(continuation);
     this.diagnostics.record({ source: "runtime", type: "continuation", phase: "acknowledged", threadId, runId, toolCallId: interaction.toolCallId });
-    // persistThreadState already records the failure and rolls its cache back; the continuation keeps running.
-    await this.threads.persistThreadState(threadId, next, true).catch(() => undefined);
+    // A failed save is surfaced by persistThreadState; the continuation keeps running.
+    await this.threads.persistThreadState(threadId, next);
   }
 
   markContinuationProgress(chunk: NativeAgentChunk, threadId: string, runId: string): void {
