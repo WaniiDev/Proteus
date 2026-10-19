@@ -256,7 +256,7 @@ export class InteractionService {
       ...state,
       pendingInteractions: (state.pendingInteractions ?? []).map((item) => item.toolCallId === toolCallId ? { ...item, status: "resolving" as const } : item),
     }));
-    this.ctx.publish({ interactions: resolvingState.pendingInteractions ?? [], workbench: this.threads.workbenchFromState(resolvingState, null) });
+    if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ interactions: resolvingState.pendingInteractions ?? [], workbench: this.threads.workbenchFromState(resolvingState, null) });
     try {
       await this.nativeDriver.approve(threadId, nativeSuspension.runId, toolCallId, approved, await this.workspaces.requestContextFor(threadId));
       this.ctx.nativeSuspensions.delete(toolCallId);

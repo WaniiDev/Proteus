@@ -308,6 +308,21 @@ describe("review fixes: background run clears the shared activeRun (WAN-503)", (
   });
 });
 
+describe("review fixes: approval publish (WAN-503)", () => {
+  test("R3: switching away while the approval is checked keeps A's resolving state out of B's snapshot", async () => {
+    const { rt, driver, select } = fixture();
+    const pending = approvalFor("A");
+    select("A", { ...stateA, pendingInteractions: [pending] });
+    driver.findSuspension = async () => {
+      select("B", stateB);
+      return { runId: "r1", toolCallId: "t1", toolName: pending.toolName, args: { path: "a.txt" }, requiresApproval: true };
+    };
+    await rt.respondToToolApproval("t1", true, approvalFingerprint(pending.toolName!, { path: "a.txt" }));
+    expect(rt.ctx.snapshot.interactions).toEqual([]);
+    rt.continuation.clearContinuationTimers();
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);
