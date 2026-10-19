@@ -215,7 +215,7 @@ describe("runtime thread isolation (WAN-503)", () => {
     const { rt, driver, select } = fixture();
     select("A", stateA);
     driver.queue = async () => { throw new Error("blocked"); };
-    await expect(rt.queueNativeMessage("A", "hello", { clientMessageId: "m1", optimistic: true })).rejects.toThrow("blocked");
+    await expect(rt.runs.queueNativeMessage("A", "hello", { clientMessageId: "m1", optimistic: true })).rejects.toThrow("blocked");
     expect(rt.ctx.optimisticUserMessages.size).toBe(0);
     expect(rt.ctx.snapshot.messages.some((message: { id: string }) => message.id === "m1")).toBeFalse();
   });
@@ -252,8 +252,8 @@ describe("runtime thread isolation (WAN-503)", () => {
       return structuredClone(stateA);
     };
     let clones = 0;
-    rt.memory.cloneThread = async () => { clones += 1; return { thread: threadRow("clone") }; };
-    await expect(rt.retryReserved("a1")).rejects.toMatchObject({ code: "aborted" });
+    rt.runs.memory.cloneThread = async () => { clones += 1; return { thread: threadRow("clone") }; };
+    await expect(rt.runs.retryReserved("a1")).rejects.toMatchObject({ code: "aborted" });
     expect(clones).toBe(0);
   });
 });
