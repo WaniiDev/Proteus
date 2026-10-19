@@ -9,8 +9,9 @@ import { emptyWorkbench } from "./message-mapping";
 import type { InteractionResolution, PersistedThreadState, SnapshotListener } from "./types";
 
 /**
- * The single owner of mutable runtime state. The services share one instance, so there is exactly
- * one snapshot, one selection, one thread-state cache and one run marker; they hold no copies.
+ * Owner of the state shared across services: one snapshot, one selection, one thread-state cache
+ * and one run marker. State only one service uses (write queues, continuation tracks, plan
+ * hydration, Codex auth) is private to that service.
  */
 export class RuntimeContext {
   private readonly listeners = new Set<SnapshotListener>();
