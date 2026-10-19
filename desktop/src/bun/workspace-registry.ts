@@ -109,29 +109,36 @@ export class WorkspaceRegistry {
     const candidate = resolve(canonicalRoot, rel);
     const relation = relative(canonicalRoot, candidate);
     if (relation.startsWith(`..${sep}`) || relation === ".." || isAbsolute(relation)) throw new Error("Path escapes the workspace");
-    // Check the nearest existing ancestor (the candidate itself when present) so missing parents cannot hide a link.
-    let existing = candidate;
+    await this.assertNearestInside(canonicalRoot, candidate, allowMissing);
+    return { absolute: candidate, relative: rel };
+  }
+  /** Checks the nearest existing ancestor (the path itself when present) so missing parents cannot hide a link. */
+  private async assertNearestInside(canonicalRoot: string, path: string, rejectLinkDestination = false) {
+    let existing = path;
     for (;;) {
       const stat = await lstat(existing).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT" || error.code === "ENOTDIR") return null; throw error; });
       if (stat) {
-        if (allowMissing && existing === candidate && stat.isSymbolicLink()) throw new Error("Destination is a symlink");
+        if (rejectLinkDestination && existing === path && stat.isSymbolicLink()) throw new Error("Destination is a symlink");
         break;
       }
       const up = dirname(existing); if (up === existing) break; existing = up;
     }
     await this.assertInside(canonicalRoot, existing);
-    return { absolute: candidate, relative: rel };
   }
+  /** Fails closed: an entry lstat found but realpath cannot resolve (dangling link) is rejected. */
   private async assertInside(canonicalRoot: string, path: string) {
-    const real = await realpath(path).catch(() => null); if (!real) return;
+    const real = await realpath(path).catch(() => null); if (!real) throw new Error("Path cannot be resolved inside the workspace");
     const check = relative(canonicalRoot, process.platform === "win32" ? real.toLowerCase() : real);
     if (check.startsWith(`..${sep}`) || check === ".." || isAbsolute(check)) throw new Error("Symlink escapes the workspace");
   }
-  /** Creates the destination's parent directories, then re-verifies containment so a swapped link cannot redirect the write. */
-  private async prepareParent(root: string, absolute: string) {
-    await mkdir(dirname(absolute), { recursive: true });
-    await this.assertInside(await this.canonicalRoot(root), dirname(absolute));
+  /** Re-checks existing ancestors, creates the missing directories, then re-verifies so a swapped link cannot redirect the write. */
+  private async makeDirectories(root: string, directory: string) {
+    const canonicalRoot = await this.canonicalRoot(root);
+    await this.assertNearestInside(canonicalRoot, directory);
+    await mkdir(directory, { recursive: true });
+    await this.assertInside(canonicalRoot, directory);
   }
+  private prepareParent(root: string, absolute: string) { return this.makeDirectories(root, dirname(absolute)); }
 
   async tree(root: string, path = "", depth = 3, includeHidden = false): Promise<WorkspaceTreeEntry[]> {
     const base = await this.contained(root, path);
@@ -167,7 +174,7 @@ export class WorkspaceRegistry {
     if (expectedVersion && (!current || versionOf(current.size, current.mtimeMs) !== expectedVersion)) throw new Error("File changed outside Proteus; refresh before saving");
     await this.prepareParent(root, item.absolute); await writeFile(item.absolute, content, "utf8"); return this.read(root, path);
   }
-  async createDirectory(root: string, path: string) { const item = await this.contained(root, path, true); await mkdir(item.absolute, { recursive: true }); await this.assertInside(await this.canonicalRoot(root), item.absolute); }
+  async createDirectory(root: string, path: string) { const item = await this.contained(root, path, true); await this.makeDirectories(root, item.absolute); }
   async delete(root: string, path: string) { if (!normalizeRelative(path)) throw new Error("Cannot delete workspace root"); const item = await this.contained(root, path); await rm(item.absolute, { recursive: true, force: false }); }
   async move(root: string, from: string, to: string) { const source = await this.contained(root, from); const destination = await this.contained(root, to, true); await this.prepareParent(root, destination.absolute); await rename(source.absolute, destination.absolute); }
   async copy(root: string, from: string, to: string) { const source = await this.contained(root, from); const destination = await this.contained(root, to, true); await this.prepareParent(root, destination.absolute); await copyFile(source.absolute, destination.absolute); }

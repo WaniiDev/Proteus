@@ -85,9 +85,22 @@ describe("WorkspaceRegistry", () => {
     const outside = join(base, "outside"); await mkdir(outside, { recursive: true });
     await symlink(outside, join(project, "dest"), "junction");
     await writeFile(join(project, "src", "a.txt"), "a");
-    await expect(registry.move(project, "src/a.txt", "dest")).rejects.toThrow();
-    await expect(registry.copy(project, "src/a.txt", "dest")).rejects.toThrow();
+    await expect(registry.createDirectory(project, "dest")).rejects.toThrow("Destination is a symlink");
+    await expect(registry.move(project, "src/a.txt", "dest")).rejects.toThrow("Destination is a symlink");
+    await expect(registry.copy(project, "src/a.txt", "dest")).rejects.toThrow("Destination is a symlink");
     expect(await readFile(join(project, "src", "a.txt"), "utf8")).toBe("a");
+    await registry.destroy();
+  });
+
+  test("fails closed on a dangling junction instead of creating its target", async () => {
+    const { base, project, registry } = await fixture();
+    const target = join(base, "gone"); await mkdir(target, { recursive: true });
+    await symlink(target, join(project, "dangling"), "junction");
+    await rm(target, { recursive: true });
+    await expect(registry.write(project, "dangling/f.txt", "x")).rejects.toThrow("cannot be resolved");
+    await expect(registry.createDirectory(project, "dangling/sub")).rejects.toThrow("cannot be resolved");
+    await expect(registry.write(project, "dangling/sub/f.txt", "x")).rejects.toThrow("cannot be resolved");
+    expect(await readdir(base)).not.toContain("gone");
     await registry.destroy();
   });
 

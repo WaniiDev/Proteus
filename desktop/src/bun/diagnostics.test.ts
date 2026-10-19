@@ -59,4 +59,21 @@ describe("runtime diagnostics", () => {
     expect(out.payload.status).toBe("ok");
     expect(JSON.stringify(out)).not.toContain("private words");
   });
+
+  it("redacts camelCase singular token keys but keeps token counters", () => {
+    const out = sanitizeDiagnosticValue({ authToken: "a", apiToken: "b", oauthToken: "c", bearerToken: "d", inputTokens: 1, outputTokens: 2, totalTokens: 3, maxTokens: 4, tokenUsage: 5 }) as Record<string, unknown>;
+    expect([out.authToken, out.apiToken, out.oauthToken, out.bearerToken]).toEqual(["[REDACTED]", "[REDACTED]", "[REDACTED]", "[REDACTED]"]);
+    expect([out.inputTokens, out.outputTokens, out.totalTokens, out.maxTokens, out.tokenUsage]).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("summarizes tool-call-suspended plan and question bodies", () => {
+    const chunk = { type: "tool-call-suspended", payload: { toolCallId: "t1", suspendPayload: { plan: "private plan", question: "private question?" }, plan: "private plan", question: "private question?", feedback: "private feedback" } };
+    const out = sanitizeDiagnosticValue(chunk) as any;
+    expect(out.payload.toolCallId).toBe("t1");
+    expect(out.payload.suspendPayload).toMatch(/^\[object: \d+ chars\]$/);
+    expect(out.payload.plan).toBe("[text: 12 chars]");
+    expect(out.payload.question).toBe("[text: 17 chars]");
+    expect(out.payload.feedback).toBe("[text: 16 chars]");
+    expect(JSON.stringify(out)).not.toContain("private");
+  });
 });

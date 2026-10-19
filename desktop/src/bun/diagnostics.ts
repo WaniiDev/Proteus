@@ -7,9 +7,9 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const REDACTED = "[REDACTED]";
 // Exact secret key names (case/separator-insensitive) so metadata such as `tokenUsage` or `inputTokens` survives.
 const SENSITIVE_KEYS = new Set(["authorization", "bearer", "cookie", "setcookie", "credential", "credentials", "password", "passwd", "secret", "clientsecret", "token", "accesstoken", "refreshtoken", "idtoken", "sessiontoken", "apikey", "privatekey"]);
-const SENSITIVE_SUFFIX = /(?:apikey|secret|password|accesstoken|refreshtoken|privatekey)$/;
+const SENSITIVE_SUFFIX = /(?:apikey|secret|password|accesstoken|refreshtoken|privatekey|token)$/;
 // Free-text bodies (prompts, answers, stream chunks, tool args/results) are summarized, never stored.
-const BODY_KEYS = new Set(["text", "delta", "textdelta", "content", "args", "result", "output", "reasoning", "response", "answer", "answers", "prompt", "body"]);
+const BODY_KEYS = new Set(["text", "delta", "textdelta", "content", "args", "result", "output", "reasoning", "response", "answer", "answers", "prompt", "body", "suspendpayload", "plan", "question", "feedback"]);
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
