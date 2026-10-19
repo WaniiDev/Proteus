@@ -1,6 +1,6 @@
 # Mastra runtime ownership
 
-Proteus uses the installed Mastra `Agent` as its run, queue, suspension, history, memory, task, and storage backbone. The desktop runtime is an adapter: it projects framework state into an Electrobun IPC snapshot and never maintains a second run lifecycle.
+Proteus (Mastra 1.78: `@mastra/core` 1.78.0 with the `@mastra/*` packages pinned in `desktop/package.json`; Electrobun 2.0.4) uses the installed Mastra `Agent` as its run, queue, suspension, history, memory, task, and storage backbone. The desktop runtime is an adapter: it projects framework state into an Electrobun IPC snapshot and never maintains a second run lifecycle.
 
 - `Agent.queueMessage()` and `Agent.subscribeToThread()` own queued and active turns.
 - `Agent.listSuspendedRuns()` is the canonical recovery source for both `requireApproval` calls and tools paused with `suspend()`.
@@ -28,7 +28,7 @@ The filesystem tool allowlist is deny-by-default:
 
 Commands use a resolver-backed `LocalSandbox`, keyed by conversation ID for background-process continuity. Execute and kill require approval; reading process output does not. Resolver-created filesystem and sandbox providers are owned and destroyed by Proteus. On Windows, `LocalSandbox` uses `isolation: "none"`: commands run on the host from the selected working directory, so the approval card and agent instructions state that limitation explicitly.
 
-The Mastra `AgentController` beta API is deliberately not part of this runtime. Its controller session state and grants are process-local in Mastra 1.56, while Proteus requires approvals to survive refreshes and restarts.
+The Mastra `AgentController` beta API is deliberately not part of this runtime. Its controller session state and grants are process-local when evaluated (Mastra 1.56) and the architecture test still forbids it, while Proteus requires approvals to survive refreshes and restarts.
 
 ## Approval and suspension boundary
 
@@ -73,9 +73,14 @@ Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: fal
 
 ## Module layout
 
-`TextRuntime` (`src/bun/runtime.ts`) is a thin facade: it wires Mastra, storage and the services below and keeps the public methods `index.ts` calls. All behaviour lives in `src/bun/runtime/`. Mutable state has exactly one owner, `RuntimeContext`; the services share that instance and keep no copies.
+`TextRuntime` (`src/bun/runtime.ts`) is a thin facade: it wires Mastra, storage and the services below and keeps the public methods `index.ts` calls. All behaviour lives in `src/bun/runtime/`. `RuntimeContext` owns the state shared across services: the snapshot, selection, per-thread state cache, the single run marker and the message and interaction bookkeeping. State used by only one service is private to it:
 
-- `context.ts`: the snapshot and its `publish`, selection, per-thread state cache, the single run marker (`runId`/`runThreadId`), optimistic and live-projected messages, pending-interaction bookkeeping, the composer mutation queue.
+- `ThreadService`: `savedState` (last state the store accepted, the rollback target), `unverified` (default-guess states for never-loaded threads, never saved), `threadWriteQueues` (per-thread save serialization), `threadSwitchQueue`.
+- `ContinuationService`: `tracks` (per-thread slow and recovery timers and progress).
+- `InteractionService`: `hydratingPlans` and `hydratedPlans` (plan Markdown loading).
+- `ProviderService`: Codex auth (`codexAuthAbortController`) and `modelUsage`.
+
+- `context.ts`: the shared state: the snapshot and its `publish`, selection, per-thread state cache, the single run marker (`runId`/`runThreadId`), optimistic and live-projected messages, pending-interaction bookkeeping, the composer mutation queue.
 - `thread-service.ts`: thread CRUD, selection and the switch queue, `stateFor`/`updateThreadState`, persisted thread state (write queue, rollback), `syncThreadState`/`syncMessages`.
 - `provider-service.ts`: OpenRouter and Codex auth, credential validation, model catalog, model and reasoning selection.
 - `workspace-service.ts`: workspace binding, project registry, the server-owned per-thread `RequestContext`.
@@ -86,6 +91,10 @@ Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: fal
 - `message-projector.ts`, `message-mapping.ts`: Mastra message to chat message mapping; `agent-factory.ts`: the `Agent` definition; `constants.ts`, `types.ts`: shared constants and types.
 
 Other backend modules are grouped by feature under `src/bun/`: `core/` (projection, error mapping, diagnostics, Mastra foundation, instructions, legacy cutover), `native/` (agent driver, stream projection, thread repository, tool-call guard), `providers/` (OpenRouter, Codex, auth, readiness, model preferences, credentials), `workspace/` (workspace registry and policy, tool compat, project registry), `memory/` (settings, tools, scoped memory) and `tools/` (approval, task and plan policy, tool decisions, working tools, ask-user). Error normalization lives in `core/runtime-error-mapping.ts`; the OpenRouter gateway lives in `providers/openrouter.ts`.
+
+## Initialization and thread load failures
+
+`initialize()` runs storage, preferences, diagnostics, legacy cutover and thread sync, then continues to the provider and credential steps (Codex model refresh, stored credential validation) even when loading the thread state fails. If a thread metadata read fails, the runtime keeps the previous selection and surfaces an error; it never defaults the thread to the app workspace, because that would silently redirect an attached project conversation.
 
 ## Storage and packaging
 
