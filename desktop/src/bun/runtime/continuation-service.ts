@@ -8,10 +8,8 @@ import type { ThreadService } from "./thread-service";
 
 /** Tracks a resumed run after a decision: progress, slow and recovery timers, and reconciliation. */
 export class ContinuationService {
-  continuationWarningTimer: ReturnType<typeof setTimeout> | null = null;
-  continuationRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  continuationHadText = false;
-  continuationLastPersistedAt = 0;
+  /** Timers and progress bookkeeping are per thread: several threads can have a resumed run at once. */
+  private readonly tracks = new Map<string, { warning: ReturnType<typeof setTimeout> | null; recovery: ReturnType<typeof setTimeout> | null; hadText: boolean; lastPersistedAt: number }>();
   private readonly nativeDriver: NativeAgentDriver;
   private readonly diagnostics: RuntimeDiagnostics;
   private readonly threads: ThreadService;
@@ -22,19 +20,31 @@ export class ContinuationService {
     this.threads = deps.threads;
   }
 
-  clearContinuationTimers(): void {
-    if (this.continuationWarningTimer) clearTimeout(this.continuationWarningTimer);
-    if (this.continuationRecoveryTimer) clearTimeout(this.continuationRecoveryTimer);
-    this.continuationWarningTimer = null;
-    this.continuationRecoveryTimer = null;
+  private track(threadId: string) {
+    let track = this.tracks.get(threadId);
+    if (!track) this.tracks.set(threadId, track = { warning: null, recovery: null, hadText: false, lastPersistedAt: 0 });
+    return track;
+  }
+
+  /** Clear one thread's slow/recovery timers, or every thread's when none is given. */
+  clearContinuationTimers(threadId?: string | null): void {
+    for (const id of threadId ? [threadId] : [...this.tracks.keys()]) {
+      const track = this.tracks.get(id);
+      if (!track) continue;
+      if (track.warning) clearTimeout(track.warning);
+      if (track.recovery) clearTimeout(track.recovery);
+      track.warning = null;
+      track.recovery = null;
+    }
   }
 
   armContinuationTimers(continuation: ContinuationState | null | undefined = this.ctx.threadState.continuation): void {
-    this.clearContinuationTimers();
+    this.clearContinuationTimers(continuation?.threadId ?? this.ctx.selectedThreadId);
     if (!continuation) return;
     const { threadId } = continuation;
+    const track = this.track(threadId);
     const elapsed = Math.max(0, Date.now() - Date.parse(continuation.lastProgressAt));
-    this.continuationWarningTimer = setTimeout(() => {
+    track.warning = setTimeout(() => {
       const current = this.threads.stateFor(threadId).continuation;
       if (!current || current.toolCallId !== continuation.toolCallId) return;
       const slow = { ...current, phase: "slow" as const };
@@ -43,7 +53,7 @@ export class ContinuationService {
       this.diagnostics.record({ source: "runtime", type: "continuation", phase: "slow", threadId, runId: slow.runId, toolCallId: slow.toolCallId, durationMs: Date.now() - Date.parse(slow.startedAt) });
       void this.threads.persistThreadState(threadId, next);
     }, Math.max(0, CONTINUATION_SLOW_MS - elapsed));
-    this.continuationRecoveryTimer = setTimeout(() => {
+    track.recovery = setTimeout(() => {
       const current = this.threads.stateFor(threadId).continuation;
       if (!current || current.toolCallId !== continuation.toolCallId) return;
       const recovery = { ...current, phase: "recovery" as const };
@@ -83,8 +93,8 @@ export class ContinuationService {
     this.ctx.runThreadId = threadId;
     this.ctx.runOutcome = "streaming";
     this.ctx.runError = null;
-    this.continuationHadText = false;
-    this.continuationLastPersistedAt = Date.now();
+    this.track(threadId).hadText = false;
+    this.track(threadId).lastPersistedAt = Date.now();
     this.threads.updateThreadActivity(threadId, "running", 0);
     if (this.ctx.selectedThreadId === threadId) {
       this.ctx.publish({
@@ -107,13 +117,14 @@ export class ContinuationService {
     if (!continuation || continuation.threadId !== threadId || continuation.runId !== runId) return;
     const meaningful = new Set(["step-start", "text-delta", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended", "error", "abort", "finish"]);
     if (!meaningful.has(chunk.type)) return;
-    if (chunk.type === "text-delta" && typeof chunk.payload?.text === "string" && chunk.payload.text.length > 0) this.continuationHadText = true;
+    if (chunk.type === "text-delta" && typeof chunk.payload?.text === "string" && chunk.payload.text.length > 0) this.track(threadId).hadText = true;
     const progressed = { ...continuation, phase: "resuming" as const, lastProgressAt: new Date().toISOString() };
     const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, continuation: progressed }));
     if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ continuation: progressed });
     this.diagnostics.record({ source: "runtime", type: "continuation", phase: "progress", threadId, runId, toolCallId: continuation.toolCallId, payload: { chunkType: chunk.type } });
-    if (Date.now() - this.continuationLastPersistedAt >= CONTINUATION_PROGRESS_PERSIST_MS) {
-      this.continuationLastPersistedAt = Date.now();
+    const track = this.track(threadId);
+    if (Date.now() - track.lastPersistedAt >= CONTINUATION_PROGRESS_PERSIST_MS) {
+      track.lastPersistedAt = Date.now();
       void this.threads.persistThreadState(threadId, next);
     }
     if (chunk.type !== "finish" && chunk.type !== "abort" && chunk.type !== "error") this.armContinuationTimers(progressed);
@@ -122,14 +133,14 @@ export class ContinuationService {
   finishContinuation(threadId: string, runId: string, outcome: NonNullable<NativeStreamProjection["terminal"]>): void {
     const continuation = this.threads.stateFor(threadId).continuation;
     if (!continuation || continuation.threadId !== threadId || continuation.runId !== runId) return;
-    this.clearContinuationTimers();
+    this.clearContinuationTimers(threadId);
     let events = this.threads.stateFor(threadId).events ?? [];
-    if (outcome === "complete" && !this.continuationHadText) {
+    if (outcome === "complete" && !this.track(threadId).hadText) {
       const id = `continuation:${continuation.toolCallId}:complete`;
       if (!events.some((event) => event.id === id)) events = [...events, { id, type: "system", text: "Proteus continued after your decision and finished without another message.", createdAt: new Date().toISOString() }];
     }
     const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, continuation: null, events }));
-    this.continuationHadText = false;
+    this.track(threadId).hadText = false;
     if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ continuation: null, events });
     this.diagnostics.record({ source: "runtime", type: "continuation", phase: outcome, threadId, runId, toolCallId: continuation.toolCallId, durationMs: Date.now() - Date.parse(continuation.startedAt) });
     void this.threads.persistThreadState(threadId, next);
@@ -156,7 +167,7 @@ export class ContinuationService {
         pendingInteractions: (reconciled.pendingInteractions ?? []).map((item) => item.toolCallId === continuation.toolCallId ? { ...item, status: "pending" as const, error: retryable } : item),
         resolvedInteractions: (reconciled.resolvedInteractions ?? []).filter((item) => item.toolCallId !== continuation.toolCallId),
       }));
-      this.clearContinuationTimers();
+      this.clearContinuationTimers(threadId);
       this.ctx.releaseRun(continuation.runId);
       if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, continuation: null, interactions: next.pendingInteractions ?? [], workbench: this.threads.workbenchFromState(next, null, null) });
       await this.threads.persistThreadState(threadId, next);
@@ -176,7 +187,7 @@ export class ContinuationService {
       this.armContinuationTimers(active);
       return;
     }
-    this.clearContinuationTimers();
+    this.clearContinuationTimers(threadId);
     const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, continuation: null }));
     this.ctx.releaseRun(continuation.runId);
     const error: RuntimeError = { code: "unknown", message: "Proteus could not confirm that the response continued. Retry or continue the original turn.", retryable: true };

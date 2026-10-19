@@ -430,6 +430,36 @@ describe("review fixes: cache rollback (WAN-503)", () => {
   });
 });
 
+describe("review fixes: per-thread continuation timers (WAN-503)", () => {
+  const continuationFor = (threadId: string, runId: string) => ({ interactionId: "i", toolCallId: `t-${threadId}`, threadId, runId, kind: "tool_approval", decision: "approved", phase: "resuming", startedAt: new Date().toISOString(), lastProgressAt: new Date().toISOString() });
+
+  test("R9: finishing or arming one thread's continuation leaves another thread's timers armed", () => {
+    const { rt, select } = fixture();
+    select("A", stateA);
+    const contA = continuationFor("A", "rA");
+    const contB = continuationFor("B", "rB");
+    rt.ctx.threadStateCache.set("B", { ...stateB, continuation: contB });
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const created: unknown[] = [];
+    const cleared = new Set<unknown>();
+    globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => { const handle = realSet(...args); created.push(handle); return handle; }) as typeof setTimeout;
+    globalThis.clearTimeout = ((handle: Parameters<typeof clearTimeout>[0]) => { cleared.add(handle); realClear(handle); }) as typeof clearTimeout;
+    try {
+      rt.continuation.armContinuationTimers(contA);
+      const aTimers = [...created];
+      expect(aTimers.length).toBe(2);
+      rt.continuation.armContinuationTimers(contB);
+      rt.continuation.finishContinuation("B", "rB", "complete");
+      for (const handle of aTimers) expect(cleared.has(handle)).toBeFalse();
+    } finally {
+      globalThis.setTimeout = realSet;
+      globalThis.clearTimeout = realClear;
+      rt.continuation.clearContinuationTimers();
+    }
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);

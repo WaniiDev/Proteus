@@ -412,7 +412,7 @@ export class RunCoordinator {
     this.ctx.runError = makeRuntimeError("aborted");
     const continuation = threadId ? this.threads.stateFor(threadId).continuation : null;
     if (threadId && continuation) {
-      this.continuation.clearContinuationTimers();
+      this.continuation.clearContinuationTimers(threadId);
       const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, continuation: null }));
       void this.threads.persistThreadState(threadId, next);
       if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ continuation: null });
@@ -444,7 +444,7 @@ export class RunCoordinator {
       this.ctx.publish({ activeRun: { runId, threadId, status: "aborted" }, error: this.ctx.runError });
       return;
     }
-    this.continuation.clearContinuationTimers();
+    this.continuation.clearContinuationTimers(threadId);
     this.ctx.releaseRun(runId);
     if (threadId) this.threads.updateThreadActivity(threadId, "interrupted", 0);
     if (!threadId || this.ctx.selectedThreadId === threadId || this.ctx.snapshot.activeRun?.runId === runId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, error: this.ctx.runError });
