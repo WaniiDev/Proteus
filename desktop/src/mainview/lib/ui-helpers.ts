@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, WorkbenchState } from "../../shared/contracts";
+import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary } from "../../shared/contracts";
 
 type ChatTextPart = Extract<ChatMessagePart, { type: "text" }>;
 
@@ -121,12 +121,4 @@ export function goalFromMessages(messages: ChatMessage[], fallback = "Current wo
   const text = userMessage?.text.replace(/\s+/g, " ").trim();
   if (!text) return fallback;
   return text.length > 88 ? `${text.slice(0, 85).trimEnd()}…` : text;
-}
-
-export function shouldShowWorkbench(workbench: WorkbenchState): boolean {
-  const hasPendingAttention = workbench.pendingInteractions.some((item) => item.status === "pending" || item.status === "resolving");
-  const hasIncompleteTask = workbench.tasks.some((task) => task.status !== "completed");
-  const hasQueue = workbench.queuedFollowUpCount > 0;
-  const hasUsage = workbench.tokenUsage.totalTokens > 0;
-  return hasPendingAttention || hasIncompleteTask || hasQueue || hasUsage || workbench.status === "waiting" || workbench.status === "complete" || workbench.status === "interrupted" || workbench.status === "error";
 }

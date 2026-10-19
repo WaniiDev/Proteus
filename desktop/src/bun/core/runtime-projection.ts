@@ -1,4 +1,3 @@
-import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
 import type { ChatMessage, ChatToolPart, PendingInteraction, WorkbenchTask } from "../../shared/contracts";
 import { APPROVAL_POLICY_VERSION, approvalFingerprint } from "../tools/approval-policy";
 
@@ -230,42 +229,10 @@ export function submitPlanResolutionResult(decision: "approved" | "rejected", fe
   };
 }
 
-/**
- * Mastra can persist a resumed submit_plan result under a fresh tool-call ID.
- * Exact IDs remain authoritative; aliases are accepted only for the trusted
- * submit_plan result contract within the interaction's originating turn.
- */
-export function findInteractionToolOutcome(
-  messages: ChatMessage[],
-  interaction: PendingInteraction,
-  expectedDecision?: "approved" | "rejected",
-): InteractionToolOutcome | null {
-  const parts = messages
-    .filter((message) => message.role === "assistant" && (!interaction.originMessageId || message.turnId === interaction.originMessageId))
-    .flatMap((message) => message.parts)
-    .filter((part): part is ChatToolPart => part.type === "tool" && part.name === (interaction.kind === "submit_plan" ? "submit_plan" : "ask_user"));
-  const terminal = (part: ChatToolPart) => part.status === "completed" || part.status === "error" || part.status === "cancelled" || part.status === "declined";
-  const exact = parts.find((part) => part.toolCallId === interaction.toolCallId && terminal(part));
-  if (exact) return { status: exact.status as InteractionToolOutcome["status"], toolCallId: exact.toolCallId, ...(exact.status === "completed" && interaction.kind === "submit_plan" ? { decision: submitPlanDecision(exact.output) ?? undefined } : {}) };
-  if (interaction.kind !== "submit_plan") return null;
-  const aliases = parts.flatMap((part): InteractionToolOutcome[] => {
-    if (!terminal(part)) return [];
-    const decision = part.status === "completed" ? submitPlanDecision(part.output) : null;
-    if (!decision || (expectedDecision && decision !== expectedDecision)) return [];
-    return [{ status: part.status as InteractionToolOutcome["status"], toolCallId: part.toolCallId, decision }];
-  });
-  return aliases.length === 1 ? aliases[0] : null;
-}
-
 function taskFromMastra(task: TaskLike): WorkbenchTask | null {
   if (typeof task.id !== "string" || typeof task.content !== "string" || typeof task.activeForm !== "string") return null;
   if (task.status !== "pending" && task.status !== "in_progress" && task.status !== "completed") return null;
   return { id: task.id, content: task.content, activeForm: task.activeForm, status: task.status };
-}
-
-export function projectTasks(displayState: AgentControllerDisplayState, fallback: WorkbenchTask[] = []): WorkbenchTask[] {
-  const tasks = displayState.tasks.map(taskFromMastra).filter((task): task is WorkbenchTask => task !== null);
-  return tasks.length > 0 ? tasks : fallback;
 }
 
 function parsePlanText(value: string | undefined): { title: string; summary: string; steps: string[]; raw?: string } {
@@ -371,33 +338,6 @@ export function upsertPendingInteraction(existing: PendingInteraction[], incomin
       : {}),
   };
   return existing.map((item) => (item.toolCallId === incoming.toolCallId ? merged : item));
-}
-
-export function projectPendingInteractions(
-  displayState: AgentControllerDisplayState,
-  existing: PendingInteraction[],
-  firstPlanVersion: number,
-): PendingInteraction[] {
-  const live = new Map<string, SuspendedToolLike>();
-  for (const [toolCallId, suspension] of displayState.pendingSuspensions.entries()) {
-    live.set(toolCallId, { toolCallId, toolName: suspension.toolName, suspendPayload: suspension.suspendPayload });
-  }
-
-  // A freshly emitted `tool_suspended` event can arrive before Mastra's
-  // synthetic display-state event updates `pendingSuspensions`. Keep pending
-  // interactions until an explicit response/cancel path removes them; a
-  // transiently incomplete display-state snapshot must not send the UI back to
-  // a generic "Thinking" state.
-  const next = existing.filter((item) => item.status === "pending" || item.status === "resolving" || item.status === "failed" || live.has(item.toolCallId));
-  let version = firstPlanVersion;
-  for (const suspension of live.values()) {
-    const parsed = parseSuspendedInteraction(suspension, version);
-    if (!parsed) continue;
-    if (parsed.kind === "submit_plan") version += 1;
-    const merged = upsertPendingInteraction(next, parsed);
-    next.splice(0, next.length, ...merged);
-  }
-  return next;
 }
 
 export function upsertChatMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {

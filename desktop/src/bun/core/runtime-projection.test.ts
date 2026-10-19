@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
-import type { ChatMessage, PendingInteraction } from "../../shared/contracts";
-import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, parseToolApproval, projectedMessageId, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
+import type { ChatMessage } from "../../shared/contracts";
+import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, parseToolApproval, projectedMessageId, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
 
 describe("native approval projection", () => {
   it("keeps run identity and exact arguments in the shared pending-action model", () => {
@@ -24,25 +23,6 @@ describe("native approval projection", () => {
       status: "pending",
     });
   });
-});
-
-const displayState = (overrides: Partial<AgentControllerDisplayState> = {}): AgentControllerDisplayState => ({
-  isRunning: true,
-  currentMessage: null,
-  queuedFollowUps: 0,
-  tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-  activeTools: new Map(),
-  toolInputBuffers: new Map(),
-  pendingApproval: null,
-  pendingSuspensions: new Map(),
-  activeSubagents: new Map(),
-  omProgress: {} as AgentControllerDisplayState["omProgress"],
-  bufferingMessages: false,
-  bufferingObservations: false,
-  modifiedFiles: new Map(),
-  tasks: [],
-  previousTasks: [],
-  ...overrides,
 });
 
 const user = (id: string): ChatMessage => ({
@@ -201,17 +181,6 @@ describe("runtime display projection", () => {
       kind: "ask_user",
       selectionMode: "single_select",
     });
-    const existing: PendingInteraction = {
-      id: "ask-1",
-      toolCallId: "ask-1",
-      kind: "ask_user",
-      title: "Question",
-      question: "Continue?",
-      options: [],
-      status: "resolving",
-      createdAt: "2026-08-03T12:00:00.000Z",
-    };
-    expect(projectPendingInteractions(displayState(), [existing], 1)).toEqual([existing]);
   });
 
   it("hydrates one plan call without resetting its resolving state or version", () => {
@@ -237,28 +206,7 @@ describe("runtime display projection", () => {
     expect(twice[0].plan).toMatchObject({ version: 4, raw: "# Updated plan\n\nOne step." });
   });
 
-  it("projects task state and upserts streamed messages by id", () => {
-    expect(
-      projectTasks(
-        displayState({
-          tasks: [
-            {
-              id: "task-1",
-              content: "Review",
-              activeForm: "Reviewing",
-              status: "in_progress",
-            },
-          ],
-        }),
-      ),
-    ).toEqual([
-      {
-        id: "task-1",
-        content: "Review",
-        activeForm: "Reviewing",
-        status: "in_progress",
-      },
-    ]);
+  it("upserts streamed messages by id", () => {
     expect(upsertChatMessage([assistant("a", "Hi", "streaming")], assistant("a", "Hi there", "streaming"))).toEqual([assistant("a", "Hi there", "streaming")]);
   });
 
@@ -336,47 +284,5 @@ describe("interaction terminal correlation", () => {
     expect(submitPlanDecision(approved)).toBe("approved");
     expect(submitPlanDecision(rejected)).toBe("rejected");
     expect(rejected.content).toContain("Add tests");
-  });
-  const planInteraction: PendingInteraction = {
-    id: "call-original",
-    toolCallId: "call-original",
-    kind: "submit_plan",
-    title: "Test plan",
-    options: [],
-    status: "resolving",
-    originMessageId: "user-1",
-    createdAt: "2026-08-03T12:00:00.000Z",
-  };
-  const planToolMessage = (toolCallId: string, output: unknown, turnId = "user-1", status: "completed" | "declined" = "completed"): ChatMessage => ({
-    ...assistant(`assistant-${toolCallId}`, ""),
-    turnId,
-    parts: [{ type: "tool", id: `tool-${toolCallId}`, toolCallId, name: "submit_plan", label: "Submit plan", status, output }],
-  });
-
-  it("accepts the trusted resumed plan result when Mastra replaces the tool-call ID", () => {
-    const output = { content: "The user approved the plan. Continue with the approved work.", isError: false };
-    expect(submitPlanDecision(output)).toBe("approved");
-    expect(findInteractionToolOutcome([planToolMessage("call-resumed", output)], planInteraction, "approved")).toEqual({
-      status: "completed",
-      toolCallId: "call-resumed",
-      decision: "approved",
-    });
-  });
-
-  it("keeps an exact denial authoritative even if an aliased success is present", () => {
-    const approved = { content: "The user approved the plan. Continue with the approved work.", isError: false };
-    expect(findInteractionToolOutcome([
-      planToolMessage("call-original", undefined, "user-1", "declined"),
-      planToolMessage("call-resumed", approved),
-    ], planInteraction, "approved")).toEqual({ status: "declined", toolCallId: "call-original" });
-  });
-
-  it("does not correlate a successful plan result from another user turn", () => {
-    const approved = { content: "The user approved the plan. Continue with the approved work.", isError: false };
-    expect(findInteractionToolOutcome([planToolMessage("call-resumed", approved, "user-other")], planInteraction, "approved")).toBeNull();
-  });
-
-  it("rejects lookalike output that does not match the trusted plan result contract", () => {
-    expect(findInteractionToolOutcome([planToolMessage("call-resumed", { content: "Plan approved" })], planInteraction, "approved")).toBeNull();
   });
 });

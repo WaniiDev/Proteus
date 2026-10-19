@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
+import { DEFAULT_MODEL_ID } from "../shared/constants";
 import type { ChatMessage, MemoryScope, OrbState, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { rpc } from "./lib/bridge";
 import { createRuntimeSnapshotTransport } from "./lib/runtime-snapshot-transport";
@@ -21,7 +22,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   ],
   models: [
     {
-      id: "openrouter/auto",
+      id: DEFAULT_MODEL_ID,
       providerId: "openrouter",
       rawId: "auto",
       name: "Auto Router",
@@ -30,7 +31,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
     },
   ],
   selectedProviderId: "openrouter",
-  selectedModelId: "openrouter/auto",
+  selectedModelId: DEFAULT_MODEL_ID,
   selectedReasoningEffort: null,
   projects: [],
   activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
