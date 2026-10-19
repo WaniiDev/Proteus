@@ -122,3 +122,24 @@ describe("native Mastra agent driver", () => {
     expect(closes).toEqual([{ threadId: "thread-1", runId: "run-unsettled" }]);
   });
 });
+
+describe("native Mastra agent driver subscriptions", () => {
+  test("concurrent callers share one in-flight subscription (WAN-503 L4)", async () => {
+    let subscribed = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const agent: NativeQueueAgent = {
+      subscribeToThread: async () => { subscribed += 1; await gate; return { stream: pendingChunks(), activeRunId: () => null, abort: () => false, unsubscribe: () => undefined }; },
+      queueMessage: () => ({ accepted: Promise.resolve({ action: "deliver", runId: "run-1" }) }),
+      sendStreamResume: async ({ runId, toolCallId }) => ({ accepted: true, runId, toolCallId }),
+    };
+    const driver = new NativeAgentDriver(agent, "local-user", { onProjection: () => undefined });
+    const first = driver.ensureSubscription("thread-1");
+    const second = driver.ensureSubscription("thread-1");
+    release();
+    expect(await first).toBe(await second);
+    expect(subscribed).toBe(1);
+    expect(await driver.ensureSubscription("thread-1")).toBe(await first);
+    expect(subscribed).toBe(1);
+  });
+});
