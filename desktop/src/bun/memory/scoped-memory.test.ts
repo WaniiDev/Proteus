@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createProteusStorage } from "./core/mastra-foundation";
+import { createProteusStorage } from "../core/mastra-foundation";
 import { MEMORY_CONTEXT_LIMIT, ScopedMemoryManager } from "./scoped-memory";
 
 const PROJECT = {
@@ -13,7 +13,7 @@ const PROJECT = {
 
 describe("scoped Mastra Working Memory", () => {
   test("is opt-in and keeps global and project entries isolated", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
@@ -36,7 +36,7 @@ describe("scoped Mastra Working Memory", () => {
   });
 
   test("supports deterministic edit, delete, reset, and retained project archives", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
@@ -63,7 +63,7 @@ describe("scoped Mastra Working Memory", () => {
   });
 
   test("caps injected context and never injects while disabled", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
@@ -82,7 +82,7 @@ describe("scoped Mastra Working Memory", () => {
   });
 
   test("keeps valid entries and backs up the original when one entry is invalid", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
@@ -102,7 +102,7 @@ describe("scoped Mastra Working Memory", () => {
   });
 
   test("an unreadable document is backed up before being overwritten", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);

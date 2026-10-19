@@ -1,6 +1,6 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { memoryCategorySchema, memoryEntrySchema, type MemoryScope } from "../shared/contracts";
+import { memoryCategorySchema, memoryEntrySchema, type MemoryScope } from "../../shared/contracts";
 import type { ScopedMemoryManager } from "./scoped-memory";
 
 const agentMemoryScopeSchema = z.enum(["global", "current_project"]);

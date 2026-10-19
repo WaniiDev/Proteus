@@ -16,7 +16,7 @@ import { ensureProteusAppWorkspace, proteusAppWorkspaceRoot } from "./workspace/
 import { NativeThreadRepository } from "./native/native-thread-repository";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native/native-agent-driver";
 import { WorkspaceRegistry } from "./workspace/workspace-registry";
-import { ScopedMemoryManager } from "./scoped-memory";
+import { ScopedMemoryManager } from "./memory/scoped-memory";
 import { RESOURCE_ID } from "./runtime/constants";
 import type { SnapshotListener } from "./runtime/types";
 import { normalizeError } from "./core/runtime-error-mapping";

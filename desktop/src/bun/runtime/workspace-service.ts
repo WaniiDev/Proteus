@@ -8,7 +8,7 @@ import { NativeThreadRepository } from "../native/native-thread-repository";
 import { NativeAgentDriver } from "../native/native-agent-driver";
 import type { ProjectRegistryStorage, StoredProject } from "../workspace/project-registry";
 import { WorkspaceRegistry } from "../workspace/workspace-registry";
-import { ScopedMemoryManager } from "../scoped-memory";
+import { ScopedMemoryManager } from "../memory/scoped-memory";
 import { workspaceSelectionBlocker } from "../workspace/workspace-selection-policy";
 import type { PersistedThreadState } from "./types";
 import { makeRuntimeError } from "../core/runtime-error-mapping";

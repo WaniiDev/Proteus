@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { RequestContext } from "@mastra/core/request-context";
-import { createProteusStorage } from "./core/mastra-foundation";
+import { createProteusStorage } from "../core/mastra-foundation";
 import { createMemoryTools } from "./memory-tools";
 import { ScopedMemoryManager } from "./scoped-memory";
 
 describe("memory tools", () => {
   test("uses request context to constrain current-project writes", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
@@ -27,7 +27,7 @@ describe("memory tools", () => {
   });
 
   test("requires native Mastra approval before forgetting", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       const tools = createMemoryTools(new ScopedMemoryManager(foundation.storage, foundation.memorySettings));

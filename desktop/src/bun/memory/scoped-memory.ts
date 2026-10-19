@@ -9,9 +9,9 @@ import {
   type MemoryScope,
   type MemoryScopeState,
   type MemorySettingsState,
-} from "../shared/contracts";
+} from "../../shared/contracts";
 import type { MemorySettingsStorage, StoredMemoryScope } from "./memory-settings";
-import type { StoredProject } from "./workspace/project-registry";
+import type { StoredProject } from "../workspace/project-registry";
 
 const WORKING_MEMORY_TEMPLATE = `# Proteus durable memory
 

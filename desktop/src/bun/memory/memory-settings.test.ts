@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createProteusStorage } from "./core/mastra-foundation";
+import { createProteusStorage } from "../core/mastra-foundation";
 
 describe("memory settings storage", () => {
   test("defaults off and persists scope archive metadata", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     try {
       await foundation.appStorage.init();
       expect(await foundation.memorySettings.loadEnabled()).toBe(false);

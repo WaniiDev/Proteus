@@ -1,6 +1,6 @@
 import type { MemoryCategory, MemoryScope, MemorySettingsState } from "../../shared/contracts";
 import type { ProjectRegistryStorage, StoredProject } from "../workspace/project-registry";
-import { ScopedMemoryManager } from "../scoped-memory";
+import { ScopedMemoryManager } from "../memory/scoped-memory";
 import type { RuntimeContext } from "./context";
 
 /** Scoped durable memory settings and entries. */
