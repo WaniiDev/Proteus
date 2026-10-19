@@ -92,8 +92,8 @@ function approvalFor(threadId: string, toolCallId = "t1") {
   return parseToolApproval({ threadId, runId: "r1", toolCallId, toolName: "mastra_workspace_write_file", args: { path: "a.txt" } });
 }
 
-function projection(threadId: string, runId = "r1") {
-  return { runId, threadId, message: { id: `${runId}:m`, role: "assistant", turnId: runId, parts: [], status: "streaming", createdAt: new Date(0).toISOString() }, terminal: null } as never;
+function projection(threadId: string, runId = "r1", terminal: string | null = null) {
+  return { runId, threadId, message: { id: `${runId}:m`, role: "assistant", turnId: runId, parts: [], status: "streaming", createdAt: new Date(0).toISOString() }, terminal } as never;
 }
 
 describe("runtime thread isolation (WAN-503)", () => {
@@ -292,7 +292,7 @@ describe("review fixes: background run clears the shared activeRun (WAN-503)", (
     runningInA(rt, select);
     driver.abort = () => true;
     rt.abort();
-    rt.runs.handleNativeProjection({ ...projection("A"), terminal: "interrupted" }, { type: "abort", payload: {} });
+    rt.runs.handleNativeProjection(projection("A", "r1", "interrupted"), { type: "abort", payload: {} });
     expect(rt.ctx.snapshot.activeRun).toBeNull();
     expect(rt.ctx.snapshot.status).not.toBe("running");
   });
@@ -320,6 +320,38 @@ describe("review fixes: approval publish (WAN-503)", () => {
     await rt.respondToToolApproval("t1", true, approvalFingerprint(pending.toolName!, { path: "a.txt" }));
     expect(rt.ctx.snapshot.interactions).toEqual([]);
     rt.continuation.clearContinuationTimers();
+  });
+});
+
+describe("review fixes: continuation history (WAN-503)", () => {
+  const continuationFor = (threadId: string) => ({ interactionId: "i", toolCallId: "t1", threadId, runId: "r1", kind: "tool_approval", decision: "approved", phase: "recovery", startedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString() });
+  const assistant = (text: string) => ({ id: "a1", role: "assistant", content: { format: 2, parts: [{ type: "text", text }] }, createdAt: new Date() });
+
+  function reconcileSetup(recalled: Record<string, unknown[]>, selectedMessages: unknown[]) {
+    const ctxt: ReturnType<typeof fixture> = fixture();
+    const { rt, select } = ctxt;
+    select("B", stateB);
+    rt.ctx.snapshot.messages = selectedMessages;
+    rt.threads.threadRepo.recall = async (id: string) => recalled[id] ?? [];
+    const events: Array<{ type: string; phase?: string }> = [];
+    rt.continuation.diagnostics.record = (event: { type: string; phase?: string }) => { events.push(event); };
+    return { ...ctxt, events };
+  }
+
+  test("R4: reconciling A while B is selected does not read B's messages as A's completion", async () => {
+    const done = { id: "b1", role: "assistant", text: "finished", status: "complete", createdAt: new Date().toISOString(), parts: [{ type: "text", id: "x", text: "finished" }], turnId: "t" };
+    const { rt, events } = reconcileSetup({}, [done]);
+    rt.ctx.threadStateCache.set("A", { ...stateA, continuation: continuationFor("A") });
+    await rt.continuation.reconcileContinuation("timeout", continuationFor("A"));
+    expect(events.some((event) => event.type === "continuation_reconcile" && event.phase === "missing")).toBeTrue();
+  });
+
+  test("R4: reconciling A while B is selected finds A's own completed history", async () => {
+    const { rt, events } = reconcileSetup({ A: [assistant("all done")] }, []);
+    rt.ctx.threadStateCache.set("A", { ...stateA, continuation: continuationFor("A") });
+    await rt.continuation.reconcileContinuation("timeout", continuationFor("A"));
+    expect(events.some((event) => event.type === "continuation_reconcile" && event.phase === "missing")).toBeFalse();
+    expect(events.some((event) => event.type === "continuation" && event.phase === "complete")).toBeTrue();
   });
 });
 

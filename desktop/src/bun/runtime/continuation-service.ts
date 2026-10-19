@@ -1,4 +1,4 @@
-import type { ContinuationState, InteractionError, PendingInteraction, RuntimeError } from "../../shared/contracts";
+import type { ChatMessage, ContinuationState, InteractionError, PendingInteraction, RuntimeError } from "../../shared/contracts";
 import { RuntimeDiagnostics } from "../diagnostics";
 import { NativeAgentDriver } from "../native-agent-driver";
 import type { NativeAgentChunk, NativeStreamProjection } from "../native-stream-projection";
@@ -135,9 +135,9 @@ export class ContinuationService {
     void this.threads.persistThreadState(threadId, next);
   }
 
-  private continuationHasCompletedHistory(continuation: ContinuationState): boolean {
+  private continuationHasCompletedHistory(continuation: ContinuationState, messages: ChatMessage[]): boolean {
     const startedAt = Date.parse(continuation.startedAt);
-    return this.ctx.snapshot.messages.some((message) => message.role === "assistant" && message.status === "complete" && Date.parse(message.createdAt) >= startedAt && (message.text.trim().length > 0 || message.parts.some((part) => part.type === "tool" && part.toolCallId === continuation.toolCallId && ["completed", "declined", "cancelled", "error"].includes(part.status))));
+    return messages.some((message) => message.role === "assistant" && message.status === "complete" && Date.parse(message.createdAt) >= startedAt && (message.text.trim().length > 0 || message.parts.some((part) => part.type === "tool" && part.toolCallId === continuation.toolCallId && ["completed", "declined", "cancelled", "error"].includes(part.status))));
   }
 
   async reconcileContinuation(reason: "startup" | "timeout" | "stream-close" | "stream-error", continuation: ContinuationState | null | undefined = this.ctx.threadState.continuation): Promise<void> {
@@ -163,7 +163,7 @@ export class ContinuationService {
       this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "suspended", threadId, runId: continuation.runId, toolCallId: continuation.toolCallId });
       return;
     }
-    if (this.continuationHasCompletedHistory(continuation)) {
+    if (this.continuationHasCompletedHistory(continuation, await this.threads.messagesFor(threadId).catch(() => []))) {
       this.finishContinuation(threadId, continuation.runId, "complete");
       this.ctx.releaseRun(continuation.runId);
       if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, error: null });

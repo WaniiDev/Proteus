@@ -1,7 +1,7 @@
 import type { MastraCompositeStore } from "@mastra/core/storage";
 import { TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
 import { LocalFilesystem } from "@mastra/core/workspace";
-import type { RuntimeSnapshot, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding } from "../../shared/contracts";
+import type { ChatMessage, RuntimeSnapshot, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding } from "../../shared/contracts";
 import { upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval } from "../runtime-projection";
 import { TaskToolPolicy } from "../task-tool-policy";
 import { migrateCodexSelection } from "../codex-models";
@@ -239,6 +239,12 @@ export class ThreadService {
     if (!tasks) return;
     const next = this.updateThreadState(threadId, (state) => ({ ...state, tasks }));
     if (threadId === this.ctx.selectedThreadId) this.ctx.publish({ workbench: this.workbenchFromState(next, null) });
+  }
+
+  /** Chat messages of one thread: the live snapshot when it is selected, otherwise recalled from storage. */
+  async messagesFor(threadId: string): Promise<ChatMessage[]> {
+    if (threadId === this.ctx.selectedThreadId) return this.ctx.snapshot.messages;
+    return this.projector.mapMessages(await this.threadRepo.recall(threadId) as MastraMessage[]);
   }
 
   async syncMessagesSafely(threadId?: string, guard?: { selectionGeneration?: number; syncGeneration?: number }, assistantRunId?: string): Promise<boolean> {
