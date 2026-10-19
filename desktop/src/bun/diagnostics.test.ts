@@ -41,4 +41,22 @@ describe("runtime diagnostics", () => {
     expect(diagnostics.snapshot().entries).toHaveLength(count);
     await diagnostics.flush();
   });
+
+  it("keeps token usage metadata while redacting exact secret keys", () => {
+    const out = sanitizeDiagnosticValue({ tokenUsage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 }, token: "x", access_token: "y", "x-api-key": "z", refreshToken: "w" }) as Record<string, any>;
+    expect(out.tokenUsage).toEqual({ inputTokens: 3, outputTokens: 4, totalTokens: 7 });
+    expect([out.token, out.access_token, out["x-api-key"], out.refreshToken]).toEqual(["[REDACTED]", "[REDACTED]", "[REDACTED]", "[REDACTED]"]);
+  });
+
+  it("replaces free-text bodies with length summaries but keeps metadata", () => {
+    const chunk = { type: "text-delta", runId: "r1", payload: { toolCallId: "t1", text: "private words", args: { path: "a.txt" }, result: "secret answer", status: "ok", size: 5 } };
+    const out = sanitizeDiagnosticValue(chunk) as any;
+    expect(out.type).toBe("text-delta");
+    expect(out.payload.toolCallId).toBe("t1");
+    expect(out.payload.text).toBe("[text: 13 chars]");
+    expect(out.payload.args).toMatch(/^\[object: \d+ chars\]$/);
+    expect(out.payload.result).toBe("[text: 13 chars]");
+    expect(out.payload.status).toBe("ok");
+    expect(JSON.stringify(out)).not.toContain("private words");
+  });
 });

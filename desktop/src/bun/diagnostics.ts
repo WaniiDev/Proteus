@@ -5,7 +5,21 @@ import type { DiagnosticEntry, DiagnosticSource, DiagnosticsSnapshot } from "../
 const MAX_ENTRIES = 2_000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const REDACTED = "[REDACTED]";
-const SENSITIVE_KEY = /(?:api.?key|authorization|bearer|cookie|credential|password|refresh.?token|secret|token)/i;
+// Exact secret key names (case/separator-insensitive) so metadata such as `tokenUsage` or `inputTokens` survives.
+const SENSITIVE_KEYS = new Set(["authorization", "bearer", "cookie", "setcookie", "credential", "credentials", "password", "passwd", "secret", "clientsecret", "token", "accesstoken", "refreshtoken", "idtoken", "sessiontoken", "apikey", "privatekey"]);
+const SENSITIVE_SUFFIX = /(?:apikey|secret|password|accesstoken|refreshtoken|privatekey)$/;
+// Free-text bodies (prompts, answers, stream chunks, tool args/results) are summarized, never stored.
+const BODY_KEYS = new Set(["text", "delta", "textdelta", "content", "args", "result", "output", "reasoning", "response", "answer", "answers", "prompt", "body"]);
+
+function isSensitiveKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return SENSITIVE_KEYS.has(normalized) || SENSITIVE_SUFFIX.test(normalized);
+}
+function summarizeBody(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return `[text: ${value.length} chars]`;
+  try { return `[${Array.isArray(value) ? "array" : "object"}: ${JSON.stringify(value)?.length ?? 0} chars]`; } catch { return "[object]"; }
+}
 
 export type DiagnosticInput = {
   source: DiagnosticSource;
@@ -28,7 +42,8 @@ function redactString(value: string): string {
 }
 
 export function sanitizeDiagnosticValue(value: unknown, key = "", depth = 0, seen = new WeakSet<object>()): unknown {
-  if (SENSITIVE_KEY.test(key)) return REDACTED;
+  if (isSensitiveKey(key)) return REDACTED;
+  if (BODY_KEYS.has(key.toLowerCase())) return summarizeBody(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "string") return redactString(value);
   if (typeof value === "bigint") return `${value}n`;
