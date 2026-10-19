@@ -1,5 +1,5 @@
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
-import type { OpenRouterModel, OpenRouterModelId, ProviderErrorCode } from "../shared/contracts";
+import type { OpenRouterModel, OpenRouterModelId, ProviderErrorCode } from "../../shared/contracts";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const REQUEST_TIMEOUT_MS = 15_000;

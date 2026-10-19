@@ -1,5 +1,5 @@
 import type { OpenRouterModelId, ProviderId } from "../../shared/contracts";
-import type { AppModelSelection } from "../model-preferences";
+import type { AppModelSelection } from "../providers/model-preferences";
 
 export const AGENT_ID = "proteus-text-agent";
 export const RESOURCE_ID = "local-user";

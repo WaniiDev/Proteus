@@ -1,7 +1,7 @@
 import type { ProviderErrorCode, RuntimeError } from "../../shared/contracts";
 import { extractSafeErrorMessage } from "./error-message";
-import { SecureStoreUnavailableError } from "../credentials";
-import { getOpenRouterErrorStatus } from "../openrouter";
+import { SecureStoreUnavailableError } from "../providers/credentials";
+import { getOpenRouterErrorStatus } from "../providers/openrouter";
 
 export function workspaceRuntimeError(error: unknown): RuntimeError | null {
   const message = extractSafeErrorMessage(error, "");

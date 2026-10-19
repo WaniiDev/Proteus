@@ -2,7 +2,7 @@ import type { CustomModelCatalogProvider, CustomAvailableModel } from "@mastra/c
 import { MastraCodeGateway, remapOpenAIModelForCodexOAuth } from "@mastra/code-sdk/agents/mastracode-gateway";
 import type { CredentialStore } from "@mastra/code-sdk/auth/types";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
-import type { ProviderModel, ProviderModelId, ReasoningEffort } from "../shared/contracts";
+import type { ProviderModel, ProviderModelId, ReasoningEffort } from "../../shared/contracts";
 
 export const CODEX_REASONING_OPTIONS = ["low", "medium", "high", "xhigh"] as const satisfies readonly ReasoningEffort[];
 export const DEFAULT_CODEX_REASONING: ReasoningEffort = "medium";

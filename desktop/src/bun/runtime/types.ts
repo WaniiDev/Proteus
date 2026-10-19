@@ -1,5 +1,5 @@
 import type { ChatEvent, ContinuationState, PendingInteraction, RuntimeSnapshot, TokenUsage, WorkbenchTask, WorkspaceBinding } from "../../shared/contracts";
-import type { AppModelSelection } from "../model-preferences";
+import type { AppModelSelection } from "../providers/model-preferences";
 import type { InteractionToolOutcome, ProjectedToolOutcome } from "../core/runtime-projection";
 
 export type SnapshotListener = (snapshot: RuntimeSnapshot) => void;

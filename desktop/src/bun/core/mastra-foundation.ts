@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { MastraCompositeStore } from "@mastra/core/storage";
 import { LibSQLFactoryStorage } from "@mastra/libsql";
-import { ModelPreferencesStorage } from "../model-preferences";
+import { ModelPreferencesStorage } from "../providers/model-preferences";
 import { MemorySettingsStorage } from "../memory-settings";
 import { ProjectRegistryStorage } from "../project-registry";
 

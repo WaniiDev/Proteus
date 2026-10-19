@@ -7,7 +7,7 @@ import {
   type ProviderId,
   type ProviderModelId,
   type ReasoningEffort,
-} from "../shared/contracts";
+} from "../../shared/contracts";
 
 const MODEL_PREFERENCES_COLLECTION = "proteus_model_preferences";
 const MODEL_USAGE_COLLECTION = "proteus_model_usage";

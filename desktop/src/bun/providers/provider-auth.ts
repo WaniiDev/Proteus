@@ -1,4 +1,4 @@
-import type { ProviderAuth, RuntimeSnapshot } from "../shared/contracts";
+import type { ProviderAuth, RuntimeSnapshot } from "../../shared/contracts";
 
 export function reconcileProviderAuth(
   providers: RuntimeSnapshot["providers"],

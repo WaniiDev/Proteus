@@ -1,4 +1,4 @@
-import type { ProviderId, ProviderModelId, RuntimeSnapshot } from "../shared/contracts";
+import type { ProviderId, ProviderModelId, RuntimeSnapshot } from "../../shared/contracts";
 
 export function selectedModelMissingFromCatalog(
   selectedProviderId: ProviderId,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ProviderAuth, RuntimeSnapshot } from "../shared/contracts";
+import type { ProviderAuth, RuntimeSnapshot } from "../../shared/contracts";
 import { reconcileProviderAuth } from "./provider-auth";
 
 const failed: ProviderAuth = {
