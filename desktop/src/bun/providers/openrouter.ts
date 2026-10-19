@@ -1,4 +1,5 @@
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
+import { DEFAULT_MODEL_ID } from "../../shared/constants";
 import type { OpenRouterModel, OpenRouterModelId, ProviderErrorCode } from "../../shared/contracts";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -134,7 +135,7 @@ export async function listOpenRouterTextModels(apiKey: string): Promise<OpenRout
     .map((model) => ({ ...model, ...(popularityRanks.has(model.rawId) ? { popularityRank: popularityRanks.get(model.rawId) } : {}) }));
 
   const autoRouter: OpenRouterModel = {
-    id: "openrouter/auto",
+    id: DEFAULT_MODEL_ID,
     providerId: "openrouter",
     rawId: "auto",
     name: "Auto Router",

@@ -3,7 +3,8 @@ import type { AppModelSelection } from "../providers/model-preferences";
 import { reconcileProviderAuth } from "../providers/provider-auth";
 import { normalizeError } from "../core/runtime-error-mapping";
 import type { LiveAssistantProjection, ProjectedToolOutcome } from "../core/runtime-projection";
-import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER_ID } from "./constants";
+import { DEFAULT_MODEL_ID } from "../../shared/constants";
+import { DEFAULT_PROVIDER_ID } from "./constants";
 import { emptyWorkbench } from "./message-mapping";
 import type { InteractionResolution, PersistedThreadState, SnapshotListener } from "./types";
 

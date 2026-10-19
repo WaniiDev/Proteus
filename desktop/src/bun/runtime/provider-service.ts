@@ -7,7 +7,7 @@ import { selectedModelMissingFromCatalog } from "../providers/provider-readiness
 import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels } from "../providers/codex-models";
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "../providers/codex-oauth-failure";
 import { type AppModelSelection, type ModelPreferencesStorage } from "../providers/model-preferences";
-import { DEFAULT_MODEL_ID } from "./constants";
+import { DEFAULT_MODEL_ID } from "../../shared/constants";
 import { makeRuntimeError, normalizeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
 import type { ThreadService } from "./thread-service";

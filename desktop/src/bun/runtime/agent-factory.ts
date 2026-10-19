@@ -22,7 +22,8 @@ import { WorkspaceRegistry } from "../workspace/workspace-registry";
 import { compatibleAskUserTool } from "../tools/compatible-ask-user-tool";
 import { ScopedMemoryManager } from "../memory/scoped-memory";
 import { createMemoryTools } from "../memory/memory-tools";
-import { AGENT_ID, DEFAULT_MODEL_ID } from "./constants";
+import { DEFAULT_MODEL_ID } from "../../shared/constants";
+import { AGENT_ID } from "./constants";
 import { sanitizeToolDetail } from "./message-mapping";
 import type { RuntimeContext } from "./context";
 
