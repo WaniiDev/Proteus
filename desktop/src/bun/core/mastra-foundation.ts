@@ -3,7 +3,7 @@ import { MastraCompositeStore } from "@mastra/core/storage";
 import { LibSQLFactoryStorage } from "@mastra/libsql";
 import { ModelPreferencesStorage } from "../providers/model-preferences";
 import { MemorySettingsStorage } from "../memory-settings";
-import { ProjectRegistryStorage } from "../project-registry";
+import { ProjectRegistryStorage } from "../workspace/project-registry";
 
 export const Proteus_RUNTIME_VERSION = "v3" as const;
 

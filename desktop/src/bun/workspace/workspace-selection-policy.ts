@@ -1,4 +1,4 @@
-import type { WorkspaceBindingUpdateResult } from "../shared/contracts";
+import type { WorkspaceBindingUpdateResult } from "../../shared/contracts";
 
 export type WorkspaceSelectionActivity = {
   runtimeBusy: boolean;

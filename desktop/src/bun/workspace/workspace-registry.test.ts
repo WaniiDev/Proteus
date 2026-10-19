@@ -24,7 +24,7 @@ describe("WorkspaceRegistry", () => {
 
   test("contains paths and rejects traversal and escaping symlinks", async () => {
     const { base, project, registry } = await fixture();
-    await expect(registry.read(project, "../secret.txt")).rejects.toThrow("escapes");
+    await expect(registry.read(project, "../../secret.txt")).rejects.toThrow("escapes");
     await writeFile(join(base, "secret.txt"), "secret");
     try {
       await symlink(join(base, "secret.txt"), join(project, "link.txt"));

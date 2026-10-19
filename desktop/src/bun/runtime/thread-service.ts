@@ -9,7 +9,7 @@ import { RuntimeDiagnostics } from "../core/diagnostics";
 import { parseAppModelSelection, resolveRememberedModelSelection, type AppModelSelection } from "../providers/model-preferences";
 import { NativeThreadRepository } from "../native/native-thread-repository";
 import { NativeAgentDriver } from "../native/native-agent-driver";
-import type { ProjectRegistryStorage } from "../project-registry";
+import type { ProjectRegistryStorage } from "../workspace/project-registry";
 import { DEFAULT_MODEL_SELECTION, LEGACY_THREAD_METADATA_KEY, RESOURCE_ID, THREAD_METADATA_KEY } from "./constants";
 import { emptyTokenUsage, mapThread } from "./message-mapping";
 import type { MastraMessage, PersistedThreadState } from "./types";

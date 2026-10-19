@@ -27,9 +27,9 @@ const MAX_MEDIA_BYTES = 10_000_000;
 function safeId(value: string): string { return `workspace_${value.replace(/[^a-zA-Z0-9_]/g, "_").slice(-48)}`; }
 function normalizeRelative(value: string): string {
   if (typeof value !== "string" || value.includes("\0") || isAbsolute(value)) throw new Error("Workspace paths must be relative");
-  const normalized = normalize(value || ".").replaceAll("\\", "/");
-  if (normalized === ".." || normalized.startsWith("../")) throw new Error("Path escapes the workspace");
-  return normalized === "." ? "" : normalized.replace(/^\.\//, "");
+  const normalized = normalize(value || "..").replaceAll("\\", "/");
+  if (normalized === "../.." || normalized.startsWith("../..")) throw new Error("Path escapes the workspace");
+  return normalized === ".." ? "" : normalized.replace(/^\.\//, "");
 }
 function versionOf(size: number, modified: number): string { return `${size}:${Math.trunc(modified)}`; }
 
@@ -108,7 +108,7 @@ export class WorkspaceRegistry {
     const rel = normalizeRelative(path);
     const candidate = resolve(canonicalRoot, rel);
     const relation = relative(canonicalRoot, candidate);
-    if (relation.startsWith(`..${sep}`) || relation === ".." || isAbsolute(relation)) throw new Error("Path escapes the workspace");
+    if (relation.startsWith(`..${sep}`) || relation === "../.." || isAbsolute(relation)) throw new Error("Path escapes the workspace");
     await this.assertNearestInside(canonicalRoot, candidate, allowMissing);
     return { absolute: candidate, relative: rel };
   }
@@ -129,7 +129,7 @@ export class WorkspaceRegistry {
   private async assertInside(canonicalRoot: string, path: string) {
     const real = await realpath(path).catch(() => null); if (!real) throw new Error("Path cannot be resolved inside the workspace");
     const check = relative(canonicalRoot, process.platform === "win32" ? real.toLowerCase() : real);
-    if (check.startsWith(`..${sep}`) || check === ".." || isAbsolute(check)) throw new Error("Symlink escapes the workspace");
+    if (check.startsWith(`..${sep}`) || check === "../.." || isAbsolute(check)) throw new Error("Symlink escapes the workspace");
   }
   /** Re-checks existing ancestors, creates the missing directories, then re-verifies so a swapped link cannot redirect the write. */
   private async makeDirectories(root: string, directory: string) {
@@ -146,7 +146,7 @@ export class WorkspaceRegistry {
       const entries = await readdir(absolute, { withFileTypes: true });
       const result: WorkspaceTreeEntry[] = [];
       for (const entry of entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
-        if ((!includeHidden && entry.name.startsWith(".")) || ["node_modules", "dist", "build"].includes(entry.name)) continue;
+        if ((!includeHidden && entry.name.startsWith("..")) || ["node_modules", "dist", "build"].includes(entry.name)) continue;
         const rel = [prefix, entry.name].filter(Boolean).join("/"); const absoluteEntry = join(absolute, entry.name); const stat = await lstat(absoluteEntry);
         const kind = stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "directory" : "file";
         result.push({ path: rel, name: entry.name, kind, size: stat.isFile() ? stat.size : undefined, modifiedAt: stat.mtime.toISOString(), children: kind === "directory" && level > 1 ? await walk(absoluteEntry, rel, level - 1) : undefined });

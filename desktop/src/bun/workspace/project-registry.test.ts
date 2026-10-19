@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createProteusStorage } from "./core/mastra-foundation";
+import { createProteusStorage } from "../core/mastra-foundation";
 
 describe("project registry", () => {
   test("persists and removes trusted project roots through Mastra storage", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     const now = new Date("2026-08-06T00:00:00.000Z");
     try {
       await foundation.appStorage.init();
