@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const appSource = readFileSync(join(import.meta.dir, "App.tsx"), "utf8");
-const providerSource = readFileSync(join(import.meta.dir, "ProviderSettings.tsx"), "utf8");
+const providerSource = readFileSync(join(import.meta.dir, "components/ProviderSettings.tsx"), "utf8");
 const cssSource = readFileSync(join(import.meta.dir, "index.css"), "utf8");
 
 describe("Settings provider and model UI", () => {

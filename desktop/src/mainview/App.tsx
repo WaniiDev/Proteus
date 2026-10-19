@@ -3,25 +3,25 @@ import { ArrowDown, ArrowRight, Brain, Check, ChevronDown, Copy, Globe, HardDriv
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatEvent, ChatMessage, DiagnosticEntry, DiagnosticsSnapshot, InteractionResponseResult, MemoryScope, ProviderModel, OrbState, PendingInteraction, RuntimeError, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkbenchTask, WorkspaceBinding } from "../shared/contracts";
-import { ORB_STATES } from "./orb-spec";
-import { mountOrb, type OrbFX } from "./orb3d";
-import { rpc } from "./bridge";
-import { createRuntimeSnapshotTransport } from "./runtime-snapshot-transport";
-import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime } from "./ui-helpers";
-import { interactionSubmissionUi, type InteractionSubmissionAction } from "./interaction-ui";
-import { InteractionActions, InteractionFrame, interactionVariant } from "./InteractionPrimitives";
-import { deriveOrbSteadyState, recoveryGate } from "./orb-state";
-import { Sidebar, type View } from "./Sidebar";
-import { ToolTimeline } from "./ToolTimeline";
-import { ContextPane, type ContextPaneTab } from "./ContextPane";
-import { reconcileQueuedDrafts, selectedProviderCanChat, type QueuedDraft } from "./composer-ui";
-import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform, type OrbPlacement } from "./orb-motion";
-import { MemorySettingsPanel } from "./MemorySettingsPanel";
-import { ProjectsView } from "./ProjectsView";
-import { Composer } from "./Composer";
-import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "./model-sorting";
-import { PROVIDER_LOGOS } from "./provider-assets";
-import { ProviderSettings } from "./ProviderSettings";
+import { ORB_STATES } from "./orb/orb-spec";
+import { mountOrb, type OrbFX } from "./orb/orb3d";
+import { rpc } from "./lib/bridge";
+import { createRuntimeSnapshotTransport } from "./lib/runtime-snapshot-transport";
+import { groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime } from "./lib/ui-helpers";
+import { interactionSubmissionUi, type InteractionSubmissionAction } from "./lib/interaction-ui";
+import { InteractionActions, InteractionFrame, interactionVariant } from "./components/InteractionPrimitives";
+import { deriveOrbSteadyState, recoveryGate } from "./orb/orb-state";
+import { Sidebar, type View } from "./components/Sidebar";
+import { ToolTimeline } from "./components/ToolTimeline";
+import { ContextPane, type ContextPaneTab } from "./components/ContextPane";
+import { reconcileQueuedDrafts, selectedProviderCanChat, type QueuedDraft } from "./lib/composer-ui";
+import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform, type OrbPlacement } from "./orb/orb-motion";
+import { MemorySettingsPanel } from "./components/MemorySettingsPanel";
+import { ProjectsView } from "./views/ProjectsView";
+import { Composer } from "./components/Composer";
+import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "./lib/model-sorting";
+import { PROVIDER_LOGOS } from "./lib/provider-assets";
+import { ProviderSettings } from "./components/ProviderSettings";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   revision: 0,
