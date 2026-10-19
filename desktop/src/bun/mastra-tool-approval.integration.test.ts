@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { RequestContext } from "@mastra/core/request-context";
@@ -9,6 +8,9 @@ import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { z } from "zod";
 import { createProteusStorage } from "./mastra-foundation";
+
+// `ai` bundles its own @ai-sdk/provider copy, so derive the chunk type from its mock instead of importing a second copy.
+type LanguageModelV3StreamPart = Extract<NonNullable<ConstructorParameters<typeof MockLanguageModelV3>[0]>["doStream"], { stream: unknown }>["stream"] extends ReadableStream<infer P> ? P : never;
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
