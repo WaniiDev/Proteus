@@ -1,3 +1,4 @@
+// Legacy pre-v2 data migration (kept 2026-10-19): remove once no install can still hold pre-v2 data.
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 

@@ -6,6 +6,7 @@ import type { CredentialStore, OAuthCredential, OAuthCredentials } from "@mastra
 
 const SERVICE = "com.proteus.companion";
 const OPENROUTER_ACCOUNT = "openrouter.api-key";
+// Legacy pre-v2 data migration (kept 2026-10-19): remove once no install can still hold pre-v2 data.
 const LEGACY_OPENROUTER_ACCOUNT = "openrouter";
 const CODEX_ACCOUNT = "openai-codex.oauth";
 const CODEX_CHUNK_PREFIX = `${CODEX_ACCOUNT}.chunk`;

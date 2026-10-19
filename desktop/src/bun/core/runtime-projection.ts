@@ -43,6 +43,7 @@ export function projectedMessageId(message: StoredMessageIdentity, projectedRole
   return typeof candidate === "string" && candidate.trim() ? candidate.trim() : message.id;
 }
 
+// Legacy pre-v2 data migration (kept 2026-10-19): remove once no install can still hold pre-v2 data.
 const LEGACY_TASK_POLICY_MESSAGES = new Set([
   "This exact task mutation already ran. Use the current task state and continue without repeating it.",
   "Task tools made no progress repeatedly. Stop using task tools and answer the user with the current result.",
@@ -81,6 +82,7 @@ function completedTaskCheckKey(part: ChatToolPart): string | null {
  * read projection: durable Mastra history remains untouched, and native task
  * errors continue to render.
  */
+// Legacy pre-v2 data migration (kept 2026-10-19): remove once no install can still hold pre-v2 data.
 export function normalizeLegacyTaskToolArtifacts(messages: ChatMessage[]): ChatMessage[] {
   const successfulByTurn = new Map<string, Set<string>>();
   const completedChecksByTurn = new Map<string, Set<string>>();
