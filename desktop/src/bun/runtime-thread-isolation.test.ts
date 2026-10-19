@@ -270,6 +270,44 @@ describe("review fixes (WAN-503)", () => {
   });
 });
 
+describe("review fixes: background run clears the shared activeRun (WAN-503)", () => {
+  function runningInA(rt: any, select: (id: string, state: Record<string, unknown>) => void) {
+    select("B", stateB);
+    rt.ctx.runId = "r1";
+    rt.ctx.runThreadId = "A";
+    rt.ctx.snapshot.status = "running";
+    rt.ctx.snapshot.activeRun = { runId: "r1", threadId: "A", status: "running" };
+  }
+
+  test("R2: aborting a run of another thread with nothing to abort returns to idle", () => {
+    const { rt, select } = fixture();
+    runningInA(rt, select);
+    rt.abort();
+    expect(rt.ctx.snapshot.activeRun).toBeNull();
+    expect(rt.ctx.snapshot.status).not.toBe("running");
+  });
+
+  test("R2: the terminal chunk of an aborted background run clears the selected snapshot", () => {
+    const { rt, driver, select } = fixture();
+    runningInA(rt, select);
+    driver.abort = () => true;
+    rt.abort();
+    rt.runs.handleNativeProjection({ ...projection("A"), terminal: "interrupted" }, { type: "abort", payload: {} });
+    expect(rt.ctx.snapshot.activeRun).toBeNull();
+    expect(rt.ctx.snapshot.status).not.toBe("running");
+  });
+
+  test("R2: a stream error of a background run clears the selected snapshot", async () => {
+    const { rt, select } = fixture();
+    runningInA(rt, select);
+    rt.threads.refreshNativeTasks = async () => undefined;
+    rt.runs.handleNativeDriverError(new Error("boom"), "A");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(rt.ctx.snapshot.activeRun).toBeNull();
+    expect(rt.ctx.snapshot.status).not.toBe("running");
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);

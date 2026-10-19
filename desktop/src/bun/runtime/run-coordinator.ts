@@ -109,6 +109,11 @@ export class RunCoordinator {
       });
     }
 
+    // The shared activeRun can still name this run after the user switched away; the terminal chunk must end it.
+    if (projection.terminal && threadId !== this.ctx.selectedThreadId && this.ctx.snapshot.activeRun?.runId === runId) {
+      this.ctx.publish({ status: projection.terminal === "error" ? "error" : this.ctx.idleStatus(), activeRun: null });
+    }
+
     if (projection.terminal) {
       this.continuation.finishContinuation(threadId, runId, projection.terminal);
       this.ctx.releaseRun(runId);
@@ -168,6 +173,8 @@ export class RunCoordinator {
         ...(outcome === "complete" ? { error: null } : error ? { error } : {}),
         workbench: this.threads.workbenchFromState(this.ctx.threadState, null),
       });
+    } else if (this.ctx.snapshot.activeRun?.threadId === threadId) {
+      this.ctx.publish({ status: outcome === "error" ? "error" : this.ctx.idleStatus(), activeRun: null });
     }
   }
 
@@ -439,6 +446,6 @@ export class RunCoordinator {
     this.continuation.clearContinuationTimers();
     this.ctx.releaseRun(runId);
     if (threadId) this.threads.updateThreadActivity(threadId, "interrupted", 0);
-    if (!threadId || this.ctx.selectedThreadId === threadId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, error: this.ctx.runError });
+    if (!threadId || this.ctx.selectedThreadId === threadId || this.ctx.snapshot.activeRun?.runId === runId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, error: this.ctx.runError });
   }
 }
