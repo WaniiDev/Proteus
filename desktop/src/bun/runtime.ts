@@ -3,7 +3,6 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, normalize } from "node:path";
 import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import { Agent } from "@mastra/core/agent";
-import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { MastraCodeGateway } from "@mastra/code-sdk/agents/mastracode-gateway";
@@ -18,10 +17,10 @@ import { Memory } from "@mastra/memory";
 import { createWorkspaceTools, LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ChatEvent, ContinuationState, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, OpenRouterModelId, ProjectSummary, ProviderErrorCode, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, TokenUsage, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceBindingUpdateResult, WorkspaceScopeSummary } from "../shared/contracts";
-import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, SecureStoreUnavailableError, type CodexCredentialStore, type CredentialVault } from "./credentials";
-import { getOpenRouterErrorStatus, isOpenRouterModelId, listOpenRouterTextModels, validateOpenRouterKey } from "./openrouter";
-import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval, reconcileLiveAssistantTurn, submitPlanResolutionResult, type InteractionToolOutcome, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
+import type { ChatMessage, ChatMessagePart, ContinuationState, DiagnosticsSnapshot, InteractionError, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProjectSummary, ProviderId, ProviderModelId, ReasoningEffort, PendingInteraction, RuntimeError, RuntimeSnapshot, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding, WorkspaceBindingUpdateResult, WorkspaceScopeSummary } from "../shared/contracts";
+import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, type CodexCredentialStore, type CredentialVault } from "./credentials";
+import { isOpenRouterModelId, listOpenRouterTextModels, openRouterGateway, validateOpenRouterKey } from "./openrouter";
+import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval, reconcileLiveAssistantTurn, submitPlanResolutionResult, type LiveAssistantProjection, type ProjectedToolOutcome } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { APPROVED_PLAN_TOOLS } from "./plan-workflow-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
@@ -44,297 +43,18 @@ import type { ProjectRegistryStorage, StoredProject } from "./project-registry";
 import { createWorkingTools } from "./working-tools";
 import { createCompatibleWorkspaceTools } from "./workspace-tool-compat";
 import { WorkspaceRegistry } from "./workspace-registry";
-import { toolResultError } from "./tool-result-error";
-import { extractSafeErrorMessage } from "./error-message";
-import { workspaceRuntimeError } from "./runtime-error-mapping";
 import { resolveAskUserResponse } from "./ask-user-response";
 import { compatibleAskUserTool } from "./compatible-ask-user-tool";
 import { ScopedMemoryManager } from "./scoped-memory";
 import { createMemoryTools } from "./memory-tools";
 import { workspaceSelectionBlocker } from "./workspace-selection-policy";
-import { isDeclinedToolResult, MASTRA_TOOL_DECLINED_MESSAGE } from "./tool-decision";
+import { MASTRA_TOOL_DECLINED_MESSAGE } from "./tool-decision";
+import { AGENT_ID, CONTINUATION_PROGRESS_PERSIST_MS, CONTINUATION_RECOVERY_MS, CONTINUATION_SLOW_MS, DEFAULT_MODEL_ID, DEFAULT_MODEL_SELECTION, DEFAULT_PROVIDER_ID, LEGACY_THREAD_METADATA_KEY, MAX_INPUT_LENGTH, RESOURCE_ID, THREAD_METADATA_KEY } from "./runtime/constants";
+import { chatRole, emptyWorkbench, emptyTokenUsage, extractText, isoDate, mapThread, projectMessageParts, sanitizeToolDetail } from "./runtime/message-mapping";
+import type { InteractionResolution, MastraMessage, PersistedThreadState, SnapshotListener } from "./runtime/types";
+import { makeRuntimeError, normalizeError } from "./runtime-error-mapping";
 
-const AGENT_ID = "proteus-text-agent";
-const RESOURCE_ID = "local-user";
-const THREAD_METADATA_KEY = "proteus.ui.v2";
-const LEGACY_THREAD_METADATA_KEY = "proteus.workbench.v1";
-const DEFAULT_MODEL_ID: OpenRouterModelId = "openrouter/auto";
-const DEFAULT_PROVIDER_ID: ProviderId = "openrouter";
-const DEFAULT_MODEL_SELECTION: AppModelSelection = { providerId: DEFAULT_PROVIDER_ID, modelId: DEFAULT_MODEL_ID };
-const MAX_INPUT_LENGTH = 32_000;
-const CONTINUATION_SLOW_MS = 30_000;
-const CONTINUATION_RECOVERY_MS = 120_000;
-const CONTINUATION_PROGRESS_PERSIST_MS = 5_000;
 
-const OPENROUTER_PROVIDER_CONFIG: ProviderConfig = {
-  url: "https://openrouter.ai/api/v1",
-  apiKeyEnvVar: "OPENROUTER_API_KEY",
-  name: "OpenRouter",
-  models: ["auto"],
-  gateway: "models.dev",
-  npm: "@openrouter/ai-sdk-provider",
-};
-
-/** Keep Mastra's model registry scoped to OpenRouter for this product. */
-class ProteusOpenRouterGateway extends ModelsDevGateway {
-  constructor() {
-    super({ openrouter: OPENROUTER_PROVIDER_CONFIG });
-  }
-
-  override async fetchProviders(): Promise<Record<string, ProviderConfig>> {
-    return { openrouter: OPENROUTER_PROVIDER_CONFIG };
-  }
-}
-
-const openRouterGateway = new ProteusOpenRouterGateway();
-
-const USER_FACING_ERRORS: Record<ProviderErrorCode, { message: string; retryable: boolean }> = {
-  "invalid-credential": {
-    message: "That OpenRouter key is invalid or disabled.",
-    retryable: false,
-  },
-  "insufficient-credits": {
-    message: "OpenRouter needs credits before this request can run.",
-    retryable: false,
-  },
-  forbidden: {
-    message: "OpenRouter refused this request for the current account.",
-    retryable: false,
-  },
-  "model-unavailable": {
-    message: "The selected OpenRouter model is unavailable.",
-    retryable: true,
-  },
-  "context-too-large": {
-    message: "This conversation is too large for the selected model. Start a new chat or shorten the message.",
-    retryable: false,
-  },
-  "rate-limited": {
-    message: "OpenRouter is rate-limiting requests. Try again shortly.",
-    retryable: true,
-  },
-  timeout: { message: "OpenRouter took too long to respond.", retryable: true },
-  offline: {
-    message: "OpenRouter could not be reached. Check your connection and retry.",
-    retryable: true,
-  },
-  aborted: { message: "The response was stopped.", retryable: true },
-  busy: { message: "A response is already running.", retryable: true },
-  "secure-store-unavailable": {
-    message: "Windows Credential Manager is unavailable, so Proteus cannot use a key safely.",
-    retryable: false,
-  },
-  "catalog-unavailable": {
-    message: "The OpenRouter model catalog could not be refreshed.",
-    retryable: true,
-  },
-  "workspace-unavailable": {
-    message: "The selected workspace is unavailable.",
-    retryable: true,
-  },
-  unknown: {
-    message: "The text model could not complete this request.",
-    retryable: true,
-  },
-};
-
-type SnapshotListener = (snapshot: RuntimeSnapshot) => void;
-type MastraMessage = {
-  id: string;
-  role: "user" | "assistant" | "system" | "signal";
-  type?: string;
-  createdAt: Date;
-  content?: unknown;
-  metadata?: { signal?: { type?: string } };
-};
-
-type PersistedThreadState = {
-  workspaceBinding?: WorkspaceBinding;
-  goal?: string;
-  tasks?: WorkbenchTask[];
-  pendingInteractions?: PendingInteraction[];
-  resolvedInteractions?: PendingInteraction[];
-  events?: ChatEvent[];
-  tokenUsage?: TokenUsage;
-  toolOutcomes?: Record<string, ProjectedToolOutcome>;
-  modelSelection?: AppModelSelection;
-  continuation?: ContinuationState | null;
-};
-
-type InteractionResolution = {
-  interaction: PendingInteraction;
-  status: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">;
-  feedback?: string;
-  terminalEvidence?: InteractionToolOutcome;
-};
-
-function isoDate(value: Date | string | number | undefined): string {
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "string" || typeof value === "number") {
-    const date = new Date(value);
-    if (!Number.isNaN(date.valueOf())) return date.toISOString();
-  }
-  return new Date().toISOString();
-}
-
-function extractText(message: MastraMessage): string {
-  const content = message.content;
-  if (!content) return "";
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => (typeof part === "string" ? part : extractPartText(part)))
-      .filter(Boolean)
-      .join("");
-  }
-  if (typeof content !== "object") return "";
-  const record = content as { content?: unknown; parts?: unknown };
-  if (typeof record.content === "string") return record.content;
-  return (Array.isArray(record.parts) ? record.parts : [])
-    .map((part) => extractPartText(part))
-    .filter(Boolean)
-    .join("");
-}
-
-const SENSITIVE_DETAIL_KEY = /authorization|credential|token|secret|password|cookie|private.?key|api.?key/i;
-
-function sanitizeToolDetail(value: unknown): unknown {
-  const seen = new WeakSet<object>();
-  const visit = (item: unknown, depth: number): unknown => {
-    if (depth > 4) return "[truncated: depth]";
-    if (item === null || typeof item === "number" || typeof item === "boolean") return item;
-    if (typeof item === "string") return item.length > 2_000 ? `${item.slice(0, 2_000)}…[truncated]` : item;
-    if (typeof item === "bigint") return `${item}n`;
-    if (typeof item === "undefined") return "[undefined]";
-    if (typeof item === "function" || typeof item === "symbol") return `[unsupported: ${typeof item}]`;
-    if (typeof item !== "object") return String(item);
-    if (seen.has(item)) return "[cyclic]";
-    seen.add(item);
-    if (Array.isArray(item)) {
-      const values = item.slice(0, 20).map((entry) => visit(entry, depth + 1));
-      if (item.length > 20) values.push(`[truncated: ${item.length - 20} items]`);
-      return values;
-    }
-    const entries = Object.entries(item as Record<string, unknown>)
-      .slice(0, 40)
-      .map(([key, entry]) => [key, SENSITIVE_DETAIL_KEY.test(key) ? "[redacted]" : visit(entry, depth + 1)]);
-    if (Object.keys(item).length > 40) entries.push(["[truncated]", `${Object.keys(item).length - 40} keys`]);
-    return Object.fromEntries(entries);
-  };
-  const safe = visit(value, 0);
-  const json = JSON.stringify(safe);
-  return json.length <= 8_192 ? safe : { preview: `${json.slice(0, 8_000)}…`, truncated: true };
-}
-
-function toolLabel(name: string): string {
-  const labels: Record<string, string> = {
-    ask_user: "Asked for input",
-    submit_plan: "Submitted plan",
-    task_write: "Created task list",
-    task_update: "Updated task",
-    task_complete: "Completed task",
-    task_check: "Checked task progress",
-  };
-  return labels[name] ?? name.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function detailSummary(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "string") return value.replace(/\s+/g, " ").trim().slice(0, 140) || undefined;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const candidate = [record.summary, record.message, record.content, record.result].find((entry) => typeof entry === "string") as string | undefined;
-    if (candidate) return candidate.replace(/\s+/g, " ").trim().slice(0, 140);
-  }
-  return undefined;
-}
-
-function toolPart(part: unknown, messageId: string, index: number): ChatToolPart | null {
-  if (!part || typeof part !== "object") return null;
-  const record = part as Record<string, unknown>;
-  let name: unknown;
-  let callId: unknown;
-  let input: unknown;
-  let output: unknown;
-  let rawStatus: unknown;
-  let error: unknown;
-  let approval: unknown;
-  if (record.type === "tool-invocation" && record.toolInvocation && typeof record.toolInvocation === "object") {
-    const invocation = record.toolInvocation as Record<string, unknown>;
-    name = invocation.toolName;
-    callId = invocation.toolCallId;
-    input = invocation.args;
-    output = invocation.result;
-    rawStatus = invocation.state;
-    approval = invocation.approval;
-  } else if (typeof record.type === "string" && record.type.startsWith("tool-")) {
-    name = record.toolName ?? record.type.slice(5);
-    callId = record.toolCallId;
-    input = record.input ?? record.args;
-    output = record.output ?? record.result;
-    rawStatus = record.state ?? record.status;
-    error = record.errorText ?? record.error;
-    approval = record.approval;
-  } else return null;
-  if (typeof name !== "string") return null;
-  const statusText = String(rawStatus ?? "running").toLowerCase();
-  const structuredError = toolResultError(output);
-  const isError = Boolean(error) || Boolean(structuredError);
-  const declined = isDeclinedToolResult({ state: rawStatus, approval, output });
-  const status: ChatToolPart["status"] = declined ? "declined" : isError ? "error" : /result|output-available|complete|success/.test(statusText) ? "completed" : /approval|suspend|waiting/.test(statusText) ? "waiting" : /cancel/.test(statusText) ? "cancelled" : /partial|input-stream/.test(statusText) ? "streaming_input" : "running";
-  const toolCallId = typeof callId === "string" && callId ? callId : `${messageId}:tool:${index}`;
-  const safeInput = input === undefined ? undefined : sanitizeToolDetail(input);
-  const safeOutput = output === undefined ? undefined : sanitizeToolDetail(output);
-  return {
-    type: "tool",
-    id: `${messageId}:tool:${toolCallId}`,
-    toolCallId,
-    name,
-    label: toolLabel(name),
-    status,
-    inputSummary: detailSummary(safeInput),
-    outputSummary: detailSummary(safeOutput),
-    input: safeInput,
-    output: safeOutput,
-    error: error === undefined ? structuredError : String(error).slice(0, 2_000),
-  };
-}
-
-function projectMessageParts(message: MastraMessage): ChatMessagePart[] {
-  const content = message.content;
-  const raw = Array.isArray(content) ? content : content && typeof content === "object" && Array.isArray((content as { parts?: unknown }).parts) ? (content as { parts: unknown[] }).parts : [content];
-  return raw.flatMap((part, index): ChatMessagePart[] => {
-    const text = extractPartText(part);
-    if (text) return [{ type: "text", id: `${message.id}:text:${index}`, text }];
-    if (part && typeof part === "object" && (part as { type?: unknown }).type === "source-url") {
-      const source = part as { sourceId?: unknown; url?: unknown; title?: unknown };
-      if (typeof source.sourceId === "string" && source.sourceId && typeof source.url === "string") {
-        return [{ type: "source-url", id: `${message.id}:source:${index}`, sourceId: source.sourceId, url: source.url, ...(typeof source.title === "string" ? { title: source.title } : {}) }];
-      }
-    }
-    const tool = toolPart(part, message.id, index);
-    return tool ? [tool] : [];
-  });
-}
-
-function extractPartText(part: unknown): string {
-  if (typeof part === "string") return part;
-  if (!part || typeof part !== "object") return "";
-  const record = part as { type?: unknown; text?: unknown; content?: unknown };
-  if (record.type !== undefined && record.type !== "text") return "";
-  return typeof record.text === "string" ? record.text : typeof record.content === "string" ? record.content : "";
-}
-
-function chatRole(message: MastraMessage): ChatMessage["role"] | null {
-  if (message.role === "assistant") return "assistant";
-  if (message.role === "user") return "user";
-  if (message.role === "signal") {
-    const content = message.content;
-    const contentMetadata = content && typeof content === "object" && !Array.isArray(content) ? (content as { metadata?: { signal?: { type?: string } } }).metadata : undefined;
-    if (contentMetadata?.signal?.type === "user" || message.metadata?.signal?.type === "user") return "user";
-  }
-  return null;
-}
 
 function productModelFromSession(value: string | undefined): ProviderModelId {
   if (value && isOpenRouterModelId(value)) return value;
@@ -347,95 +67,12 @@ function codexThinkingLevel(value: ReasoningEffort | null): ThinkingLevel {
   return value === "low" || value === "high" || value === "xhigh" ? value : "medium";
 }
 
-function makeRuntimeError(code: ProviderErrorCode): RuntimeError {
-  const details = USER_FACING_ERRORS[code];
-  return { code, message: details.message, retryable: details.retryable };
-}
-
-function findStatus(error: unknown): number | undefined {
-  const direct = getOpenRouterErrorStatus(error);
-  if (direct !== undefined) return direct;
-  if (error && typeof error === "object") {
-    const record = error as {
-      statusCode?: unknown;
-      response?: { status?: unknown };
-      cause?: unknown;
-    };
-    if (typeof record.statusCode === "number") return record.statusCode;
-    if (typeof record.response?.status === "number") return record.response.status;
-    if (record.cause !== undefined) return findStatus(record.cause);
-  }
-  return undefined;
-}
-
-function findMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string") {
-    return (error as { message: string }).message;
-  }
-  return "";
-}
-
-function normalizeError(error: unknown): RuntimeError {
-  if (error && typeof error === "object" && "code" in error && "message" in error && "retryable" in error) {
-    return error as RuntimeError;
-  }
-  if (error instanceof SecureStoreUnavailableError) return makeRuntimeError("secure-store-unavailable");
-  const workspaceError = workspaceRuntimeError(error);
-  if (workspaceError) return workspaceError;
-
-  const status = findStatus(error);
-  if (status === 401) return makeRuntimeError("invalid-credential");
-  if (status === 402) return makeRuntimeError("insufficient-credits");
-  if (status === 403) return makeRuntimeError("forbidden");
-  if (status === 404) return makeRuntimeError("model-unavailable");
-  if (status === 408) return makeRuntimeError("timeout");
-  if (status === 429) return makeRuntimeError("rate-limited");
-  if (status === 400 && /context|token|length/i.test(findMessage(error))) return makeRuntimeError("context-too-large");
-  if (status && status >= 500) return makeRuntimeError("offline");
-
-  const message = findMessage(error);
-  if (/no verified|api key|credential/i.test(message)) return makeRuntimeError("invalid-credential");
-  if (/abort|cancel/i.test(message)) return makeRuntimeError("aborted");
-  if (/network|fetch|connect|socket|offline|timed out/i.test(message)) return makeRuntimeError("offline");
-  const safeMessage = extractSafeErrorMessage(error, "");
-  return safeMessage ? { code: "unknown", message: safeMessage, retryable: true } : makeRuntimeError("unknown");
-}
-
-function mapThread(thread: { id: string; title?: string | null; createdAt: Date; updatedAt: Date; metadata?: Record<string, unknown> | null }): ThreadSummary {
-  const rawState = thread.metadata?.[THREAD_METADATA_KEY] ?? thread.metadata?.[LEGACY_THREAD_METADATA_KEY];
-  const binding = rawState && typeof rawState === "object" && !Array.isArray(rawState) && "workspaceBinding" in rawState
-    ? (rawState as PersistedThreadState).workspaceBinding ?? { kind: "app" as const }
-    : { kind: "app" as const };
-  return {
-    id: thread.id,
-    title: thread.title?.trim() || "New chat",
-    createdAt: isoDate(thread.createdAt),
-    updatedAt: isoDate(thread.updatedAt),
-    activity: "idle",
-    attention: 0,
-    workspace: { binding, label: binding.kind === "app" ? "Proteus workspace" : "Project", availability: "ready" },
-  };
-}
-
-function emptyTokenUsage(): TokenUsage {
-  return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-}
 
 function uiStateOf(state: PersistedThreadState): PersistedThreadState {
   const { tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes, ...uiState } = state;
   return structuredClone(uiState);
 }
 
-function emptyWorkbench(): WorkbenchState {
-  return {
-    status: "idle",
-    tasks: [],
-    pendingInteractions: [],
-    queuedFollowUpCount: 0,
-    tokenUsage: emptyTokenUsage(),
-  };
-}
 
 export class TextRuntime {
   private readonly vault: CredentialVault;

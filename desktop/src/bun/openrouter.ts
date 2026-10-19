@@ -1,3 +1,4 @@
+import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import type { OpenRouterModel, OpenRouterModelId, ProviderErrorCode } from "../shared/contracts";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -152,3 +153,25 @@ export function getOpenRouterErrorStatus(error: unknown): number | undefined {
   if (typeof record.statusCode === "number") return record.statusCode;
   return typeof record.response?.status === "number" ? record.response.status : undefined;
 }
+
+export const OPENROUTER_PROVIDER_CONFIG: ProviderConfig = {
+  url: "https://openrouter.ai/api/v1",
+  apiKeyEnvVar: "OPENROUTER_API_KEY",
+  name: "OpenRouter",
+  models: ["auto"],
+  gateway: "models.dev",
+  npm: "@openrouter/ai-sdk-provider",
+};
+
+/** Keep Mastra's model registry scoped to OpenRouter for this product. */
+export class ProteusOpenRouterGateway extends ModelsDevGateway {
+  constructor() {
+    super({ openrouter: OPENROUTER_PROVIDER_CONFIG });
+  }
+
+  override async fetchProviders(): Promise<Record<string, ProviderConfig>> {
+    return { openrouter: OPENROUTER_PROVIDER_CONFIG };
+  }
+}
+
+export const openRouterGateway = new ProteusOpenRouterGateway();

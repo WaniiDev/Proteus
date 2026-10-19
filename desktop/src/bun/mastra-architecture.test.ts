@@ -1,14 +1,21 @@
 import { describe, expect, it } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const sourceRoot = join(import.meta.dir, "..");
 
+/** The runtime facade plus every module split out of it (WAN-502). */
+async function readRuntimeSources(): Promise<string> {
+  const folder = join(sourceRoot, "bun", "runtime");
+  const files = [join(sourceRoot, "bun", "runtime.ts"), ...(await readdir(folder)).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).map((name) => join(folder, name))];
+  return (await Promise.all(files.map((path) => readFile(path, "utf8")))).join("\n");
+}
+
 describe("Mastra-first architecture boundaries", () => {
   it("does not reintroduce custom plan tools or follow-up queue RPCs", async () => {
     const [runtime, registry, contracts, bunEntry, app] = await Promise.all([
-      readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
+      readRuntimeSources(),
       readFile(join(sourceRoot, "bun", "workspace-registry.ts"), "utf8"),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
       readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
@@ -58,7 +65,7 @@ describe("Mastra-first architecture boundaries", () => {
 
   it("keeps workspace roots server-owned and allows rebinding only through the guarded empty-chat contract", async () => {
     const [runtime, contracts, entry] = await Promise.all([
-      readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8"),
+      readRuntimeSources(),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
       readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
     ]);
@@ -72,7 +79,7 @@ describe("Mastra-first architecture boundaries", () => {
   });
 
   it("keeps model selection conversation-owned while retaining a new-chat default", async () => {
-    const runtime = (await readFile(join(sourceRoot, "bun", "runtime.ts"), "utf8")).replaceAll("\r\n", "\n");
+    const runtime = (await readRuntimeSources()).replaceAll("\r\n", "\n");
     expect(runtime).toContain("resolveRememberedModelSelection(\n      nextThreadState.modelSelection,\n      this.preferredModelSelection");
     expect(runtime).toContain("const shouldBackfillModelSelection = !parseAppModelSelection(nextThreadState.modelSelection)");
     expect(runtime).toContain("modelSelection: this.defaultModelSelection()");
