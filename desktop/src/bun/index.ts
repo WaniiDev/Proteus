@@ -238,7 +238,7 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       },
       "chat.interaction.respond": async ({ toolCallId, response }) => {
         const startedAt = performance.now();
-        runtime.traceDiagnostic({ source: "rpc", type: "chat.interaction.respond", phase: "start", toolCallId, payload: { response } });
+        runtime.traceDiagnostic({ source: "rpc", type: "chat.interaction.respond", phase: "start", toolCallId, payload: { responseType: typeof response, responseSize: JSON.stringify(response ?? null).length } });
         try {
           const result = await runtime.respondToInteraction(toolCallId, response);
           runtime.traceDiagnostic({ source: "rpc", type: "chat.interaction.respond", phase: "end", toolCallId, durationMs: performance.now() - startedAt, payload: result });

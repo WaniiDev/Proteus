@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkspaceRegistry } from "./workspace-registry";
@@ -63,6 +63,38 @@ describe("WorkspaceRegistry", () => {
     expect(await registry.index(project, ["src/index.ts"])).toEqual({ indexed: 1 });
     const results = await registry.search(project, "pastel proteus", { mode: "bm25" });
     expect(results[0]?.id).toBe("src/index.ts"); expect(results[0]?.score).toBeGreaterThan(0);
+    await registry.destroy();
+  });
+
+  test("rejects mutations through a junction or symlink that leaves the root", async () => {
+    const { base, project, registry } = await fixture();
+    const outside = join(base, "outside"); await mkdir(outside, { recursive: true });
+    await symlink(outside, join(project, "junction"), "junction");
+    await writeFile(join(project, "src", "a.txt"), "a");
+    await expect(registry.write(project, "junction/new/f.txt", "x")).rejects.toThrow("escapes");
+    await expect(registry.write(project, "junction/f.txt", "x")).rejects.toThrow("escapes");
+    await expect(registry.createDirectory(project, "junction/new")).rejects.toThrow("escapes");
+    await expect(registry.move(project, "src/a.txt", "junction/new/a.txt")).rejects.toThrow("escapes");
+    await expect(registry.copy(project, "src/a.txt", "junction/new/a.txt")).rejects.toThrow("escapes");
+    expect(await readdir(outside)).toEqual([]);
+    await registry.destroy();
+  });
+
+  test("rejects a destination that is itself an existing link", async () => {
+    const { base, project, registry } = await fixture();
+    const outside = join(base, "outside"); await mkdir(outside, { recursive: true });
+    await symlink(outside, join(project, "dest"), "junction");
+    await writeFile(join(project, "src", "a.txt"), "a");
+    await expect(registry.move(project, "src/a.txt", "dest")).rejects.toThrow();
+    await expect(registry.copy(project, "src/a.txt", "dest")).rejects.toThrow();
+    expect(await readFile(join(project, "src", "a.txt"), "utf8")).toBe("a");
+    await registry.destroy();
+  });
+
+  test("still creates missing directories inside the root", async () => {
+    const { project, registry } = await fixture();
+    await registry.write(project, "deep/new/f.txt", "ok");
+    expect(await readFile(join(project, "deep", "new", "f.txt"), "utf8")).toBe("ok");
     await registry.destroy();
   });
 });

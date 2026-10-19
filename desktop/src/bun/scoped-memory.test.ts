@@ -80,4 +80,43 @@ describe("scoped Mastra Working Memory", () => {
       await foundation.appStorage.close();
     }
   });
+
+  test("keeps valid entries and backs up the original when one entry is invalid", async () => {
+    const foundation = createProteusStorage(".", { inMemory: true });
+    try {
+      await foundation.appStorage.init();
+      const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
+      const kept = await manager.create({ kind: "global" }, "preference", "Keep me.", "All conversations");
+      const memory = (manager as unknown as { memory: { getWorkingMemory(i: object): Promise<string>; updateWorkingMemory(i: object): Promise<void> } }).memory;
+      const ids = { threadId: "proteus-memory:global", resourceId: "proteus-memory:global" };
+      const damaged = JSON.stringify({ version: 1, entries: [kept, { id: "bad", category: "nope" }] });
+      await memory.updateWorkingMemory({ ...ids, workingMemory: damaged });
+
+      await manager.create({ kind: "global" }, "goal", "New one.", "All conversations");
+      await manager.setEnabled(true, []);
+      const contents = (await manager.getState([])).scopes[0]?.entries.map((e) => e.content).sort();
+      expect(contents).toEqual(["Keep me.", "New one."]);
+    } finally {
+      await foundation.appStorage.close();
+    }
+  });
+
+  test("an unreadable document is backed up before being overwritten", async () => {
+    const foundation = createProteusStorage(".", { inMemory: true });
+    try {
+      await foundation.appStorage.init();
+      const manager = new ScopedMemoryManager(foundation.storage, foundation.memorySettings);
+      await manager.create({ kind: "global" }, "preference", "Old.", "All conversations");
+      const memory = (manager as unknown as { memory: { getWorkingMemory(i: object): Promise<string | null>; updateWorkingMemory(i: object): Promise<void>; listThreads(a: object): Promise<{ threads: { id: string }[] }> } }).memory;
+      const ids = { threadId: "proteus-memory:global", resourceId: "proteus-memory:global" };
+      await memory.updateWorkingMemory({ ...ids, workingMemory: JSON.stringify({ version: 2, entries: [] }) });
+      await manager.create({ kind: "global" }, "goal", "Fresh.", "All conversations");
+      const backup = (await memory.listThreads({ filter: { resourceId: undefined } as never }).catch(() => ({ threads: [] }))).threads.find((t) => t.id.includes("corrupt"));
+      expect(backup).toBeDefined();
+      const raw = await memory.getWorkingMemory({ threadId: backup!.id, resourceId: backup!.id });
+      expect(raw).toContain('"version":2');
+    } finally {
+      await foundation.appStorage.close();
+    }
+  });
 });
