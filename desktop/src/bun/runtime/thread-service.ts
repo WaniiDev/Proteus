@@ -77,7 +77,8 @@ export class ThreadService {
   /** Cache a freshly reconciled state, unless a background update landed meanwhile: that one is newer. */
   private settleLoadedState(threadId: string, startedWith: PersistedThreadState | undefined, reconciled: PersistedThreadState): PersistedThreadState {
     const current = this.ctx.threadStateCache.get(threadId);
-    if (current !== startedWith) return structuredClone(current!);
+    // An entry deleted mid-load stays deleted: return this load's result without re-caching a gone thread.
+    if (current !== startedWith) return structuredClone(current ?? reconciled);
     this.ctx.threadStateCache.set(threadId, uiStateOf(reconciled));
     if (!startedWith) this.savedState.set(threadId, uiStateOf(reconciled));
     return structuredClone(reconciled);
@@ -328,7 +329,17 @@ export class ThreadService {
     const wantedThreadId = options.threadId ?? this.ctx.selectedThreadId;
     const activeThreadId = wantedThreadId && threads.some((thread) => thread.id === wantedThreadId) ? wantedThreadId : threads[0].id;
     if (selectionGeneration !== this.ctx.threadSelectionGeneration || syncGeneration !== this.ctx.threadStateSyncGeneration || (this.ctx.pendingThreadSelectionId !== null && this.ctx.pendingThreadSelectionId !== activeThreadId)) return;
-    const nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
+    // List first: a thread whose metadata cannot be read must not hide the others or abort startup.
+    this.ctx.publish({ threads });
+    let nextThreadState: PersistedThreadState;
+    try {
+      nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
+    } catch (error) {
+      this.diagnostics.record({ source: "storage", type: "thread_state_load", phase: "error", threadId: activeThreadId, payload: error });
+      if (selectionGeneration !== this.ctx.threadSelectionGeneration || syncGeneration !== this.ctx.threadStateSyncGeneration) return;
+      this.keepSelectionAfterLoadFailure(threads);
+      return;
+    }
     if (selectionGeneration !== this.ctx.threadSelectionGeneration || syncGeneration !== this.ctx.threadStateSyncGeneration || (this.ctx.pendingThreadSelectionId !== null && this.ctx.pendingThreadSelectionId !== activeThreadId)) return;
     for (const [id, optimistic] of this.ctx.optimisticUserMessages) {
       if (optimistic.threadId !== activeThreadId) this.ctx.optimisticUserMessages.delete(id);
@@ -382,6 +393,24 @@ export class ThreadService {
       selectionGeneration,
       syncGeneration,
     });
+  }
+
+  /** The target thread could not be loaded: keep the previous selection, or clear it when that thread is gone, and surface the error. */
+  private keepSelectionAfterLoadFailure(threads: ThreadSummary[]): void {
+    const error = { code: "unknown" as const, message: "This conversation could not be loaded. Select it again to retry.", retryable: true };
+    if (this.ctx.selectedThreadId && threads.some((thread) => thread.id === this.ctx.selectedThreadId)) {
+      this.ctx.publish({ error });
+      return;
+    }
+    this.ctx.selectedThreadId = null;
+    this.ctx.threadState = {};
+    this.ctx.publish({ activeThreadId: null, messages: [], events: [], interactions: [], continuation: null, workbench: this.workbenchFromState({}, null), error });
+  }
+
+  /** Drop everything cached for a thread that no longer exists. */
+  forgetThread(threadId: string): void {
+    this.ctx.threadStateCache.delete(threadId);
+    this.savedState.delete(threadId);
   }
 
   private enqueueThreadSwitch(operation: () => Promise<void>): Promise<void> {
@@ -457,7 +486,7 @@ export class ThreadService {
     await this.ctx.ensureInitialized();
     if (this.ctx.startingRun || this.ctx.runId) throw makeRuntimeError("busy");
     await this.threadRepo.delete(threadId);
-    this.ctx.threadStateCache.delete(threadId);
+    this.forgetThread(threadId);
     this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
     const remaining = (await this.threadRepo.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
