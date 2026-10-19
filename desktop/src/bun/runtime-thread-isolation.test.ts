@@ -393,6 +393,29 @@ describe("review fixes: createThread (WAN-503)", () => {
   });
 });
 
+describe("review fixes: retry clone (WAN-503)", () => {
+  const message = (id: string, role: string, text: string) => ({ id, role, content: { format: 2, parts: [{ type: "text", text }] }, createdAt: new Date(0) });
+
+  test("R7: a queue failure after cloning removes the clone and reselects the source thread", async () => {
+    const { rt, driver, select } = fixture();
+    select("A", stateA);
+    const deleted: string[] = [];
+    let cloned = false;
+    Object.assign(rt.threads.threadRepo, {
+      recall: async () => [message("u1", "user", "hello"), message("a1", "assistant", "hi")],
+      list: async () => [threadRow("A"), threadRow("B"), ...(cloned && !deleted.includes("clone") ? [threadRow("clone")] : [])],
+      delete: async (id: string) => { deleted.push(id); },
+    });
+    rt.runs.memory.cloneThread = async () => { cloned = true; return { thread: threadRow("clone") }; };
+    rt.runs.memory.deleteMessages = async () => undefined;
+    driver.queue = async () => { throw new Error("project folder unavailable"); };
+    await expect(rt.runs.retryReserved("a1")).rejects.toThrow("project folder unavailable");
+    expect(deleted).toEqual(["clone"]);
+    expect(rt.ctx.selectedThreadId).toBe("A");
+    expect(rt.ctx.threadStateCache.has("clone")).toBeFalse();
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);

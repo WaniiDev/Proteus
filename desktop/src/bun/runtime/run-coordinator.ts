@@ -295,47 +295,48 @@ export class RunCoordinator {
       resourceId: RESOURCE_ID,
     });
     try {
-    const staleInteractions = sourceState.pendingInteractions ?? [];
-    const retryState: PersistedThreadState = {
-      ...sourceState,
-      pendingInteractions: [],
-      resolvedInteractions: [
-        ...(sourceState.resolvedInteractions ?? []),
-        ...staleInteractions.map((item) => ({
-          ...item,
-          status: "cancelled" as const,
-        })),
-      ],
-    };
-    await this.threads.persistThreadState(retryThread.id, retryState);
-    const retryMessages = await this.threadRepo.recall(retryThread.id) as MastraMessage[];
-    const sourceUserOrdinal = messages.slice(0, sourceIndex + 1).filter((message) => chatRole(message) === "user" && extractText(message) === content).length - 1;
-    let retrySourceIndex = -1;
-    let seenMatchingUser = 0;
-    for (let candidate = 0; candidate < retryMessages.length; candidate += 1) {
-      if (chatRole(retryMessages[candidate]) === "user" && extractText(retryMessages[candidate]) === content) {
-        if (seenMatchingUser === sourceUserOrdinal) {
-          retrySourceIndex = candidate;
-          break;
+      const staleInteractions = sourceState.pendingInteractions ?? [];
+      const retryState: PersistedThreadState = {
+        ...sourceState,
+        pendingInteractions: [],
+        resolvedInteractions: [
+          ...(sourceState.resolvedInteractions ?? []),
+          ...staleInteractions.map((item) => ({
+            ...item,
+            status: "cancelled" as const,
+          })),
+        ],
+      };
+      await this.threads.persistThreadState(retryThread.id, retryState);
+      const retryMessages = await this.threadRepo.recall(retryThread.id) as MastraMessage[];
+      const sourceUserOrdinal = messages.slice(0, sourceIndex + 1).filter((message) => chatRole(message) === "user" && extractText(message) === content).length - 1;
+      let retrySourceIndex = -1;
+      let seenMatchingUser = 0;
+      for (let candidate = 0; candidate < retryMessages.length; candidate += 1) {
+        if (chatRole(retryMessages[candidate]) === "user" && extractText(retryMessages[candidate]) === content) {
+          if (seenMatchingUser === sourceUserOrdinal) {
+            retrySourceIndex = candidate;
+            break;
+          }
+          seenMatchingUser += 1;
         }
-        seenMatchingUser += 1;
       }
-    }
-    if (retrySourceIndex < 0) throw new Error("The retry branch could not recover the original turn");
-    const removeIds = retryMessages.slice(retrySourceIndex).map((message) => message.id);
-    if (removeIds.length > 0) await this.memory.deleteMessages(removeIds);
-    if (this.ctx.startingRunAbortRequested) throw makeRuntimeError("aborted");
+      if (retrySourceIndex < 0) throw new Error("The retry branch could not recover the original turn");
+      const removeIds = retryMessages.slice(retrySourceIndex).map((message) => message.id);
+      if (removeIds.length > 0) await this.memory.deleteMessages(removeIds);
+      if (this.ctx.startingRunAbortRequested) throw makeRuntimeError("aborted");
+      await this.threads.syncThreadState({ threadId: retryThread.id });
+      if (this.ctx.startingRunAbortRequested) throw makeRuntimeError("aborted");
+      this.ctx.retryingText = null;
+      this.ctx.hideSingleRetry = false;
+      return await this.queueNativeMessage(retryThread.id, content, { optimistic: true });
     } catch (error) {
-      // A clone nobody will ever open must not linger as an orphan "· retry" conversation.
+      // A clone nobody will ever open must not linger as an orphan "· retry" conversation, nor stay selected.
       this.ctx.threadStateCache.delete(retryThread.id);
       await this.threadRepo.delete(retryThread.id).catch(() => undefined);
+      if (this.ctx.selectedThreadId === retryThread.id) await this.threads.syncThreadState({ threadId: sourceThreadId }).catch(() => undefined);
       throw error;
     }
-    await this.threads.syncThreadState({ threadId: retryThread.id });
-    if (this.ctx.startingRunAbortRequested) throw makeRuntimeError("aborted");
-    this.ctx.retryingText = null;
-    this.ctx.hideSingleRetry = false;
-    return this.queueNativeMessage(retryThread.id, content, { optimistic: true });
   }
 
   async continueFrom(messageId: string): Promise<{ runId: string }> {
