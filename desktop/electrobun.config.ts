@@ -1,7 +1,5 @@
 import type { ElectrobunConfig } from "electrobun";
 
-const windowsIcon = process.env.PROTEUS_WINDOWS_ICONS_PREPARED === "1" ? undefined : "assets/proteus.ico";
-
 export default {
   app: {
     name: "Proteus",
@@ -32,10 +30,7 @@ export default {
     watchIgnore: ["dist/**"],
     win: {
       bundleCEF: false,
-      // Electrobun 1.18.1's packaged CLI cannot resolve its bundled rcedit.
-      // The project scripts pre-embed this icon into the Windows templates and
-      // disable only the CLI's duplicate pass for prepared invocations.
-      icon: windowsIcon,
+      icon: "assets/proteus.ico",
     },
     mac: {
       bundleCEF: false,
@@ -47,7 +42,7 @@ export default {
     },
   },
   scripts: {
-    // Electrobun 1.18.1 kills only the Windows launcher during watch rebuilds.
+    // Observed on Electrobun 1.18.1 (not re-verified on 2.x): watch rebuilds kill only the Windows launcher.
     // Clean up any surviving bundled child process before it removes the bundle.
     preBuild: "scripts/prepare-electrobun-build.ts",
   },

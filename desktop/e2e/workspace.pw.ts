@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { RequestContext } from "@mastra/core/request-context";
 import { WORKSPACE_TOOLS } from "@mastra/core/workspace";
-import { WorkspaceRegistry } from "../src/bun/workspace-registry";
-import { createCompatibleWorkspaceTools } from "../src/bun/workspace-tool-compat";
+import { WorkspaceRegistry } from "../src/bun/workspace/workspace-registry";
+import { createCompatibleWorkspaceTools } from "../src/bun/workspace/workspace-tool-compat";
 
 test("production workspace services traverse filesystem, search, skills, and native sandbox", async () => {
   const base = await mkdtemp(join(tmpdir(), "proteus-e2e-")); const root = join(base, "fixture"); await mkdir(join(root, "src"), { recursive: true });

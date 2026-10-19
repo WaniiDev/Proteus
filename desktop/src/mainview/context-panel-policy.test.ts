@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 describe("context panel policy", () => {
   it("opens only through explicit user interaction", async () => {
-    const source = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
+    const source = await Bun.file(new URL("./views/Companion.tsx", import.meta.url)).text();
 
     expect(source).not.toContain("autoOpenedContextThreads");
     expect(source).not.toContain("workbenchHasContent");

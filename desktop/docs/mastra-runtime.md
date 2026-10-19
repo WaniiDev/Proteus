@@ -17,6 +17,8 @@ Each conversation has a workspace binding: either the private Proteus app worksp
 
 `RequestContext` carries the trusted thread ID, workspace kind, and canonical root from the Bun runtime into `Agent.queueMessage()` through `ifIdle.streamOptions`. A dynamic `LocalFilesystem` is constructed with `contained: true`, so traversal and symlink escapes outside that root are rejected by Mastra.
 
+`WorkspaceRegistry` (the UI file operations) resolves the nearest existing ancestor of every path, including missing write/move/copy/mkdir destinations, rejects it when it leaves the root, rejects destinations that are themselves symlinks or junctions, and re-checks the parent after `mkdir`.
+
 The filesystem tool allowlist is deny-by-default:
 
 - Read, list, stat, and grep run automatically.
@@ -68,6 +70,22 @@ Historical rendering removes only artifacts emitted by the retired task-loop gua
 OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with each conversation; the most recently chosen combination seeds new conversations without changing existing ones. There is no silent fallback to OpenRouter.
 
 Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: false`. MastraCode owns ChatGPT OAuth and model construction. Credentials remain in Windows Credential Manager and never enter IPC snapshots, messages, diagnostics, thread metadata, or plan files.
+
+## Module layout
+
+`TextRuntime` (`src/bun/runtime.ts`) is a thin facade: it wires Mastra, storage and the services below and keeps the public methods `index.ts` calls. All behaviour lives in `src/bun/runtime/`. Mutable state has exactly one owner, `RuntimeContext`; the services share that instance and keep no copies.
+
+- `context.ts`: the snapshot and its `publish`, selection, per-thread state cache, the single run marker (`runId`/`runThreadId`), optimistic and live-projected messages, pending-interaction bookkeeping, the composer mutation queue.
+- `thread-service.ts`: thread CRUD, selection and the switch queue, `stateFor`/`updateThreadState`, persisted thread state (write queue, rollback), `syncThreadState`/`syncMessages`.
+- `provider-service.ts`: OpenRouter and Codex auth, credential validation, model catalog, model and reasoning selection.
+- `workspace-service.ts`: workspace binding, project registry, the server-owned per-thread `RequestContext`.
+- `memory-service.ts`: scoped durable memory settings and entries.
+- `interaction-service.ts`: `ask_user`, plan and tool-approval responses, resolving and failed bookkeeping, plan hydration.
+- `continuation-service.ts`: a resumed run after a decision: progress, slow and recovery timers (per thread), reconciliation.
+- `run-coordinator.ts`: native stream projection, send, queue, retry, continue and abort.
+- `message-projector.ts`, `message-mapping.ts`: Mastra message to chat message mapping; `agent-factory.ts`: the `Agent` definition; `constants.ts`, `types.ts`: shared constants and types.
+
+Other backend modules are grouped by feature under `src/bun/`: `core/` (projection, error mapping, diagnostics, Mastra foundation, instructions, legacy cutover), `native/` (agent driver, stream projection, thread repository, tool-call guard), `providers/` (OpenRouter, Codex, auth, readiness, model preferences, credentials), `workspace/` (workspace registry and policy, tool compat, project registry), `memory/` (settings, tools, scoped memory) and `tools/` (approval, task and plan policy, tool decisions, working tools, ask-user). Error normalization lives in `core/runtime-error-mapping.ts`; the OpenRouter gateway lives in `providers/openrouter.ts`.
 
 ## Storage and packaging
 
