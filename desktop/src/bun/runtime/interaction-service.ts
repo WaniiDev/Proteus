@@ -5,7 +5,7 @@ import { upsertPendingInteraction, parseSuspendedInteraction, submitPlanResoluti
 import { APPROVED_PLAN_TOOLS } from "../plan-workflow-policy";
 import { RuntimeDiagnostics } from "../core/diagnostics";
 import { approvalFingerprint } from "../approval-policy";
-import { NativeAgentDriver } from "../native-agent-driver";
+import { NativeAgentDriver } from "../native/native-agent-driver";
 import { resolveAskUserResponse } from "../ask-user-response";
 import { MASTRA_TOOL_DECLINED_MESSAGE } from "../tool-decision";
 import type { InteractionResolution } from "./types";

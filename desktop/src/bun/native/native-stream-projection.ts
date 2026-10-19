@@ -1,6 +1,6 @@
-import type { ChatMessage, ChatMessagePart, ChatToolPart } from "../shared/contracts";
-import { toolResultError } from "./tool-result-error";
-import { extractSafeErrorMessage } from "./core/error-message";
+import type { ChatMessage, ChatMessagePart, ChatToolPart } from "../../shared/contracts";
+import { toolResultError } from "../tool-result-error";
+import { extractSafeErrorMessage } from "../core/error-message";
 
 export type NativeAgentChunk = {
   type: string;

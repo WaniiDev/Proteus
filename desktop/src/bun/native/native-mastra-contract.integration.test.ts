@@ -9,7 +9,7 @@ import { submitPlanTool, TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { scriptedStreamingModel, waitFor } from "./native-mastra-test-harness";
-import { APPROVED_PLAN_TOOLS } from "./plan-workflow-policy";
+import { APPROVED_PLAN_TOOLS } from "../plan-workflow-policy";
 import { NativeToolCallGuard } from "./native-tool-call-guard";
 
 const temporaryDirectories: string[] = [];

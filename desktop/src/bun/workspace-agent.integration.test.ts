@@ -6,7 +6,7 @@ import { Agent } from "@mastra/core/agent";
 import { LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { RequestContext } from "@mastra/core/request-context";
 import { createCompatibleWorkspaceTools } from "./workspace-tool-compat";
-import { scriptedStreamingModel } from "./native-mastra-test-harness";
+import { scriptedStreamingModel } from "./native/native-mastra-test-harness";
 
 describe("effective Agent workspace command catalog", () => {
   test("has one authoritative repaired native command tool", async () => {

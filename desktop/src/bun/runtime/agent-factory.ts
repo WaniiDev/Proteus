@@ -15,7 +15,7 @@ import { AGENT_INSTRUCTIONS } from "../core/agent-instructions";
 import { COMMAND_SAFETY_INSTRUCTIONS } from "../command-safety-instructions";
 import { resolveCodexGatewayModel } from "../codex-models";
 import { RuntimeDiagnostics } from "../core/diagnostics";
-import { NativeToolCallGuard } from "../native-tool-call-guard";
+import { NativeToolCallGuard } from "../native/native-tool-call-guard";
 import { createWorkingTools } from "../working-tools";
 import { createCompatibleWorkspaceTools } from "../workspace-tool-compat";
 import { WorkspaceRegistry } from "../workspace-registry";

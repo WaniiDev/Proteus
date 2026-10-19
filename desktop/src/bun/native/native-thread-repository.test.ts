@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Memory } from "@mastra/memory";
-import { createProteusStorage } from "./core/mastra-foundation";
+import { createProteusStorage } from "../core/mastra-foundation";
 import { NativeThreadRepository } from "./native-thread-repository";
 
 describe("native Mastra thread repository", () => {
   test("creates, renames, lists, recalls, and permanently deletes owned threads", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     const memory = new Memory({ storage: foundation.storage, vector: false, options: { lastMessages: 20, semanticRecall: false } });
     const threads = new NativeThreadRepository(memory, "local-user");
 
@@ -23,7 +23,7 @@ describe("native Mastra thread repository", () => {
   });
 
   test("never exposes another resource's threads", async () => {
-    const foundation = createProteusStorage(".", { inMemory: true });
+    const foundation = createProteusStorage("..", { inMemory: true });
     const memory = new Memory({ storage: foundation.storage, vector: false });
     const local = new NativeThreadRepository(memory, "local-user");
     const other = new NativeThreadRepository(memory, "other-user");
