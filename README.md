@@ -66,4 +66,4 @@ Other: `desktop/e2e` (Playwright), `desktop/scripts` (Electrobun pre-build), `de
 
 - [desktop/docs/mastra-runtime.md](desktop/docs/mastra-runtime.md): runtime ownership, workspace boundary, approvals, providers, module layout.
 - [HANDOFF.md](HANDOFF.md): current state, constraints and verification.
-- [desktop/docs/adr/](desktop/docs/adr): design decisions — the Island interface (0001) and seamless motion (0002).
+- [desktop/docs/adr/](desktop/docs/adr): design decisions — the Island interface and Tide glass (0001) and seamless, liquid motion (0002).
