@@ -373,6 +373,26 @@ describe("review fixes: loadThreadState (WAN-503)", () => {
   });
 });
 
+describe("review fixes: createThread (WAN-503)", () => {
+  test("R6: the new thread is selected only once it has loaded", async () => {
+    const { rt, select } = fixture();
+    select("A", stateA);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    Object.assign(rt.threads.threadRepo, {
+      create: async () => threadRow("new"),
+      list: async () => { await gate; return [threadRow("A"), threadRow("B"), threadRow("new")]; },
+    });
+    const creating = rt.createThread("fresh");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(rt.ctx.selectedThreadId).toBe("A");
+    release();
+    expect(await creating).toBe("new");
+    expect(rt.ctx.selectedThreadId).toBe("new");
+    expect(rt.ctx.threadStateCache.get("A")).toMatchObject({ workspaceBinding: stateA.workspaceBinding });
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);

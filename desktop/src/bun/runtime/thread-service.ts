@@ -318,7 +318,9 @@ export class ThreadService {
       if (optimistic.threadId !== activeThreadId) this.ctx.optimisticUserMessages.delete(id);
     }
     // Keep the thread we leave in the per-thread cache so background runs still find its state. The
-    // selection changes only here, after the target loaded, so no save can write one thread's state under another id.
+    // selection changes only here (also for a newly created thread), after the target loaded, so no
+    // save can write one thread's state under another id. The cache is the in-memory source of truth
+    // until a write succeeds; persistThreadState rolls an entry back when the store refuses it.
     if (this.ctx.selectedThreadId && this.ctx.selectedThreadId !== activeThreadId && threads.some((thread) => thread.id === this.ctx.selectedThreadId)) this.ctx.threadStateCache.set(this.ctx.selectedThreadId, uiStateOf(this.ctx.threadState));
     this.ctx.selectedThreadId = activeThreadId;
     let modelSelection = resolveRememberedModelSelection(
@@ -396,8 +398,7 @@ export class ThreadService {
     const state: PersistedThreadState = { workspaceBinding, modelSelection: this.defaultModelSelection() };
     const thread = await this.threadRepo.create(title?.trim() || "New chat", { [THREAD_METADATA_KEY]: state });
     this.ctx.threadStateCache.set(thread.id, state);
-    this.ctx.selectedThreadId = thread.id;
-    await this.syncThreadState();
+    await this.syncThreadState({ threadId: thread.id });
     return thread.id;
   }
 
