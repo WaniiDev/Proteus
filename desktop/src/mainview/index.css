@@ -1,3 +1,4 @@
+/* Entry stylesheet: imports proteus.css and sidebar.css, then owns the window shell, composer, tool timeline, settings and workbench styles. */
 @import "./proteus.css";
 @import "./sidebar.css";
 
