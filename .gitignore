@@ -11,3 +11,5 @@ desktop/.env.*
 desktop/*.db
 desktop/*.db-*
 .codex/
+desktop/.hutch/
+desktop/.cottontail-tmp/

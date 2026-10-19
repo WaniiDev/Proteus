@@ -27,21 +27,9 @@ describe("Proteus application icons", () => {
     }
   });
 
-  it("prepares Electrobun's Windows runtime icons before dev and build", async () => {
-    expect(packageJson.scripts.dev).toContain("bun run icon:prepare");
-    expect(packageJson.scripts.start).toContain("bun run icon:prepare");
-    expect(packageJson.scripts.build).toContain("bun run icon:prepare");
-    expect(packageJson.scripts.dev).toContain("PROTEUS_WINDOWS_ICONS_PREPARED=1");
-    expect(packageJson.scripts.start).toContain("PROTEUS_WINDOWS_ICONS_PREPARED=1");
-    expect(packageJson.scripts.build).toContain("PROTEUS_WINDOWS_ICONS_PREPARED=1");
+  it("lets Electrobun embed the Windows icon without project-side rcedit scripts", () => {
     expect(packageJson.scripts.build).toContain("electrobun build --env=stable");
-    expect(packageJson.scripts["icon:prepare"]).toContain("--prepare");
-    expect(packageJson.scripts["icon:embed"]).toContain("--build");
-
-    const embedScript = await Bun.file(new URL("../../scripts/embed-windows-icons.ts", import.meta.url)).text();
-    expect(embedScript).toContain("dist-win-x64");
-    expect(embedScript).toContain("launcher.exe");
-    expect(embedScript).toContain("bun.exe");
+    expect(Object.keys(packageJson.scripts).some((name) => name.startsWith("icon:"))).toBe(false);
   });
 
   it("uses the packaged ICO for the native Windows tray", async () => {
