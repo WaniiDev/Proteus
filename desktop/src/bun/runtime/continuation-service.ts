@@ -38,6 +38,12 @@ export class ContinuationService {
     }
   }
 
+  /** Stop and drop a deleted thread's timers and bookkeeping. */
+  forgetThread(threadId: string): void {
+    this.clearContinuationTimers(threadId);
+    this.tracks.delete(threadId);
+  }
+
   armContinuationTimers(continuation: ContinuationState | null | undefined = this.ctx.threadState.continuation): void {
     this.clearContinuationTimers(continuation?.threadId ?? this.ctx.selectedThreadId);
     if (!continuation) return;
@@ -146,6 +152,11 @@ export class ContinuationService {
     void this.threads.persistThreadState(threadId, next);
   }
 
+  /** The run is settled, so a snapshot still showing it as active (e.g. after switching away) must not keep claiming it. */
+  private clearStaleActiveRun(continuation: ContinuationState): void {
+    if (this.ctx.selectedThreadId !== continuation.threadId && this.ctx.snapshot.activeRun?.runId === continuation.runId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null });
+  }
+
   private continuationHasCompletedHistory(continuation: ContinuationState, messages: ChatMessage[]): boolean {
     const startedAt = Date.parse(continuation.startedAt);
     return messages.some((message) => message.role === "assistant" && message.status === "complete" && Date.parse(message.createdAt) >= startedAt && (message.text.trim().length > 0 || message.parts.some((part) => part.type === "tool" && part.toolCallId === continuation.toolCallId && ["completed", "declined", "cancelled", "error"].includes(part.status))));
@@ -169,6 +180,7 @@ export class ContinuationService {
       }));
       this.clearContinuationTimers(threadId);
       this.ctx.releaseRun(continuation.runId);
+      this.clearStaleActiveRun(continuation);
       if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, continuation: null, interactions: next.pendingInteractions ?? [], workbench: this.threads.workbenchFromState(next, null, null) });
       await this.threads.persistThreadState(threadId, next);
       this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "suspended", threadId, runId: continuation.runId, toolCallId: continuation.toolCallId });
@@ -177,6 +189,7 @@ export class ContinuationService {
     if (this.continuationHasCompletedHistory(continuation, await this.threads.messagesFor(threadId).catch(() => []))) {
       this.finishContinuation(threadId, continuation.runId, "complete");
       this.ctx.releaseRun(continuation.runId);
+      this.clearStaleActiveRun(continuation);
       if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ status: this.ctx.idleStatus(), activeRun: null, error: null });
       return;
     }
@@ -190,6 +203,7 @@ export class ContinuationService {
     this.clearContinuationTimers(threadId);
     const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, continuation: null }));
     this.ctx.releaseRun(continuation.runId);
+    this.clearStaleActiveRun(continuation);
     const error: RuntimeError = { code: "unknown", message: "Proteus could not confirm that the response continued. Retry or continue the original turn.", retryable: true };
     if (this.ctx.selectedThreadId === threadId) this.ctx.publish({ status: "error", activeRun: null, continuation: null, error });
     await this.threads.persistThreadState(threadId, next);

@@ -338,7 +338,8 @@ export class RunCoordinator {
       return await this.queueNativeMessage(retryThread.id, content, { optimistic: true });
     } catch (error) {
       // A clone nobody will ever open must not linger as an orphan "· retry" conversation, nor stay selected.
-      this.ctx.threadStateCache.delete(retryThread.id);
+      this.threads.forgetThread(retryThread.id);
+      this.continuation.forgetThread(retryThread.id);
       await this.threadRepo.delete(retryThread.id).catch(() => undefined);
       if (this.ctx.selectedThreadId === retryThread.id) await this.threads.syncThreadState({ threadId: sourceThreadId }).catch(() => undefined);
       throw error;
