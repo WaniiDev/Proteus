@@ -309,8 +309,11 @@ export class TextRuntime {
   }
 
   async deleteThread(threadId: string): Promise<void> {
-    await this.threads.deleteThread(threadId);
-    this.continuation.forgetThread(threadId);
+    try {
+      await this.threads.deleteThread(threadId);
+    } finally {
+      this.continuation.forgetThread(threadId);
+    }
   }
 
   async send(text: string, clientMessageId?: string): Promise<{ runId: string }> {
