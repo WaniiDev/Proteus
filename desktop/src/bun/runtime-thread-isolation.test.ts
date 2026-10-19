@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { approvalFingerprint } from "./approval-policy";
+import { approvalFingerprint } from "./tools/approval-policy";
 import { parseSuspendedInteraction, parseToolApproval } from "./core/runtime-projection";
 
 // The runtime is a per-process singleton over Electrobun paths; give it a throwaway user-data directory.

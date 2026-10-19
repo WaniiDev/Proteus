@@ -1,6 +1,6 @@
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
-import { isDeclinedToolResult } from "../tool-decision";
-import { toolResultError } from "../tool-result-error";
+import { isDeclinedToolResult } from "../tools/tool-decision";
+import { toolResultError } from "../tools/tool-result-error";
 import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY } from "./constants";
 import type { MastraMessage, PersistedThreadState } from "./types";
 

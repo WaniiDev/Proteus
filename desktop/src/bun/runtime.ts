@@ -7,7 +7,7 @@ import { Utils } from "electrobun/bun";
 import type { DiagnosticsSnapshot, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot, WorkspaceBinding, WorkspaceBindingUpdateResult } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, type CodexCredentialStore, type CredentialVault } from "./providers/credentials";
 import { openRouterGateway } from "./providers/openrouter";
-import { TaskToolPolicy } from "./task-tool-policy";
+import { TaskToolPolicy } from "./tools/task-tool-policy";
 import { cutOverLegacyRuntimeData } from "./core/runtime-cutover";
 import { createProteusCodexCatalogProvider } from "./providers/codex-models";
 import { RuntimeDiagnostics, type DiagnosticInput } from "./core/diagnostics";

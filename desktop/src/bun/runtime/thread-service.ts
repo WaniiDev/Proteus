@@ -3,7 +3,7 @@ import { TASK_STATE_TYPE, type TaskItemSnapshot } from "@mastra/core/tools";
 import { LocalFilesystem } from "@mastra/core/workspace";
 import type { ChatMessage, RuntimeSnapshot, ThreadSummary, WorkbenchState, WorkbenchTask, WorkspaceBinding } from "../../shared/contracts";
 import { upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval } from "../core/runtime-projection";
-import { TaskToolPolicy } from "../task-tool-policy";
+import { TaskToolPolicy } from "../tools/task-tool-policy";
 import { migrateCodexSelection } from "../providers/codex-models";
 import { RuntimeDiagnostics } from "../core/diagnostics";
 import { parseAppModelSelection, resolveRememberedModelSelection, type AppModelSelection } from "../providers/model-preferences";

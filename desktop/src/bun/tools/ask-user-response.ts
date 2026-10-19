@@ -1,4 +1,4 @@
-import type { PendingInteraction } from "../shared/contracts";
+import type { PendingInteraction } from "../../shared/contracts";
 
 type AskUserInteraction = Pick<PendingInteraction, "options" | "selectionMode">;
 
