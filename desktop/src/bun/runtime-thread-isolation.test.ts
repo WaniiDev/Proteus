@@ -156,7 +156,7 @@ describe("runtime thread isolation (WAN-503)", () => {
     select("B", stateB);
     select("A", stateA);
     select("B", stateB);
-    rt.handleNativeProjection(projection("A"), { type: "tool-call-approval", payload: { toolCallId: "t1", toolName: "mastra_workspace_write_file", args: { path: "a.txt" } } });
+    rt.runs.handleNativeProjection(projection("A"), { type: "tool-call-approval", payload: { toolCallId: "t1", toolName: "mastra_workspace_write_file", args: { path: "a.txt" } } });
     expect(rt.ctx.threadState.pendingInteractions ?? []).toEqual([]);
     expect(rt.ctx.snapshot.interactions).toEqual([]);
     expect(rt.ctx.threadStateCache.get("A")?.pendingInteractions?.map((item: { toolCallId: string }) => item.toolCallId)).toEqual(["t1"]);
@@ -168,7 +168,7 @@ describe("runtime thread isolation (WAN-503)", () => {
     const earlier = { ...parseSuspendedInteraction({ toolCallId: "old", toolName: "submit_plan", suspendPayload: { path: "p.md", plan: "# Old" } }, 7)!, status: "approved" as const };
     select("B", { ...stateB, resolvedInteractions: [earlier] });
     rt.ctx.threadStateCache.set("A", structuredClone(stateA));
-    rt.handleNativeProjection(projection("A"), { type: "tool-call-suspended", payload: { toolCallId: "p1", toolName: "submit_plan", suspendPayload: { path: "../outside.md" } } });
+    rt.runs.handleNativeProjection(projection("A"), { type: "tool-call-suspended", payload: { toolCallId: "p1", toolName: "submit_plan", suspendPayload: { path: "../outside.md" } } });
     expect(rt.ctx.threadStateCache.get("A")?.pendingInteractions?.[0]?.plan?.version).toBe(1);
   });
 
@@ -236,9 +236,9 @@ describe("runtime thread isolation (WAN-503)", () => {
     rt.ctx.threadStateCache.set("B", structuredClone(stateB));
     rt.ctx.runId = "r1";
     rt.ctx.runThreadId = "A";
-    rt.handleNativeDriverError(new Error("boom"), "B");
+    rt.runs.handleNativeDriverError(new Error("boom"), "B");
     expect(rt.ctx.runId).toBe("r1");
-    rt.handleNativeDriverError(new Error("boom"), "A");
+    rt.runs.handleNativeDriverError(new Error("boom"), "A");
     expect(rt.ctx.runId).toBeNull();
   });
 

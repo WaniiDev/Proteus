@@ -5,10 +5,9 @@ import { Mastra } from "@mastra/core/mastra";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { Utils } from "electrobun/bun";
-import type { DiagnosticsSnapshot, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProviderId, ProviderModelId, ReasoningEffort, RuntimeError, RuntimeSnapshot, WorkspaceBinding, WorkspaceBindingUpdateResult } from "../shared/contracts";
+import type { DiagnosticsSnapshot, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot, WorkspaceBinding, WorkspaceBindingUpdateResult } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, type CodexCredentialStore, type CredentialVault } from "./credentials";
 import { openRouterGateway } from "./openrouter";
-import { applyToolOutcomes, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval } from "./runtime-projection";
 import { TaskToolPolicy } from "./task-tool-policy";
 import { cutOverLegacyRuntimeData } from "./runtime-cutover";
 import { createProteusCodexCatalogProvider } from "./codex-models";
@@ -17,7 +16,6 @@ import { createProteusStorage, type ProteusStorageFoundation } from "./mastra-fo
 import { ensureProteusAppWorkspace, proteusAppWorkspaceRoot } from "./app-workspace";
 import { NativeThreadRepository } from "./native-thread-repository";
 import { NativeAgentDriver, type NativeQueueAgent } from "./native-agent-driver";
-import type { NativeAgentChunk, NativeStreamProjection } from "./native-stream-projection";
 import { WorkspaceRegistry } from "./workspace-registry";
 import { ScopedMemoryManager } from "./scoped-memory";
 import { MAX_INPUT_LENGTH, RESOURCE_ID } from "./runtime/constants";
@@ -33,6 +31,7 @@ import { InteractionService } from "./runtime/interaction-service";
 import { WorkspaceService } from "./runtime/workspace-service";
 import { ProviderService } from "./runtime/provider-service";
 import { MemoryService } from "./runtime/memory-service";
+import { RunCoordinator } from "./runtime/run-coordinator";
 
 /** Public entry point of the Mastra-backed text runtime; the services in runtime/ own the behaviour. */
 
@@ -54,6 +53,7 @@ export class TextRuntime {
   private readonly workspaces: WorkspaceService;
   private readonly providers: ProviderService;
   private readonly memories: MemoryService;
+  private readonly runs: RunCoordinator;
   private initializePromise: Promise<RuntimeSnapshot> | undefined;
   private shutdownPromise: Promise<void> | null = null;
 
@@ -103,12 +103,12 @@ export class TextRuntime {
     const taskToolPolicy = new TaskToolPolicy();
     const agent = createProteusAgent({ ctx: this.ctx, vault, codexCredentialStore, workspaceRegistry: this.workspaceRegistry, memory, scopedMemory, workspace, taskToolPolicy, diagnostics: this.diagnostics });
     const nativeDriver = new NativeAgentDriver(agent as unknown as NativeQueueAgent, RESOURCE_ID, {
-      onProjection: (projection, chunk) => this.handleNativeProjection(projection, chunk),
+      onProjection: (projection, chunk) => this.runs.handleNativeProjection(projection, chunk),
       onQueueChanged: (threadId) => {
         if (threadId === this.ctx.selectedThreadId) this.ctx.publish({ workbench: this.threads.workbenchFromState(this.ctx.threadState, null) });
       },
-      onError: (error, threadId) => this.handleNativeDriverError(error, threadId),
-      onClose: (threadId, activeRunId) => this.handleNativeDriverClose(threadId, activeRunId),
+      onError: (error, threadId) => this.runs.handleNativeDriverError(error, threadId),
+      onClose: (threadId, activeRunId) => this.runs.handleNativeDriverClose(threadId, activeRunId),
     });
 
     const ctx = this.ctx;
@@ -119,6 +119,7 @@ export class TextRuntime {
     this.interactions = new InteractionService(ctx, { nativeDriver, diagnostics: this.diagnostics, planFilesystem, threads: this.threads, workspaces: this.workspaces, continuation: this.continuation, projector: this.projector });
     this.providers = new ProviderService(ctx, { vault, codexCredentialStore, codexCatalogProvider, modelPreferences, threads: this.threads, abortRun: () => this.abort() });
     this.memories = new MemoryService(ctx, { projects, scopedMemory });
+    this.runs = new RunCoordinator(ctx, { diagnostics: this.diagnostics, threads: this.threads, interactions: this.interactions, continuation: this.continuation });
     this.nativeDriver = nativeDriver;
     this.threadRepo = threadRepo;
     this.memory = memory;
@@ -178,136 +179,6 @@ export class TextRuntime {
 
   traceDiagnostic(input: DiagnosticInput): void {
     this.diagnostics.record(input);
-  }
-
-  private handleNativeProjection(projection: NativeStreamProjection, chunk: NativeAgentChunk): void {
-    const { threadId, runId } = projection;
-    const payload = chunk.payload ?? {};
-    const toolCallId = typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
-    this.diagnostics.record({ source: "mastra", type: chunk.type, threadId, runId, toolCallId, payload: chunk });
-    this.continuation.markContinuationProgress(chunk, threadId, runId);
-
-    if (chunk.type === "start") {
-      if (this.threads.stateFor(threadId).continuation?.runId !== runId) this.ctx.runToolOutcomes.clear();
-      this.ctx.runId = runId;
-      this.ctx.runThreadId = threadId;
-      this.ctx.runOutcome = "streaming";
-      this.ctx.runError = null;
-      this.threads.updateThreadActivity(threadId, "running", 0);
-    }
-
-    if (chunk.type === "tool-call-suspended" && toolCallId && typeof payload.toolName === "string") {
-      this.ctx.nativeSuspensions.set(toolCallId, { runId, threadId });
-      const interaction = parseSuspendedInteraction(
-        { toolCallId, toolName: payload.toolName, suspendPayload: payload.suspendPayload },
-        this.threads.nextPlanVersion(threadId),
-        this.ctx.runClientMessageId ?? undefined,
-      );
-      if (interaction) {
-        const boundInteraction = { ...interaction, threadId, runId, toolName: payload.toolName };
-        const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, pendingInteractions: upsertPendingInteraction(state.pendingInteractions ?? [], boundInteraction) }));
-        if (threadId === this.ctx.selectedThreadId) this.ctx.publish({ interactions: next.pendingInteractions ?? [], workbench: this.threads.workbenchFromState(next, null) });
-      }
-      if (payload.toolName === "submit_plan") {
-        const suspendPayload = payload.suspendPayload && typeof payload.suspendPayload === "object" ? payload.suspendPayload as { path?: unknown } : {};
-        void this.interactions.hydratePlanSuspension(threadId, toolCallId, suspendPayload.path, this.ctx.runClientMessageId ?? undefined);
-      }
-      this.threads.updateThreadActivity(threadId, "waiting", 1);
-    }
-
-    if (chunk.type === "tool-call-approval" && toolCallId && typeof payload.toolName === "string") {
-      this.ctx.nativeSuspensions.set(toolCallId, { runId, threadId });
-      const interaction = parseToolApproval({ threadId, runId, toolCallId, toolName: payload.toolName, args: payload.args });
-      const next = this.threads.updateThreadState(threadId, (state) => ({ ...state, pendingInteractions: upsertPendingInteraction(state.pendingInteractions ?? [], interaction) }));
-      if (threadId === this.ctx.selectedThreadId) this.ctx.publish({ interactions: next.pendingInteractions ?? [], workbench: this.threads.workbenchFromState(next, null) });
-      this.threads.updateThreadActivity(threadId, "waiting", 1);
-    }
-
-    if ((chunk.type === "tool-result" || chunk.type === "tool-error") && toolCallId && this.ctx.runToolOutcomes.get(toolCallId)?.status === "running") this.ctx.runToolOutcomes.delete(toolCallId);
-    if (chunk.type === "tool-result") void this.threads.refreshNativeTasks(threadId);
-
-    const renderedMessage = applyToolOutcomes([projection.message], this.ctx.runToolOutcomes)[0];
-
-    const terminalError = projection.terminal === "error"
-      ? normalizeError(projection.terminalError)
-      : projection.terminal === "interrupted"
-        ? makeRuntimeError("aborted")
-        : null;
-
-    if (threadId === this.ctx.selectedThreadId && (renderedMessage.parts.length > 0 || projection.terminal === "error")) {
-      this.ctx.lastAssistantId = renderedMessage.id;
-      const projectedMessage = terminalError
-        ? { ...renderedMessage, retryable: terminalError.retryable }
-        : renderedMessage;
-      this.ctx.publish({
-        status: projection.terminal === "error" ? "error" : projection.terminal ? this.ctx.idleStatus() : "running",
-        activeRun: projection.terminal ? null : { runId, threadId, status: "running" },
-        messages: upsertChatMessage(this.ctx.snapshot.messages, projectedMessage),
-        ...(projection.terminal === "complete" ? { error: null } : terminalError ? { error: terminalError } : {}),
-        ...(projection.usage ? { workbench: { ...this.threads.workbenchFromState(this.threads.stateFor(threadId), null), tokenUsage: projection.usage } } : {}),
-      });
-    }
-
-    if (projection.terminal) {
-      this.continuation.finishContinuation(threadId, runId, projection.terminal);
-      this.ctx.releaseRun(runId);
-      this.ctx.runOutcome = projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error";
-      this.ctx.runError = terminalError;
-      this.threads.updateThreadActivity(threadId, projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error", 0);
-      void this.settleNativeRun(threadId, projection.terminal, terminalError);
-    }
-  }
-
-  private handleNativeDriverError(error: unknown, threadId: string): void {
-    const normalized = normalizeError(error);
-    this.diagnostics.record({ source: "mastra", type: "stream_consume_error", threadId, runId: this.ctx.runId, payload: error });
-    const continuation = this.threads.stateFor(threadId).continuation;
-    if (continuation) {
-      void this.continuation.reconcileContinuation("stream-error", continuation);
-      return;
-    }
-    // An error from another thread must not end the run that owns the shared marker.
-    if (this.ctx.runThreadId === threadId || !this.ctx.runId) {
-      this.ctx.runOutcome = "error";
-      this.ctx.runError = normalized;
-      this.ctx.runId = null;
-      this.ctx.runThreadId = null;
-    }
-    this.threads.updateThreadActivity(threadId, "error", 0);
-    if (threadId === this.ctx.selectedThreadId) this.ctx.publish({ status: "error", activeRun: null, error: normalized });
-    void this.settleNativeRun(threadId, "error", normalized);
-  }
-
-  private handleNativeDriverClose(threadId: string, activeRunId: string | null): void {
-    this.diagnostics.record({ source: "mastra", type: "stream_closed", threadId, runId: activeRunId ?? this.ctx.runId ?? undefined });
-    const continuation = this.threads.stateFor(threadId).continuation;
-    if (continuation) {
-      void this.continuation.reconcileContinuation("stream-close", continuation);
-      return;
-    }
-    const runId = activeRunId ?? (this.ctx.runId && this.ctx.runThreadId === threadId ? this.ctx.runId : null);
-    if (!runId) return;
-    const error: RuntimeError = { code: "unknown", message: "The response stream closed before Proteus reported a final result.", retryable: true };
-    this.ctx.releaseRun(runId);
-    this.ctx.runOutcome = "error";
-    this.ctx.runError = error;
-    this.threads.updateThreadActivity(threadId, "error", 0);
-    if (threadId === this.ctx.selectedThreadId) this.ctx.publish({ status: "error", activeRun: null, error });
-    void this.settleNativeRun(threadId, "error", error);
-  }
-
-  private async settleNativeRun(threadId: string, outcome: NativeStreamProjection["terminal"], error: RuntimeError | null): Promise<void> {
-    await this.threads.refreshNativeTasks(threadId);
-    await this.threads.syncMessagesSafely(threadId);
-    await this.threads.refreshThreadSummaries();
-    if (threadId === this.ctx.selectedThreadId) {
-      this.ctx.publish({
-        status: outcome === "error" ? "error" : this.ctx.idleStatus(),
-        activeRun: null,
-        ...(outcome === "complete" ? { error: null } : error ? { error } : {}),
-        workbench: this.threads.workbenchFromState(this.ctx.threadState, null),
-      });
-    }
   }
 
   async initialize(): Promise<RuntimeSnapshot> {
