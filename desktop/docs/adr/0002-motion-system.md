@@ -14,6 +14,8 @@ Everything around the orb follows one rule: **no surface appears, disappears or 
 - **Every overlay has an exit.** Menus, modals and toasts leave over 160ms with an ease-in, shorter than they arrived.
 - **Replies are written in.** Each paragraph reveals with a diagonal ink sweep over 900ms instead of fading in as a block.
 - **Selections glide.** Segmented controls use one sliding thumb; Day ↔ Night eases every colour together for one beat; the thread scrolls smoothly.
+- **Pages switch in two beats too.** A destination's own switches (Settings tabs, Memory spaces) move the segmented thumb at once, then the shown content fades up over 160ms before the next rises in on a stagger.
+- **Rows grow and fold.** A row that needs a form grows open below itself the way the Island grows (height only, 520ms, its own line still, content kept mounted so it can fold shut). A removed row fades and folds its height away over 220ms, so the rows below close the gap instead of jumping.
 - **Springs only for what the person caused**; reduced motion resolves everything at once.
 
 ## Liquid transformations
@@ -43,8 +45,9 @@ The tokens (`dur-exit`, `dur-enter`, `dur-reveal`, `dur-morph`, `dur-fly`, `dur-
 
 ## Consequences
 
+- Collapsed row forms, like hidden Island variants, must be inert.
 - Hidden Island variants must be inert: `visibility: hidden` and disabled controls, so they are never focusable or announced.
 - Navigation takes one 160ms exit beat before the next view mounts; anything that measures the old view (the orb flight) must do so in that beat.
-- Reduced motion must stay complete: one still orb frame per state, no flight or pulses, instant Island growth, cross-fades and reveals, no lens ripple, sheen, tension, droplet stretch, wave or ambient drift, with status still carried by colour, marks and words.
+- Reduced motion must stay complete: one still orb frame per state, no flight or pulses, instant Island growth, row expands and folds, page swaps, cross-fades and reveals, no lens ripple, sheen, tension, droplet stretch, wave or ambient drift, with status still carried by colour, marks and words.
 - The lens ripple is SMIL on the filter (`beginElement()`); where SMIL is unavailable the glass simply stays still.
 - The orb’s own tokens (`dur-blend` 460ms, `ease-breathe`, `ease-spring`, `orb-period-*`) keep their original values; changing them is an orb change, not a UI tweak.

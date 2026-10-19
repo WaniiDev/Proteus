@@ -14,6 +14,10 @@ What floats over content or changes shape is made of Tide, our liquid glass: the
 
 We chose this over keeping the Island a solid ink capsule because the glass makes the Island read as one layer above the work rather than a footer, and it lets the orb's colour reach beyond its 44px without adding UI colour.
 
+## Destinations: Page and List
+
+Projects, a project, Memory and Settings share the conversation's 720px column instead of a wider dashboard. Each is a **Page**: a 24px heading, one muted sentence and at most the page's own actions, then grouped **Lists** of 56px rows on one opaque surface. Forms live in the row they belong to: a provider's key field opens under that provider, the memory composer is the first row of its list, a model is a radio row with a check. Explanations that used to be notice banners become the heading's sentence or a footnote under a list, and the one destructive action is a single danger row at the foot. We chose this over the card grids and 32px heads these pages had, because the pages are visited rarely and briefly: one column and one row pattern makes them read as part of the same calm app as the thread, and nothing on them competes with the Island.
+
 ## Considered options
 
 - **A · Still**: one light column, no sidebar, the orb inside the composer, approvals as inline cards. Rejected: hiding history behind an icon made switching conversations slow, and inline cards scroll away from the person mid-run.
@@ -26,6 +30,7 @@ We chose this over keeping the Island a solid ink capsule because the glass make
 - The context pane and its tabs go. The live step list moves into the thread; files, search, memory and details move to their own destinations or the conversation menu.
 - The 68px nav rail becomes the sidebar pane; Projects, Memory and Settings sit at its foot. It carries no brand or orb: the orb appears only on the stage and in the Island, and the window title names the app.
 - The fonts must be bundled with the app: the desktop CSP allows only `font-src 'self'`.
+- Settings, Memory and Projects screens are rebuilt on Page and List (design system `List` component and `heading` type style). Project search is dropped until people have enough projects to need it.
 - Glass costs GPU time: backdrop blur and the SVG lens run on every frame the content behind them changes. Keep at most a few glass surfaces on screen (the Island plus one overlay) and never stack glass on glass. The sidebar pane is translucency only, so it does not count against this.
 - The lens depends on `backdrop-filter: url()`, which Chromium (WebView2, our Windows target) supports and other engines may not; there the glass falls back to blur only. The Island's glass is 86% opaque so its text keeps contrast with or without blur.
 - `prefers-reduced-transparency` turns every glass surface solid and removes the ambient field and caustic.
