@@ -71,6 +71,22 @@ OpenRouter and Codex are alternative primary model providers. The chosen provide
 
 Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: false`. MastraCode owns ChatGPT OAuth and model construction. Credentials remain in Windows Credential Manager and never enter IPC snapshots, messages, diagnostics, thread metadata, or plan files.
 
+## Module layout
+
+`TextRuntime` (`src/bun/runtime.ts`) is a thin facade: it wires Mastra, storage and the services below and keeps the public methods `index.ts` calls. All behaviour lives in `src/bun/runtime/`. Mutable state has exactly one owner, `RuntimeContext`; the services share that instance and keep no copies.
+
+- `context.ts`: the snapshot and its `publish`, selection, per-thread state cache, the single run marker (`runId`/`runThreadId`), optimistic and live-projected messages, pending-interaction bookkeeping, the composer mutation queue.
+- `thread-service.ts`: thread CRUD, selection and the switch queue, `stateFor`/`updateThreadState`, persisted thread state (write queue, rollback), `syncThreadState`/`syncMessages`.
+- `provider-service.ts`: OpenRouter and Codex auth, credential validation, model catalog, model and reasoning selection.
+- `workspace-service.ts`: workspace binding, project registry, the server-owned per-thread `RequestContext`.
+- `memory-service.ts`: scoped durable memory settings and entries.
+- `interaction-service.ts`: `ask_user`, plan and tool-approval responses, resolving and failed bookkeeping, plan hydration.
+- `continuation-service.ts`: a resumed run after a decision: progress, slow and recovery timers (per thread), reconciliation.
+- `run-coordinator.ts`: native stream projection, send, queue, retry, continue and abort.
+- `message-projector.ts`, `message-mapping.ts`: Mastra message to chat message mapping; `agent-factory.ts`: the `Agent` definition; `constants.ts`, `types.ts`: shared constants and types.
+
+Error normalization lives in `runtime-error-mapping.ts`; the OpenRouter gateway lives in `openrouter.ts`.
+
 ## Storage and packaging
 
 The runtime uses `proteus-v3.db`, `proteus-plans-v2`, and the app-owned `proteus-workspace-v1` directory. A one-time allowlisted cutover removes only legacy v1 database/session files. Credential Manager data is untouched.
