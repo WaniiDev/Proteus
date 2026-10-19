@@ -120,7 +120,7 @@ export class WorkspaceRegistry {
       const entries = await readdir(absolute, { withFileTypes: true });
       const result: WorkspaceTreeEntry[] = [];
       for (const entry of entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
-        if ((!includeHidden && entry.name.startsWith(".")) || ["node_modules", "graphify-out", "dist", "build"].includes(entry.name)) continue;
+        if ((!includeHidden && entry.name.startsWith(".")) || ["node_modules", "dist", "build"].includes(entry.name)) continue;
         const rel = [prefix, entry.name].filter(Boolean).join("/"); const absoluteEntry = join(absolute, entry.name); const stat = await lstat(absoluteEntry);
         const kind = stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "directory" : "file";
         result.push({ path: rel, name: entry.name, kind, size: stat.isFile() ? stat.size : undefined, modifiedAt: stat.mtime.toISOString(), children: kind === "directory" && level > 1 ? await walk(absoluteEntry, rel, level - 1) : undefined });
