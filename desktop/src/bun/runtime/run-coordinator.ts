@@ -224,26 +224,31 @@ export class RunCoordinator {
   }
 
   async retry(messageId: string): Promise<{ runId: string }> {
+    return this.withStartReservation("retry", () => this.retryReserved(messageId));
+  }
+
+  async continueFrom(messageId: string): Promise<{ runId: string }> {
+    return this.withStartReservation("continue", () => this.continueReserved(messageId));
+  }
+
+  /** Hold the single starting-run slot (and a placeholder activeRun) while a retry or continue prepares its run. */
+  private async withStartReservation(kind: "retry" | "continue", start: () => Promise<{ runId: string }>): Promise<{ runId: string }> {
     if (this.ctx.startingRun || this.ctx.runId || this.ctx.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
     this.ctx.startingRun = true;
     this.ctx.startingRunAbortRequested = false;
     const reservationThreadId = this.ctx.selectedThreadId ?? this.ctx.snapshot.activeThreadId;
-    const reservationId = reservationThreadId ? `starting:retry:${randomUUID()}` : null;
+    const reservationId = reservationThreadId ? `starting:${kind}:${randomUUID()}` : null;
     this.ctx.startingRunId = reservationId;
     if (reservationId && reservationThreadId) {
       this.ctx.publish({
         status: "running",
-        activeRun: {
-          runId: reservationId,
-          threadId: reservationThreadId,
-          status: "running",
-        },
+        activeRun: { runId: reservationId, threadId: reservationThreadId, status: "running" },
         error: null,
         retryMessageId: null,
       });
     }
     try {
-      return await this.retryReserved(messageId);
+      return await start();
     } finally {
       const abortedBeforeStart = this.ctx.startingRunAbortRequested;
       this.ctx.startingRun = false;
@@ -336,44 +341,6 @@ export class RunCoordinator {
       await this.threadRepo.delete(retryThread.id).catch(() => undefined);
       if (this.ctx.selectedThreadId === retryThread.id) await this.threads.syncThreadState({ threadId: sourceThreadId }).catch(() => undefined);
       throw error;
-    }
-  }
-
-  async continueFrom(messageId: string): Promise<{ runId: string }> {
-    if (this.ctx.startingRun || this.ctx.runId || this.ctx.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
-    this.ctx.startingRun = true;
-    this.ctx.startingRunAbortRequested = false;
-    const reservationThreadId = this.ctx.selectedThreadId ?? this.ctx.snapshot.activeThreadId;
-    const reservationId = reservationThreadId ? `starting:continue:${randomUUID()}` : null;
-    this.ctx.startingRunId = reservationId;
-    if (reservationId && reservationThreadId) {
-      this.ctx.publish({
-        status: "running",
-        activeRun: {
-          runId: reservationId,
-          threadId: reservationThreadId,
-          status: "running",
-        },
-        error: null,
-        retryMessageId: null,
-      });
-    }
-    try {
-      return await this.continueReserved(messageId);
-    } finally {
-      const abortedBeforeStart = this.ctx.startingRunAbortRequested;
-      this.ctx.startingRun = false;
-      this.ctx.startingRunAbortRequested = false;
-      if (this.ctx.startingRunId === reservationId) {
-        this.ctx.startingRunId = null;
-        if (reservationId && this.ctx.runId === null && this.ctx.snapshot.activeRun?.runId === reservationId) {
-          this.ctx.publish({
-            status: this.ctx.idleStatus(),
-            activeRun: null,
-            ...(abortedBeforeStart ? { error: makeRuntimeError("aborted") } : {}),
-          });
-        }
-      }
     }
   }
 

@@ -8,7 +8,6 @@ import type { RuntimeContext } from "./context";
 /** Maps Mastra messages into chat messages and merges optimistic and live-streamed ones. */
 export class MessageProjector {
 
-
   constructor(private readonly ctx: RuntimeContext) {
 
   }

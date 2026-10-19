@@ -34,7 +34,6 @@ import { RunCoordinator } from "./runtime/run-coordinator";
 /** Public entry point of the Mastra-backed text runtime; the services in runtime/ own the behaviour. */
 
 export class TextRuntime {
-
   private readonly ctx = new RuntimeContext();
 
   private readonly diagnostics: RuntimeDiagnostics;
@@ -51,8 +50,6 @@ export class TextRuntime {
   private readonly runs: RunCoordinator;
   private initializePromise: Promise<RuntimeSnapshot> | undefined;
   private shutdownPromise: Promise<void> | null = null;
-
-
 
   constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore()) {
     this.diagnostics = new RuntimeDiagnostics(Utils.paths.userData);
@@ -124,8 +121,6 @@ export class TextRuntime {
       logger: false,
     });
   }
-
-
 
   onSnapshot(listener: SnapshotListener): () => void {
     return this.ctx.onSnapshot(listener);
