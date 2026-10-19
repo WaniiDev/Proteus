@@ -25,6 +25,8 @@ export function uiStateOf(state: PersistedThreadState): PersistedThreadState {
 
 /** Thread CRUD, selection and switching, persisted per-thread state and message sync. */
 export class ThreadService {
+  /** Last state the store accepted per thread; the target a failed save rolls the cache back to. */
+  private readonly savedState = new Map<string, PersistedThreadState>();
   readonly threadWriteQueues = new Map<string, Promise<void>>();
   threadSwitchQueue: Promise<void> = Promise.resolve();
   private readonly projector: MessageProjector;
@@ -77,6 +79,7 @@ export class ThreadService {
     const current = this.ctx.threadStateCache.get(threadId);
     if (current !== startedWith) return structuredClone(current!);
     this.ctx.threadStateCache.set(threadId, uiStateOf(reconciled));
+    if (!startedWith) this.savedState.set(threadId, uiStateOf(reconciled));
     return structuredClone(reconciled);
   }
 
@@ -183,12 +186,14 @@ export class ThreadService {
               },
             });
           }
+          if (thread && memoryStore) this.savedState.set(threadId, next);
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "end", threadId, durationMs: performance.now() - startedAt });
         } catch (error) {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "error", threadId, durationMs: performance.now() - startedAt, payload: error });
           // The cache must not claim state the store never accepted.
           if (this.ctx.threadStateCache.get(threadId) === next) {
-            if (previousCached) this.ctx.threadStateCache.set(threadId, previousCached);
+            const restore = this.savedState.get(threadId) ?? previousCached;
+            if (restore) this.ctx.threadStateCache.set(threadId, restore);
             else this.ctx.threadStateCache.delete(threadId);
           }
           if (failOnError) throw error;

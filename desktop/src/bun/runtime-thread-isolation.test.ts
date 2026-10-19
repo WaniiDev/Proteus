@@ -416,6 +416,20 @@ describe("review fixes: retry clone (WAN-503)", () => {
   });
 });
 
+describe("review fixes: cache rollback (WAN-503)", () => {
+  test("R8: a failed save of a background thread rolls back to the last saved state", async () => {
+    const options = { failWrites: false };
+    const { rt, select } = fixture(options);
+    select("B", stateB);
+    rt.ctx.threadStateCache.set("A", structuredClone(stateA));
+    await rt.threads.persistThreadState("A", stateA);
+    options.failWrites = true;
+    const updated = rt.threads.updateThreadState("A", (state: Record<string, unknown>) => ({ ...state, events: [{ id: "e", type: "system", text: "x", createdAt: "" }] }));
+    await rt.threads.persistThreadState("A", updated);
+    expect(rt.ctx.threadStateCache.get("A")).toEqual(stateA);
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);
