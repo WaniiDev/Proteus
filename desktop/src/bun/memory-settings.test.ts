@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage } from "./core/mastra-foundation";
 
 describe("memory settings storage", () => {
   test("defaults off and persists scope archive metadata", async () => {

@@ -11,7 +11,7 @@ import { WorkspaceRegistry } from "../workspace-registry";
 import { ScopedMemoryManager } from "../scoped-memory";
 import { workspaceSelectionBlocker } from "../workspace-selection-policy";
 import type { PersistedThreadState } from "./types";
-import { makeRuntimeError } from "../runtime-error-mapping";
+import { makeRuntimeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
 import type { ThreadService } from "./thread-service";
 

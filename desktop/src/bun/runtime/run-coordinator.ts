@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { Memory } from "@mastra/memory";
 import type { RuntimeError } from "../../shared/contracts";
-import { applyToolOutcomes, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval } from "../runtime-projection";
-import { RuntimeDiagnostics } from "../diagnostics";
+import { applyToolOutcomes, upsertChatMessage, upsertPendingInteraction, parseSuspendedInteraction, parseToolApproval } from "../core/runtime-projection";
+import { RuntimeDiagnostics } from "../core/diagnostics";
 import { NativeThreadRepository } from "../native-thread-repository";
 import { NativeAgentDriver } from "../native-agent-driver";
 import type { NativeAgentChunk, NativeStreamProjection } from "../native-stream-projection";
 import { MAX_INPUT_LENGTH, RESOURCE_ID } from "./constants";
 import { chatRole, extractText } from "./message-mapping";
 import type { MastraMessage, PersistedThreadState } from "./types";
-import { makeRuntimeError, normalizeError } from "../runtime-error-mapping";
+import { makeRuntimeError, normalizeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
 import type { MessageProjector } from "./message-projector";
 import type { ThreadService } from "./thread-service";

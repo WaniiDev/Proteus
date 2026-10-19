@@ -8,7 +8,7 @@ import { Memory } from "@mastra/memory";
 import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { z } from "zod";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage } from "./core/mastra-foundation";
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage } from "./core/mastra-foundation";
 import { MEMORY_CONTEXT_LIMIT, ScopedMemoryManager } from "./scoped-memory";
 
 const PROJECT = {

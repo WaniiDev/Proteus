@@ -19,8 +19,8 @@ describe("Quickstart-native Mastra foundation", () => {
   });
 
   test("retains and shuts down the registered Mastra application", async () => {
-    const runtimeSource = await Bun.file(new URL("./runtime.ts", import.meta.url)).text();
-    const shellSource = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+    const runtimeSource = await Bun.file(new URL("../runtime.ts", import.meta.url)).text();
+    const shellSource = await Bun.file(new URL("../index.ts", import.meta.url)).text();
 
     expect(runtimeSource).toContain("private readonly mastra: Mastra");
     expect(runtimeSource).toContain("await this.mastra.shutdown()");

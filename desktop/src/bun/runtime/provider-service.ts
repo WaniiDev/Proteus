@@ -8,7 +8,7 @@ import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteus
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "../codex-oauth-failure";
 import { type AppModelSelection, type ModelPreferencesStorage } from "../model-preferences";
 import { DEFAULT_MODEL_ID } from "./constants";
-import { makeRuntimeError, normalizeError } from "../runtime-error-mapping";
+import { makeRuntimeError, normalizeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
 import type { ThreadService } from "./thread-service";
 

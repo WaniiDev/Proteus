@@ -1,6 +1,6 @@
 import { toAISdkV5Messages } from "@mastra/ai-sdk/ui";
 import type { ChatMessage, ChatMessagePart } from "../../shared/contracts";
-import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, reconcileLiveAssistantTurn, type LiveAssistantProjection, type ProjectedToolOutcome } from "../runtime-projection";
+import { applyToolOutcomes, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, projectedMessageId, upsertChatMessage, reconcileLiveAssistantTurn, type LiveAssistantProjection, type ProjectedToolOutcome } from "../core/runtime-projection";
 import { chatRole, extractText, isoDate, projectMessageParts, sanitizeToolDetail } from "./message-mapping";
 import type { MastraMessage } from "./types";
 import type { RuntimeContext } from "./context";

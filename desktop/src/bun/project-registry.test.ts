@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage } from "./core/mastra-foundation";
 
 describe("project registry", () => {
   test("persists and removes trusted project roots through Mastra storage", async () => {

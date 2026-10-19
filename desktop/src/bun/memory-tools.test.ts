@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { RequestContext } from "@mastra/core/request-context";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage } from "./core/mastra-foundation";
 import { createMemoryTools } from "./memory-tools";
 import { ScopedMemoryManager } from "./scoped-memory";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
-import type { ChatMessage, PendingInteraction } from "../shared/contracts";
+import type { ChatMessage, PendingInteraction } from "../../shared/contracts";
 import { applyToolOutcomes, findInteractionToolOutcome, historicalTaskToolOutcomes, normalizeLegacyTaskToolArtifacts, parseSuspendedInteraction, parseToolApproval, projectedMessageId, projectPendingInteractions, projectTasks, projectionMessages, reconcileLiveAssistantTurn, submitPlanDecision, submitPlanResolutionResult, upsertChatMessage, upsertPendingInteraction, type LiveAssistantProjection } from "./runtime-projection";
 
 describe("native approval projection", () => {

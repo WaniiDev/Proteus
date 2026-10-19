@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Memory } from "@mastra/memory";
-import { createProteusStorage } from "./mastra-foundation";
+import { createProteusStorage } from "./core/mastra-foundation";
 import { NativeThreadRepository } from "./native-thread-repository";
 
 describe("native Mastra thread repository", () => {

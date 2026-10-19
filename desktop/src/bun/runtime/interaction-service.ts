@@ -1,15 +1,15 @@
 import { isAbsolute, normalize } from "node:path";
 import { LocalFilesystem } from "@mastra/core/workspace";
 import type { InteractionError, InteractionResponseResult, PendingInteraction } from "../../shared/contracts";
-import { upsertPendingInteraction, parseSuspendedInteraction, submitPlanResolutionResult } from "../runtime-projection";
+import { upsertPendingInteraction, parseSuspendedInteraction, submitPlanResolutionResult } from "../core/runtime-projection";
 import { APPROVED_PLAN_TOOLS } from "../plan-workflow-policy";
-import { RuntimeDiagnostics } from "../diagnostics";
+import { RuntimeDiagnostics } from "../core/diagnostics";
 import { approvalFingerprint } from "../approval-policy";
 import { NativeAgentDriver } from "../native-agent-driver";
 import { resolveAskUserResponse } from "../ask-user-response";
 import { MASTRA_TOOL_DECLINED_MESSAGE } from "../tool-decision";
 import type { InteractionResolution } from "./types";
-import { normalizeError } from "../runtime-error-mapping";
+import { normalizeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
 import type { MessageProjector } from "./message-projector";
 import type { ThreadService } from "./thread-service";

@@ -1,6 +1,6 @@
 import type { AgentControllerDisplayState } from "@mastra/core/agent-controller";
-import type { ChatMessage, ChatToolPart, PendingInteraction, WorkbenchTask } from "../shared/contracts";
-import { APPROVAL_POLICY_VERSION, approvalFingerprint } from "./approval-policy";
+import type { ChatMessage, ChatToolPart, PendingInteraction, WorkbenchTask } from "../../shared/contracts";
+import { APPROVAL_POLICY_VERSION, approvalFingerprint } from "../approval-policy";
 
 type TaskLike = { id?: unknown; content?: unknown; activeForm?: unknown; status?: unknown };
 
@@ -224,7 +224,7 @@ export function submitPlanResolutionResult(decision: "approved" | "rejected", fe
   return {
     content: decision === "approved"
       ? "The user approved the plan. Continue with the approved work."
-      : `The user requested plan changes${feedback ? `: ${feedback}` : "."}`,
+      : `The user requested plan changes${feedback ? `: ${feedback}` : ".."}`,
   };
 }
 

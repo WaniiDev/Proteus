@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { DiagnosticEntry, DiagnosticSource, DiagnosticsSnapshot } from "../shared/contracts";
+import type { DiagnosticEntry, DiagnosticSource, DiagnosticsSnapshot } from "../../shared/contracts";
 
 const MAX_ENTRIES = 2_000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
