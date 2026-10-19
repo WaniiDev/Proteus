@@ -9,8 +9,8 @@ export interface OrbFX {
   dispose(): void;
 }
 
-// These boot values intentionally match app/orb3d.js so the production orb
-// starts with the same framing and liquid character as the prototype.
+// These boot values intentionally match the original prototype so the production orb
+// starts with the same framing and liquid character.
 export const ORB_CAMERA_DISTANCE = 3.15;
 export const ORB_INITIAL_FX = {
   amp: 0.14,
