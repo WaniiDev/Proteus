@@ -39,6 +39,7 @@ export type NativeAgentDriverCallbacks = {
 /** Thin lifecycle bridge over Mastra's native thread subscription and queue. */
 export class NativeAgentDriver {
   private readonly subscriptions = new Map<string, NativeThreadSubscription>();
+  private readonly pendingSubscriptions = new Map<string, Promise<NativeThreadSubscription>>();
   private readonly queuedCounts = new Map<string, number>();
   private readonly projector = new NativeStreamProjector();
 
@@ -63,10 +64,25 @@ export class NativeAgentDriver {
   async ensureSubscription(threadId: string): Promise<NativeThreadSubscription> {
     const existing = this.subscriptions.get(threadId);
     if (existing) return existing;
-    const subscription = await this.agent.subscribeToThread({ resourceId: this.resourceId, threadId });
-    this.subscriptions.set(threadId, subscription);
-    void this.consume(threadId, subscription);
-    return subscription;
+    // Concurrent callers share one subscribe call; a second subscription would leak and double-process chunks.
+    const inFlight = this.pendingSubscriptions.get(threadId);
+    if (inFlight) return inFlight;
+    const pending: Promise<NativeThreadSubscription> = this.agent.subscribeToThread({ resourceId: this.resourceId, threadId }).then((subscription) => {
+      if (this.pendingSubscriptions.get(threadId) !== pending) {
+        // Disposed while subscribing.
+        subscription.unsubscribe();
+        return subscription;
+      }
+      this.pendingSubscriptions.delete(threadId);
+      this.subscriptions.set(threadId, subscription);
+      void this.consume(threadId, subscription);
+      return subscription;
+    }, (error) => {
+      if (this.pendingSubscriptions.get(threadId) === pending) this.pendingSubscriptions.delete(threadId);
+      throw error;
+    });
+    this.pendingSubscriptions.set(threadId, pending);
+    return pending;
   }
 
   abort(threadId: string): boolean {
@@ -118,6 +134,8 @@ export class NativeAgentDriver {
       this.subscriptions.delete(id);
       this.queuedCounts.delete(id);
     }
+    if (threadId) this.pendingSubscriptions.delete(threadId);
+    else this.pendingSubscriptions.clear();
   }
 
   private async consume(threadId: string, subscription: NativeThreadSubscription): Promise<void> {
