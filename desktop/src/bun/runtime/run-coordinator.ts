@@ -332,6 +332,8 @@ export class RunCoordinator {
       if (removeIds.length > 0) await this.memory.deleteMessages(removeIds);
       if (this.ctx.startingRunAbortRequested) throw makeRuntimeError("aborted");
       await this.threads.syncThreadState({ threadId: retryThread.id });
+      // A swallowed load failure leaves the source selected: never run on an unselected clone.
+      if (this.ctx.selectedThreadId !== retryThread.id) throw new Error("The retry branch could not be loaded");
       if (this.ctx.startingRunAbortRequested) throw makeRuntimeError("aborted");
       this.ctx.retryingText = null;
       this.ctx.hideSingleRetry = false;
@@ -341,7 +343,9 @@ export class RunCoordinator {
       this.threads.forgetThread(retryThread.id);
       this.continuation.forgetThread(retryThread.id);
       await this.threadRepo.delete(retryThread.id).catch(() => undefined);
+      // The list may already include the clone, so always republish it; re-select the source only if the clone was selected.
       if (this.ctx.selectedThreadId === retryThread.id) await this.threads.syncThreadState({ threadId: sourceThreadId }).catch(() => undefined);
+      await this.threads.refreshThreadSummaries().catch(() => undefined);
       throw error;
     }
   }

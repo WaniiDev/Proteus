@@ -24,6 +24,8 @@ export function uiStateOf(state: PersistedThreadState): PersistedThreadState {
 }
 
 /** Thread CRUD, selection and switching, persisted per-thread state and message sync. */
+const THREAD_LOAD_FAILED = "This conversation could not be loaded. Select it again to retry.";
+
 export class ThreadService {
   /** Last state the store accepted per thread; the target a failed save rolls the cache back to. */
   private readonly savedState = new Map<string, PersistedThreadState>();
@@ -77,7 +79,7 @@ export class ThreadService {
   /** Cache a freshly reconciled state, unless a background update landed meanwhile: that one is newer. */
   private settleLoadedState(threadId: string, startedWith: PersistedThreadState | undefined, reconciled: PersistedThreadState): PersistedThreadState {
     const current = this.ctx.threadStateCache.get(threadId);
-    // An entry deleted mid-load stays deleted: return this load's result without re-caching a gone thread.
+    // A cached entry deleted mid-load stays deleted: return this load's result without re-caching a gone thread (an uncached thread's delete is not tracked).
     if (current !== startedWith) return structuredClone(current ?? reconciled);
     this.ctx.threadStateCache.set(threadId, uiStateOf(reconciled));
     if (!startedWith) this.savedState.set(threadId, uiStateOf(reconciled));
@@ -397,7 +399,7 @@ export class ThreadService {
 
   /** The target thread could not be loaded: keep the previous selection, or clear it when that thread is gone, and surface the error. */
   private keepSelectionAfterLoadFailure(threads: ThreadSummary[]): void {
-    const error = { code: "unknown" as const, message: "This conversation could not be loaded. Select it again to retry.", retryable: true };
+    const error = { code: "unknown" as const, message: THREAD_LOAD_FAILED, retryable: true };
     if (this.ctx.selectedThreadId && threads.some((thread) => thread.id === this.ctx.selectedThreadId)) {
       this.ctx.publish({ error });
       return;
@@ -444,6 +446,7 @@ export class ThreadService {
     const thread = await this.threadRepo.create(title?.trim() || "New chat", { [THREAD_METADATA_KEY]: state });
     this.ctx.threadStateCache.set(thread.id, state);
     await this.syncThreadState({ threadId: thread.id });
+    if (this.ctx.selectedThreadId !== thread.id) throw new Error(THREAD_LOAD_FAILED);
     return thread.id;
   }
 
@@ -460,6 +463,9 @@ export class ThreadService {
         await this.enqueueThreadSwitch(async () => {
           if (generation !== this.ctx.threadSelectionGeneration) return;
           await this.syncThreadState({ threadId }, generation);
+          // A superseded switch is not a failure; a target that failed to load must not subscribe or be reported as accepted.
+          if (generation !== this.ctx.threadSelectionGeneration) return;
+          if (this.ctx.selectedThreadId !== threadId) throw new Error(THREAD_LOAD_FAILED);
           await this.nativeDriver.ensureSubscription(threadId);
           if (generation === this.ctx.threadSelectionGeneration) this.ctx.pendingThreadSelectionId = null;
         });

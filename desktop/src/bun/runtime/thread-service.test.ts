@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,8 +16,12 @@ beforeAll(async () => {
   ({ TextRuntime } = await import("../runtime"));
 }, 60_000);
 
+// Mastra's storage proxy runs the full schema init inside close(); closing runtimes concurrently contends on the one SQLite file, so close them one at a time.
+afterEach(async () => {
+  for (const runtime of runtimes.splice(0)) await runtime.shutdown().catch(() => undefined);
+});
+
 afterAll(async () => {
-  await Promise.all(runtimes.map((runtime) => runtime.shutdown().catch(() => undefined)));
   await rm(userData, { recursive: true, force: true }).catch(() => undefined);
 });
 
@@ -144,26 +148,69 @@ describe("continuation reconcile (WAN-502)", () => {
 describe("retry clone cleanup (WAN-503)", () => {
   const message = (id: string, role: string, text: string) => ({ id, role, content: { format: 2, parts: [{ type: "text", text }] }, createdAt: new Date(0) });
 
-  test("a state sync failure after cloning removes the clone and every cache entry for it", async () => {
-    const { rt, select, deleted, rows } = fixture();
-    select("A", stateA);
-    Object.assign(rt.threads.threadRepo, { recall: async () => [message("u1", "user", "hello"), message("a1", "assistant", "hi")] });
-    rt.runs.memory.cloneThread = async () => { rows.current = [...rows.current, threadRow("clone")]; return { thread: threadRow("clone") }; };
-    rt.runs.memory.deleteMessages = async () => undefined;
+  function retryFixture() {
+    const f = fixture();
+    f.select("A", stateA);
+    Object.assign(f.rt.threads.threadRepo, { recall: async () => [message("u1", "user", "hello"), message("a1", "assistant", "hi")] });
+    f.rt.runs.memory.cloneThread = async () => { f.rows.current = [...f.rows.current, threadRow("clone")]; return { thread: threadRow("clone") }; };
+    f.rt.runs.memory.deleteMessages = async () => undefined;
+    return f;
+  }
+
+  test("an unreadable clone is removed from the published list and the source stays selected", async () => {
+    const { rt, failing, deleted } = retryFixture();
+    failing.add("clone");
     const sync = rt.threads.syncThreadState.bind(rt.threads);
-    rt.threads.syncThreadState = async (options: { threadId?: string } = {}) => {
-      if (options.threadId === "clone") {
-        rt.threads.savedState.set("clone", {});
-        rt.continuation.track("clone");
-        throw new Error("sync failed");
-      }
-      return sync(options);
-    };
-    await expect(rt.runs.retryReserved("a1")).rejects.toThrow("sync failed");
+    // persistThreadState caches the clone; drop it so the sync really reads the (unreadable) metadata.
+    rt.threads.syncThreadState = async (options: { threadId?: string } = {}) => { rt.ctx.threadStateCache.delete(options.threadId); return sync(options); };
+    rt.threads.savedState.set("clone", {});
+    rt.continuation.track("clone");
+    await expect(rt.runs.retryReserved("a1")).rejects.toThrow("could not be loaded");
     expect(deleted).toEqual(["clone"]);
+    expect(rt.ctx.snapshot.threads.map((thread: { id: string }) => thread.id)).toEqual(["A", "B"]);
     expect(rt.ctx.selectedThreadId).toBe("A");
     expect(rt.ctx.threadStateCache.has("clone")).toBeFalse();
     expect(rt.threads.savedState.has("clone")).toBeFalse();
     expect(rt.continuation.tracks.has("clone")).toBeFalse();
+  });
+
+  test("a one-off clone read failure never starts the run on an unselected clone", async () => {
+    const { rt, failing, deleted, driver } = retryFixture();
+    let queued = 0;
+    driver.queue = async () => { queued += 1; return { runId: "r1", queued: false }; };
+    const sync = rt.threads.syncThreadState.bind(rt.threads);
+    rt.threads.syncThreadState = async (options: { threadId?: string } = {}) => {
+      if (options.threadId === "clone") { failing.add("clone"); rt.ctx.threadStateCache.delete("clone"); }
+      try { return await sync(options); } finally { failing.delete("clone"); }
+    };
+    await expect(rt.runs.retryReserved("a1")).rejects.toThrow("could not be loaded");
+    expect(queued).toBe(0);
+    expect(deleted).toEqual(["clone"]);
+    expect(rt.ctx.selectedThreadId).toBe("A");
+    expect(rt.ctx.snapshot.threads.map((thread: { id: string }) => thread.id)).toEqual(["A", "B"]);
+  });
+});
+
+describe("selectThread load failure (WAN-502)", () => {
+  test("a target that fails to load rejects, keeps the selection and does not subscribe", async () => {
+    const { rt, failing, select, driver } = fixture();
+    select("A", stateA);
+    failing.add("B");
+    const subscribed: string[] = [];
+    driver.ensureSubscription = async (id: string) => { subscribed.push(id); };
+    await expect(rt.selectThread("B")).rejects.toThrow("could not be loaded");
+    expect(subscribed).not.toContain("B");
+    expect(rt.ctx.selectedThreadId).toBe("A");
+    expect(rt.ctx.pendingThreadSelectionId).toBeNull();
+  });
+
+  test("a readable target is selected and subscribed", async () => {
+    const { rt, select, driver } = fixture();
+    select("A", stateA);
+    const subscribed: string[] = [];
+    driver.ensureSubscription = async (id: string) => { subscribed.push(id); };
+    await rt.selectThread("B");
+    expect(subscribed).toContain("B");
+    expect(rt.ctx.selectedThreadId).toBe("B");
   });
 });
