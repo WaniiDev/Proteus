@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RuntimeSnapshot } from "../../shared/contracts";
 
-mock.module("./bridge", () => ({ rpc: { request: {} } }));
+mock.module("../lib/bridge", () => ({ rpc: { request: {} } }));
 const { ContextPane } = await import("./ContextPane");
 
 function snapshot(): RuntimeSnapshot {

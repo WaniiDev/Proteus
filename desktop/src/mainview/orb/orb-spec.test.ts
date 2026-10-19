@@ -79,7 +79,7 @@ describe("orb visual contract", () => {
   });
 
   it("keeps one WebGL orb mounted while its surface changes anchors", async () => {
-    const source = await Bun.file(new URL("../App.tsx", import.meta.url)).text();
+    const source = await Bun.file(new URL("../components/PersistentOrbSurface.tsx", import.meta.url)).text();
 
     expect(source.match(/<Orb ref=/g)).toHaveLength(1);
     expect(source).toContain("function PersistentOrbSurface");

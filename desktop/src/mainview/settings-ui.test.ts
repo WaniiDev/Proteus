@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const appSource = readFileSync(join(import.meta.dir, "App.tsx"), "utf8");
+const appSource = readFileSync(join(import.meta.dir, "views/SettingsView.tsx"), "utf8") + readFileSync(join(import.meta.dir, "components/DiagnosticsPanel.tsx"), "utf8");
+const shellSource = readFileSync(join(import.meta.dir, "App.tsx"), "utf8");
 const providerSource = readFileSync(join(import.meta.dir, "components/ProviderSettings.tsx"), "utf8");
 const cssSource = readFileSync(join(import.meta.dir, "index.css"), "utf8");
 
@@ -30,7 +31,7 @@ describe("Settings provider and model UI", () => {
 
   it("renders only advertised reasoning choices and keeps provider connections responsive", () => {
     expect(appSource).toContain("selected.reasoningOptions.map");
-    expect(appSource).toContain('rpc.request["models.reasoning.select"]');
+    expect(shellSource).toContain('rpc.request["models.reasoning.select"]');
     expect(cssSource).toContain(".reasoning-options");
     expect(cssSource).toContain(".model-card-list { grid-template-columns: 1fr; }");
     expect(cssSource).toContain("grid-template-columns: 210px minmax(0, 1fr)");
@@ -40,7 +41,7 @@ describe("Settings provider and model UI", () => {
     expect(providerSource).toContain("Connect in browser");
     expect(providerSource).toContain("Use device code");
     expect(providerSource).toContain("Paste callback URL or code");
-    expect(appSource).toContain('rpc.request["providers.auth.cancel"]');
+    expect(shellSource).toContain('rpc.request["providers.auth.cancel"]');
     expect(providerSource).not.toContain("Native ACP");
     expect(providerSource).toContain('!provider.verified && snapshot.providerAuth?.providerId === "codex"');
   });

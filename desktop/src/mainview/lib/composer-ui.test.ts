@@ -89,7 +89,7 @@ describe("composer UI policy", () => {
   });
 
   it("keeps the composer metadata minimal and centers its action at the right edge", async () => {
-    const app = await Bun.file(new URL("../App.tsx", import.meta.url)).text();
+    const app = await Bun.file(new URL("../views/Companion.tsx", import.meta.url)).text();
     const composer = await Bun.file(new URL("../components/Composer.tsx", import.meta.url)).text();
     const css = await Bun.file(new URL("../index.css", import.meta.url)).text();
 

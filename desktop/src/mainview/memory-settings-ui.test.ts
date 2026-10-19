@@ -2,11 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 describe("memory settings UI", () => {
   test("keeps memory inside controlled Settings navigation", async () => {
-    const app = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
+    const app = await Bun.file(new URL("./views/SettingsView.tsx", import.meta.url)).text();
+    const shell = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
     const sidebar = await Bun.file(new URL("./components/Sidebar.tsx", import.meta.url)).text();
     expect(app).toContain('export type SettingsSection = "providers" | "models" | "memory" | "developer"');
     expect(app).toContain('<MemorySettingsPanel focusScope={memoryScope} />');
-    expect(app).not.toContain('view === "memory"');
+    expect(shell).not.toContain('view === "memory"');
     expect(sidebar).toContain('export type View = "companion" | "projects" | "settings"');
     expect(sidebar).not.toContain('label: "Memory"');
   });
