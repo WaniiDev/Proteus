@@ -1,6 +1,6 @@
 # Proteus handoff
 
-_Updated 2026-08-11 after syncing `main` to `b69239e`._
+_Updated 2026-10-19 after syncing `main` to `73fc90c`._
 
 ## Objective
 
@@ -8,21 +8,20 @@ Maintain and extend Proteus, an Electrobun desktop personal AI companion. The de
 
 ## Current status
 
-The checkout is clean on `main` and matches `origin/main` at `b69239e` (`feat: redesign conversation composer`). No application code is currently in progress.
+`main` is at `73fc90c` (`Merge WAN-501 refactor (#3)`), on Mastra 1.78 (`@mastra/core` 1.78.0) and Electrobun 2.0.4. Follow-up work on top of it: a flaky `runtime-thread-isolation` test fix, thread-load error handling (a failed thread metadata read keeps the previous selection and surfaces an error instead of defaulting to the app workspace; `initialize` continues to the provider and credential steps), small nits, and the docs refresh (root [README.md](README.md), this file, [desktop/docs/mastra-runtime.md](desktop/docs/mastra-runtime.md)).
 
 ## Verified state
 
 - The Bun backend entrypoint and RPC boundary are in [desktop/src/bun/index.ts](desktop/src/bun/index.ts).
-- [TextRuntime](desktop/src/bun/runtime.ts) is the central adapter for Mastra, providers, threads, workspaces, memory, approvals, tasks, persistence, and diagnostics.
-- The React surface and latest composer redesign are in [desktop/src/mainview](desktop/src/mainview).
+- `TextRuntime` in [desktop/src/bun/runtime.ts](desktop/src/bun/runtime.ts) is a ~340-line facade. Behaviour lives in the services under [desktop/src/bun/runtime/](desktop/src/bun/runtime): `context` (shared snapshot and run state), `thread-service`, `provider-service`, `workspace-service`, `memory-service`, `interaction-service`, `continuation-service`, `run-coordinator`, `message-projector`/`message-mapping`, `agent-factory`. State used by one service is private to it; the module layout section of the runtime doc lists it.
+- Other backend code is grouped by feature: `core/`, `native/`, `providers/`, `workspace/`, `memory/`, `tools/`. Shared contracts are in `desktop/src/shared`.
+- The React surface is in [desktop/src/mainview](desktop/src/mainview) (`components/`, `hooks/`, `views/`, `lib/`, `orb/`).
 - Mastra ownership, workspace containment, approval/suspension semantics, providers, storage, packaging, and backlog are documented in [desktop/docs/mastra-runtime.md](desktop/docs/mastra-runtime.md).
-- The default app workspace initialization regression was addressed in commit `03c3942`; the older workspace-startup investigation that previously occupied this file is no longer the active state.
-- The latest commit adds guarded workspace selection for empty conversations, conversation-owned model selection, queued composer behavior, accessibility improvements, and focused tests.
 
 ## Remaining work
 
 1. Run the focused desktop tests and typecheck from `desktop/` before making or shipping further changes:
-   `bun test` and `bun run typecheck`.
+   `bun test` and `bun run typecheck` (on a fresh checkout run `bun run build` once first so the gitignored `desktop/.hutch` Electrobun typings exist).
 2. If changing runtime behavior, update [desktop/docs/mastra-runtime.md](desktop/docs/mastra-runtime.md).
 3. Treat the documented backlog as intentionally deferred: evaluate search, skills, AST editing, and LSP before enabling them; design durable restart-safe session-level tool trust; keep observability backends out of scope unless that decision changes.
 4. For a release-level check, run `bun run build` and `bun run test:e2e` after focused tests pass.
@@ -38,7 +37,8 @@ The checkout is clean on `main` and matches `origin/main` at `b69239e` (`feat: r
 
 ## Risks and gotchas
 
-- The final release gate is broader than the orientation performed here: tests, typecheck, production build, and end-to-end desktop coverage have not been run in this handoff.
+- `runtime-thread-isolation.test.ts` had a 5s hook timeout that flaked roughly 1 in 3 full runs; the follow-up flaky fix addresses it. Re-run it if it fails.
+- Run `bun run build` and `bun run test:e2e` before a release; they are not part of the quick baseline.
 - On Windows, `LocalSandbox` uses host execution (`isolation: "none"`); approval UI and agent instructions must continue to state that limitation.
 - Preserve unrelated user changes if they appear later, especially generated/runtime data or lockfile changes.
 
