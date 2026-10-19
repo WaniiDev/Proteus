@@ -140,7 +140,8 @@ export class ScopedMemoryManager {
     const previous = this.mutationQueues.get(key) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
       const stored = await this.ensureScope(scope, label);
-      const document = await this.readDocument(scope);
+      const { document, lossyRaw } = await this.readDocumentChecked(scope);
+      if (lossyRaw !== undefined) await this.backupRaw(scope, lossyRaw);
       result = mutation(document);
       await this.writeDocument(scope, document);
       await this.settings.saveScope({ ...stored, label, updatedAt: new Date() });
@@ -194,19 +195,37 @@ export class ScopedMemoryManager {
   }
 
   private async readDocument(scope: MemoryScope): Promise<MemoryDocument> {
+    return (await this.readDocumentChecked(scope)).document;
+  }
+
+  /** Keeps every valid entry; `lossyRaw` is the stored text when anything was dropped or unreadable. */
+  private async readDocumentChecked(scope: MemoryScope): Promise<{ document: MemoryDocument; lossyRaw?: string }> {
     const identifiers = memoryIdentifiers(scope);
     await this.ensureMemoryThread(identifiers);
     const raw = await this.memory.getWorkingMemory(identifiers);
-    if (!raw) return emptyDocument();
+    if (!raw) return { document: emptyDocument() };
     try {
       const parsed = JSON.parse(raw) as { version?: unknown; entries?: unknown };
-      const entries = memoryEntrySchema.array().safeParse(parsed.entries);
-      return parsed.version === MEMORY_DOCUMENT_VERSION && entries.success
-        ? { version: MEMORY_DOCUMENT_VERSION, entries: entries.data }
-        : emptyDocument();
+      if (parsed.version !== MEMORY_DOCUMENT_VERSION || !Array.isArray(parsed.entries)) throw new Error("Unsupported memory document");
+      const entries: MemoryEntry[] = [];
+      for (const candidate of parsed.entries) {
+        const entry = memoryEntrySchema.safeParse(candidate);
+        if (entry.success) entries.push(entry.data);
+      }
+      const dropped = parsed.entries.length - entries.length;
+      if (dropped > 0) console.warn(`Dropped ${dropped} invalid memory entries in scope ${scopeKey(scope)}`);
+      return { document: { version: MEMORY_DOCUMENT_VERSION, entries }, ...(dropped > 0 ? { lossyRaw: raw } : {}) };
     } catch {
-      return emptyDocument();
+      console.warn(`Unreadable memory document in scope ${scopeKey(scope)}; starting empty`);
+      return { document: emptyDocument(), lossyRaw: raw };
     }
+  }
+
+  private async backupRaw(scope: MemoryScope, raw: string): Promise<void> {
+    const key = `proteus-memory-backup:${scopeKey(scope)}:corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const identifiers = { threadId: key, resourceId: key };
+    await this.ensureMemoryThread(identifiers);
+    await this.memory.updateWorkingMemory({ ...identifiers, workingMemory: raw });
   }
 
   private async writeDocument(scope: MemoryScope, document: MemoryDocument): Promise<void> {
