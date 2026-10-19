@@ -1,14 +1,14 @@
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
 import type { ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot } from "../../shared/contracts";
-import { type CodexCredentialStore, type CredentialVault } from "../credentials";
-import { listOpenRouterTextModels, validateOpenRouterKey } from "../openrouter";
-import { selectedModelMissingFromCatalog } from "../provider-readiness";
-import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels } from "../codex-models";
-import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "../codex-oauth-failure";
-import { type AppModelSelection, type ModelPreferencesStorage } from "../model-preferences";
-import { DEFAULT_MODEL_ID } from "./constants";
-import { makeRuntimeError, normalizeError } from "../runtime-error-mapping";
+import { type CodexCredentialStore, type CredentialVault } from "../providers/credentials";
+import { listOpenRouterTextModels, validateOpenRouterKey } from "../providers/openrouter";
+import { selectedModelMissingFromCatalog } from "../providers/provider-readiness";
+import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels } from "../providers/codex-models";
+import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "../providers/codex-oauth-failure";
+import { type AppModelSelection, type ModelPreferencesStorage } from "../providers/model-preferences";
+import { DEFAULT_MODEL_ID } from "../../shared/constants";
+import { makeRuntimeError, normalizeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
 import type { ThreadService } from "./thread-service";
 

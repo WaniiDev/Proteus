@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Brain, Check, ChevronDown, FolderOpen, Search, Send, Settings2, Square } from "lucide-react";
+import { MAX_INPUT_LENGTH } from "../../shared/constants";
 import type {
   ProviderModelId,
   ReasoningEffort,
@@ -188,7 +189,7 @@ export function Composer({
         placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message Proteus…" : `Configure ${providerName} in Settings to chat`}
         aria-label="Message Proteus"
         disabled={!canChat}
-        maxLength={32_000}
+        maxLength={MAX_INPUT_LENGTH}
         rows={inputLineCount}
         onKeyDown={(event) => {
           if (!shouldSubmitComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return;

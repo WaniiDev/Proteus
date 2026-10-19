@@ -85,7 +85,7 @@ Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: fal
 - `run-coordinator.ts`: native stream projection, send, queue, retry, continue and abort.
 - `message-projector.ts`, `message-mapping.ts`: Mastra message to chat message mapping; `agent-factory.ts`: the `Agent` definition; `constants.ts`, `types.ts`: shared constants and types.
 
-Error normalization lives in `runtime-error-mapping.ts`; the OpenRouter gateway lives in `openrouter.ts`.
+Other backend modules are grouped by feature under `src/bun/`: `core/` (projection, error mapping, diagnostics, Mastra foundation, instructions, legacy cutover), `native/` (agent driver, stream projection, thread repository, tool-call guard), `providers/` (OpenRouter, Codex, auth, readiness, model preferences, credentials), `workspace/` (workspace registry and policy, tool compat, project registry), `memory/` (settings, tools, scoped memory) and `tools/` (approval, task and plan policy, tool decisions, working tools, ask-user). Error normalization lives in `core/runtime-error-mapping.ts`; the OpenRouter gateway lives in `providers/openrouter.ts`.
 
 ## Storage and packaging
 

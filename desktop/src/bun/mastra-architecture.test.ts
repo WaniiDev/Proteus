@@ -16,7 +16,7 @@ describe("Mastra-first architecture boundaries", () => {
   it("does not reintroduce custom plan tools or follow-up queue RPCs", async () => {
     const [runtime, registry, contracts, bunEntry, app] = await Promise.all([
       readRuntimeSources(),
-      readFile(join(sourceRoot, "bun", "workspace-registry.ts"), "utf8"),
+      readFile(join(sourceRoot, "bun", "workspace", "workspace-registry.ts"), "utf8"),
       readFile(join(sourceRoot, "shared", "contracts.ts"), "utf8"),
       readFile(join(sourceRoot, "bun", "index.ts"), "utf8"),
       readFile(join(sourceRoot, "mainview", "App.tsx"), "utf8"),

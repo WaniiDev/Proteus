@@ -1,7 +1,7 @@
 import type { ChatMessage, ContinuationState, InteractionError, PendingInteraction, RuntimeError } from "../../shared/contracts";
-import { RuntimeDiagnostics } from "../diagnostics";
-import { NativeAgentDriver } from "../native-agent-driver";
-import type { NativeAgentChunk, NativeStreamProjection } from "../native-stream-projection";
+import { RuntimeDiagnostics } from "../core/diagnostics";
+import { NativeAgentDriver } from "../native/native-agent-driver";
+import type { NativeAgentChunk, NativeStreamProjection } from "../native/native-stream-projection";
 import { CONTINUATION_PROGRESS_PERSIST_MS, CONTINUATION_RECOVERY_MS, CONTINUATION_SLOW_MS } from "./constants";
 import type { RuntimeContext } from "./context";
 import type { ThreadService } from "./thread-service";

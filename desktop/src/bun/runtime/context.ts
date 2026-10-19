@@ -1,9 +1,10 @@
 import type { ChatMessage, RuntimeError, RuntimeSnapshot, ThreadSummary } from "../../shared/contracts";
-import type { AppModelSelection } from "../model-preferences";
-import { reconcileProviderAuth } from "../provider-auth";
-import { normalizeError } from "../runtime-error-mapping";
-import type { LiveAssistantProjection, ProjectedToolOutcome } from "../runtime-projection";
-import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER_ID } from "./constants";
+import type { AppModelSelection } from "../providers/model-preferences";
+import { reconcileProviderAuth } from "../providers/provider-auth";
+import { normalizeError } from "../core/runtime-error-mapping";
+import type { LiveAssistantProjection, ProjectedToolOutcome } from "../core/runtime-projection";
+import { DEFAULT_MODEL_ID } from "../../shared/constants";
+import { DEFAULT_PROVIDER_ID } from "./constants";
 import { emptyWorkbench } from "./message-mapping";
 import type { InteractionResolution, PersistedThreadState, SnapshotListener } from "./types";
 

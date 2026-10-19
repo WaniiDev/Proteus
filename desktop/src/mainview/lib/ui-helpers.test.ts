@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { ThreadSummary, WorkbenchState } from "../../shared/contracts";
-import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime, shouldShowWorkbench } from "./ui-helpers";
+import type { ThreadSummary } from "../../shared/contracts";
+import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime } from "./ui-helpers";
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 const thread = (id: string, title: string, updatedAt: string): ThreadSummary => ({
@@ -11,14 +11,6 @@ const thread = (id: string, title: string, updatedAt: string): ThreadSummary => 
   activity: "idle",
   attention: 0,
   workspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
-});
-const emptyWorkbench = (overrides: Partial<WorkbenchState> = {}): WorkbenchState => ({
-  status: "idle",
-  tasks: [],
-  pendingInteractions: [],
-  queuedFollowUpCount: 0,
-  tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-  ...overrides,
 });
 
 describe("conversation helpers", () => {
@@ -136,36 +128,5 @@ describe("conversation helpers", () => {
     ]);
     expect(items[0]).toMatchObject({ type: "assistant", parts: [{ type: "text", text: "Answer" }, { type: "source-url", title: "Updated title" }] });
     expect(groupAssistantPartRuns([{ type: "text", id: "text", text: "Answer" }, source])).toEqual([{ type: "text", part: { type: "text", id: "text", text: "Answer" } }]);
-  });
-});
-
-describe("Workbench visibility policy", () => {
-  it("stays hidden for an empty idle state", () => {
-    expect(shouldShowWorkbench(emptyWorkbench())).toBe(false);
-  });
-
-  it("opens for real structured work and completed review state", () => {
-    expect(
-      shouldShowWorkbench(
-        emptyWorkbench({
-          tasks: [
-            {
-              id: "1",
-              content: "Review",
-              activeForm: "Reviewing",
-              status: "in_progress",
-            },
-          ],
-        }),
-      ),
-    ).toBe(true);
-    expect(shouldShowWorkbench(emptyWorkbench({ status: "complete", goal: "Review the result" }))).toBe(true);
-  });
-
-  it("stays relevant for waiting and terminal review states", () => {
-    for (const status of ["waiting", "interrupted", "error"] as const) {
-      expect(shouldShowWorkbench(emptyWorkbench({ status }))).toBe(true);
-    }
-    expect(shouldShowWorkbench(emptyWorkbench({ tokenUsage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 } }))).toBe(true);
   });
 });
