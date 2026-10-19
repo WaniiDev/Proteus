@@ -27,6 +27,8 @@ export function uiStateOf(state: PersistedThreadState): PersistedThreadState {
 export class ThreadService {
   /** Last state the store accepted per thread; the target a failed save rolls the cache back to. */
   private readonly savedState = new Map<string, PersistedThreadState>();
+  /** States derived from a default guess for a thread that was never loaded; they are never saved. */
+  private readonly unverified = new WeakSet<object>();
   readonly threadWriteQueues = new Map<string, Promise<void>>();
   threadSwitchQueue: Promise<void> = Promise.resolve();
   private readonly projector: MessageProjector;
@@ -54,21 +56,19 @@ export class ThreadService {
   async loadThreadState(threadId: string): Promise<PersistedThreadState> {
     const cached = this.ctx.threadStateCache.get(threadId);
     if (cached) return this.settleLoadedState(threadId, cached, await this.reconcileNativeThreadState(threadId, structuredClone(cached)));
-    try {
-      const memoryStore = await this.storage.getStore("memory");
-      const thread = await memoryStore?.getThreadById({
-        threadId,
-        resourceId: RESOURCE_ID,
-      });
-      const value = thread?.metadata?.[THREAD_METADATA_KEY] ?? thread?.metadata?.[LEGACY_THREAD_METADATA_KEY];
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        const state = structuredClone(value as PersistedThreadState);
-        state.workspaceBinding ??= { kind: "app" };
-        return this.settleLoadedState(threadId, undefined, await this.reconcileNativeThreadState(threadId, state));
-      }
-    } catch {
-      // Metadata is optional; an empty state is a valid first-run state.
+    // A read error must propagate: defaulting here would cache an app binding that a later save writes over a real project binding.
+    const memoryStore = await this.storage.getStore("memory");
+    const thread = await memoryStore?.getThreadById({
+      threadId,
+      resourceId: RESOURCE_ID,
+    });
+    const value = thread?.metadata?.[THREAD_METADATA_KEY] ?? thread?.metadata?.[LEGACY_THREAD_METADATA_KEY];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const state = structuredClone(value as PersistedThreadState);
+      state.workspaceBinding ??= { kind: "app" };
+      return this.settleLoadedState(threadId, undefined, await this.reconcileNativeThreadState(threadId, state));
     }
+    // No metadata yet is a valid first-run state.
     const empty: PersistedThreadState = { workspaceBinding: { kind: "app" } };
     this.ctx.threadStateCache.set(threadId, empty);
     return structuredClone(empty);
@@ -145,19 +145,30 @@ export class ThreadService {
   /** State of one thread: the live selected state, or its cached copy when the user has switched away. */
   stateFor(threadId: string): PersistedThreadState {
     if (threadId === this.ctx.selectedThreadId) return this.ctx.threadState;
-    return this.ctx.threadStateCache.get(threadId) ?? { workspaceBinding: { kind: "app" } };
+    const cached = this.ctx.threadStateCache.get(threadId);
+    if (cached) return cached;
+    // Never loaded: this default is a guess, so it must not be cached or saved over the real state.
+    const guess: PersistedThreadState = { workspaceBinding: { kind: "app" } };
+    this.unverified.add(guess);
+    return guess;
   }
 
   /** Apply a change to one thread's state by id, never to whichever thread is selected now. */
   updateThreadState(threadId: string, change: (state: PersistedThreadState) => PersistedThreadState): PersistedThreadState {
-    const next = change(this.stateFor(threadId));
+    const base = this.stateFor(threadId);
+    const next = change(base);
     if (threadId === this.ctx.selectedThreadId) this.ctx.threadState = next;
+    else if (this.unverified.has(base)) this.unverified.add(next);
     else this.ctx.threadStateCache.set(threadId, uiStateOf(next));
     return next;
   }
 
   async persistThreadState(threadId: string, state = this.stateFor(threadId), failOnError = false): Promise<void> {
     if (!threadId) return;
+    if (this.unverified.has(state)) {
+      this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "skipped", threadId, payload: "state was never loaded" });
+      return;
+    }
     const next = uiStateOf(state);
     const previousCached = this.ctx.threadStateCache.get(threadId);
     this.ctx.threadStateCache.set(threadId, next);

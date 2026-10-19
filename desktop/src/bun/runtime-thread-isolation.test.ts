@@ -460,6 +460,25 @@ describe("review fixes: per-thread continuation timers (WAN-503)", () => {
   });
 });
 
+describe("review fixes: synthesized default state (WAN-503)", () => {
+  test("R10: a metadata read error is not turned into a cached default binding", async () => {
+    const { rt, select } = fixture();
+    select("A", stateA);
+    rt.threads.storage.getStore = async () => ({ getThreadById: async () => { throw new Error("io error"); } });
+    await expect(rt.threads.loadThreadState("B")).rejects.toThrow("io error");
+    expect(rt.ctx.threadStateCache.has("B")).toBeFalse();
+  });
+
+  test("R10: state synthesized for an unloaded background thread is neither cached nor persisted", async () => {
+    const { rt, writes, select } = fixture();
+    select("A", stateA);
+    const next = rt.threads.updateThreadState("X", (state: Record<string, unknown>) => ({ ...state, events: [{ id: "e", type: "system", text: "x", createdAt: "" }] }));
+    expect(rt.ctx.threadStateCache.has("X")).toBeFalse();
+    await rt.threads.persistThreadState("X", next);
+    expect(writes.filter((write) => write.id === "X")).toEqual([]);
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);
