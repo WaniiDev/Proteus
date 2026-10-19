@@ -422,6 +422,11 @@ function emptyTokenUsage(): TokenUsage {
   return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 }
 
+function uiStateOf(state: PersistedThreadState): PersistedThreadState {
+  const { tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes, ...uiState } = state;
+  return structuredClone(uiState);
+}
+
 function emptyWorkbench(): WorkbenchState {
   return {
     status: "idle",
@@ -506,6 +511,7 @@ export class TextRuntime {
     revision: 0,
   };
   private runId: string | null = null;
+  private runThreadId: string | null = null;
   private runOutcome: "streaming" | "complete" | "interrupted" | "error" = "complete";
   private runError: RuntimeError | null = null;
   private lastAssistantId: string | null = null;
@@ -867,10 +873,24 @@ export class TextRuntime {
     return structuredClone(next);
   }
 
-  private async persistThreadState(threadId: string, state = this.threadState, failOnError = false): Promise<void> {
+  /** State of one thread: the live selected state, or its cached copy when the user has switched away. */
+  private stateFor(threadId: string): PersistedThreadState {
+    if (threadId === this.selectedThreadId) return this.threadState;
+    return this.threadStateCache.get(threadId) ?? { workspaceBinding: { kind: "app" } };
+  }
+
+  /** Apply a change to one thread's state by id, never to whichever thread is selected now. */
+  private updateThreadState(threadId: string, change: (state: PersistedThreadState) => PersistedThreadState): PersistedThreadState {
+    const next = change(this.stateFor(threadId));
+    if (threadId === this.selectedThreadId) this.threadState = next;
+    else this.threadStateCache.set(threadId, uiStateOf(next));
+    return next;
+  }
+
+  private async persistThreadState(threadId: string, state = this.stateFor(threadId), failOnError = false): Promise<void> {
     if (!threadId) return;
-    const { tasks: _legacyTasks, toolOutcomes: _legacyToolOutcomes, ...uiState } = state;
-    const next = structuredClone(uiState);
+    const next = uiStateOf(state);
+    const previousCached = this.threadStateCache.get(threadId);
     this.threadStateCache.set(threadId, next);
     const queuedAt = performance.now();
     const previous = this.threadWriteQueues.get(threadId) ?? Promise.resolve();
@@ -900,8 +920,14 @@ export class TextRuntime {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "end", threadId, durationMs: performance.now() - startedAt });
         } catch (error) {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "error", threadId, durationMs: performance.now() - startedAt, payload: error });
+          // The cache must not claim state the store never accepted.
+          if (this.threadStateCache.get(threadId) === next) {
+            if (previousCached) this.threadStateCache.set(threadId, previousCached);
+            else this.threadStateCache.delete(threadId);
+          }
           if (failOnError) throw error;
-          // Workbench metadata must never make text chat fail.
+          // Workbench metadata must never make text chat fail; surface it without changing run status.
+          if (!this.snapshot.error) this.publish({ error: { code: "unknown", message: "Some conversation details could not be saved.", retryable: false } });
         }
       });
     let tracked!: Promise<void>;
@@ -1058,39 +1084,38 @@ export class TextRuntime {
     this.continuationRecoveryTimer = null;
   }
 
-  private armContinuationTimers(): void {
+  private armContinuationTimers(continuation: ContinuationState | null | undefined = this.threadState.continuation): void {
     this.clearContinuationTimers();
-    const continuation = this.threadState.continuation;
     if (!continuation) return;
+    const { threadId } = continuation;
     const elapsed = Math.max(0, Date.now() - Date.parse(continuation.lastProgressAt));
     this.continuationWarningTimer = setTimeout(() => {
-      const current = this.threadState.continuation;
+      const current = this.stateFor(threadId).continuation;
       if (!current || current.toolCallId !== continuation.toolCallId) return;
       const slow = { ...current, phase: "slow" as const };
-      this.threadState = { ...this.threadState, continuation: slow };
-      if (this.selectedThreadId === slow.threadId) this.publish({ continuation: slow });
-      this.diagnostics.record({ source: "runtime", type: "continuation", phase: "slow", threadId: slow.threadId, runId: slow.runId, toolCallId: slow.toolCallId, durationMs: Date.now() - Date.parse(slow.startedAt) });
-      void this.persistThreadState(slow.threadId, this.threadState);
+      const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation: slow }));
+      if (this.selectedThreadId === threadId) this.publish({ continuation: slow });
+      this.diagnostics.record({ source: "runtime", type: "continuation", phase: "slow", threadId, runId: slow.runId, toolCallId: slow.toolCallId, durationMs: Date.now() - Date.parse(slow.startedAt) });
+      void this.persistThreadState(threadId, next);
     }, Math.max(0, CONTINUATION_SLOW_MS - elapsed));
     this.continuationRecoveryTimer = setTimeout(() => {
-      const current = this.threadState.continuation;
+      const current = this.stateFor(threadId).continuation;
       if (!current || current.toolCallId !== continuation.toolCallId) return;
       const recovery = { ...current, phase: "recovery" as const };
-      this.threadState = { ...this.threadState, continuation: recovery };
-      if (this.selectedThreadId === recovery.threadId) this.publish({ continuation: recovery });
-      this.diagnostics.record({ source: "runtime", type: "continuation", phase: "recovery", threadId: recovery.threadId, runId: recovery.runId, toolCallId: recovery.toolCallId, durationMs: Date.now() - Date.parse(recovery.startedAt) });
-      void this.persistThreadState(recovery.threadId, this.threadState);
-      void this.reconcileContinuation("timeout");
+      const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation: recovery }));
+      if (this.selectedThreadId === threadId) this.publish({ continuation: recovery });
+      this.diagnostics.record({ source: "runtime", type: "continuation", phase: "recovery", threadId, runId: recovery.runId, toolCallId: recovery.toolCallId, durationMs: Date.now() - Date.parse(recovery.startedAt) });
+      void this.persistThreadState(threadId, next);
+      void this.reconcileContinuation("timeout", recovery);
     }, Math.max(0, CONTINUATION_RECOVERY_MS - elapsed));
   }
 
   private async beginContinuation(
+    threadId: string,
     interaction: PendingInteraction,
     runId: string,
     decision: ContinuationState["decision"],
   ): Promise<void> {
-    const threadId = interaction.threadId ?? this.selectedThreadId;
-    if (!threadId) return;
     const now = new Date().toISOString();
     const continuation: ContinuationState = {
       interactionId: interaction.id,
@@ -1103,13 +1128,14 @@ export class TextRuntime {
       startedAt: now,
       lastProgressAt: now,
     };
-    let events = this.threadState.events ?? [];
+    let events = this.stateFor(threadId).events ?? [];
     if (decision === "declined") {
       const id = `continuation:${interaction.toolCallId}:declined`;
       if (!events.some((event) => event.id === id)) events = [...events, { id, type: "system", text: "Tool declined. Proteus is continuing without it.", createdAt: now }];
     }
-    this.threadState = { ...this.threadState, continuation, events };
+    const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation, events }));
     this.runId = runId;
+    this.runThreadId = threadId;
     this.runOutcome = "streaming";
     this.runError = null;
     this.continuationHadText = false;
@@ -1122,47 +1148,46 @@ export class TextRuntime {
         continuation,
         events,
         error: null,
-        workbench: this.workbenchFromState(this.threadState, null, { runId, threadId, status: "running" }),
+        workbench: this.workbenchFromState(next, null, { runId, threadId, status: "running" }),
       });
     }
-    this.armContinuationTimers();
+    this.armContinuationTimers(continuation);
     this.diagnostics.record({ source: "runtime", type: "continuation", phase: "acknowledged", threadId, runId, toolCallId: interaction.toolCallId });
-    await this.persistThreadState(threadId, this.threadState, true).catch((error) => {
-      this.diagnostics.record({ source: "storage", type: "continuation_persist", phase: "error", threadId, runId, toolCallId: interaction.toolCallId, payload: normalizeError(error) });
-    });
+    // persistThreadState already records the failure and rolls its cache back; the continuation keeps running.
+    await this.persistThreadState(threadId, next, true).catch(() => undefined);
   }
 
   private markContinuationProgress(chunk: NativeAgentChunk, threadId: string, runId: string): void {
-    const continuation = this.threadState.continuation;
+    const continuation = this.stateFor(threadId).continuation;
     if (!continuation || continuation.threadId !== threadId || continuation.runId !== runId) return;
     const meaningful = new Set(["step-start", "text-delta", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended", "error", "abort", "finish"]);
     if (!meaningful.has(chunk.type)) return;
     if (chunk.type === "text-delta" && typeof chunk.payload?.text === "string" && chunk.payload.text.length > 0) this.continuationHadText = true;
     const progressed = { ...continuation, phase: "resuming" as const, lastProgressAt: new Date().toISOString() };
-    this.threadState = { ...this.threadState, continuation: progressed };
+    const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation: progressed }));
     if (this.selectedThreadId === threadId) this.publish({ continuation: progressed });
     this.diagnostics.record({ source: "runtime", type: "continuation", phase: "progress", threadId, runId, toolCallId: continuation.toolCallId, payload: { chunkType: chunk.type } });
     if (Date.now() - this.continuationLastPersistedAt >= CONTINUATION_PROGRESS_PERSIST_MS) {
       this.continuationLastPersistedAt = Date.now();
-      void this.persistThreadState(threadId, this.threadState);
+      void this.persistThreadState(threadId, next);
     }
-    if (chunk.type !== "finish" && chunk.type !== "abort" && chunk.type !== "error") this.armContinuationTimers();
+    if (chunk.type !== "finish" && chunk.type !== "abort" && chunk.type !== "error") this.armContinuationTimers(progressed);
   }
 
   private finishContinuation(threadId: string, runId: string, outcome: NonNullable<NativeStreamProjection["terminal"]>): void {
-    const continuation = this.threadState.continuation;
+    const continuation = this.stateFor(threadId).continuation;
     if (!continuation || continuation.threadId !== threadId || continuation.runId !== runId) return;
     this.clearContinuationTimers();
-    let events = this.threadState.events ?? [];
+    let events = this.stateFor(threadId).events ?? [];
     if (outcome === "complete" && !this.continuationHadText) {
       const id = `continuation:${continuation.toolCallId}:complete`;
       if (!events.some((event) => event.id === id)) events = [...events, { id, type: "system", text: "Proteus continued after your decision and finished without another message.", createdAt: new Date().toISOString() }];
     }
-    this.threadState = { ...this.threadState, continuation: null, events };
+    const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation: null, events }));
     this.continuationHadText = false;
     if (this.selectedThreadId === threadId) this.publish({ continuation: null, events });
     this.diagnostics.record({ source: "runtime", type: "continuation", phase: outcome, threadId, runId, toolCallId: continuation.toolCallId, durationMs: Date.now() - Date.parse(continuation.startedAt) });
-    void this.persistThreadState(threadId, this.threadState);
+    void this.persistThreadState(threadId, next);
   }
 
   private continuationHasCompletedHistory(continuation: ContinuationState): boolean {
@@ -1170,52 +1195,59 @@ export class TextRuntime {
     return this.snapshot.messages.some((message) => message.role === "assistant" && message.status === "complete" && Date.parse(message.createdAt) >= startedAt && (message.text.trim().length > 0 || message.parts.some((part) => part.type === "tool" && part.toolCallId === continuation.toolCallId && ["completed", "declined", "cancelled", "error"].includes(part.status))));
   }
 
-  private async reconcileContinuation(reason: "startup" | "timeout" | "stream-close" | "stream-error"): Promise<void> {
-    const continuation = this.threadState.continuation;
+  private async reconcileContinuation(reason: "startup" | "timeout" | "stream-close" | "stream-error", continuation: ContinuationState | null | undefined = this.threadState.continuation): Promise<void> {
     if (!continuation) return;
-    this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "start", threadId: continuation.threadId, runId: continuation.runId, toolCallId: continuation.toolCallId, payload: { reason } });
-    await this.syncMessagesSafely(continuation.threadId);
-    const suspensions = await this.nativeDriver.listSuspensions(continuation.threadId).catch(() => []);
+    const { threadId } = continuation;
+    this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "start", threadId, runId: continuation.runId, toolCallId: continuation.toolCallId, payload: { reason } });
+    await this.syncMessagesSafely(threadId);
+    const suspensions = await this.nativeDriver.listSuspensions(threadId).catch(() => []);
     const exact = suspensions.find((item) => item.runId === continuation.runId && item.toolCallId === continuation.toolCallId);
     if (exact) {
-      const reconciled = await this.reconcileNativeSuspensions(continuation.threadId, this.threadState);
+      const reconciled = await this.reconcileNativeSuspensions(threadId, this.stateFor(threadId));
       const retryable: InteractionError = { code: "resume-failed", message: "The previous response did not settle. Review and submit your decision again.", retryable: true };
-      this.threadState = {
+      const next = this.updateThreadState(threadId, () => ({
         ...reconciled,
         continuation: null,
         pendingInteractions: (reconciled.pendingInteractions ?? []).map((item) => item.toolCallId === continuation.toolCallId ? { ...item, status: "pending" as const, error: retryable } : item),
         resolvedInteractions: (reconciled.resolvedInteractions ?? []).filter((item) => item.toolCallId !== continuation.toolCallId),
-      };
+      }));
       this.clearContinuationTimers();
-      if (this.runId === continuation.runId) this.runId = null;
-      if (this.selectedThreadId === continuation.threadId) this.publish({ status: this.idleStatus(), activeRun: null, continuation: null, interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null, null) });
-      await this.persistThreadState(continuation.threadId, this.threadState);
-      this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "suspended", threadId: continuation.threadId, runId: continuation.runId, toolCallId: continuation.toolCallId });
+      this.releaseRun(continuation.runId);
+      if (this.selectedThreadId === threadId) this.publish({ status: this.idleStatus(), activeRun: null, continuation: null, interactions: next.pendingInteractions ?? [], workbench: this.workbenchFromState(next, null, null) });
+      await this.persistThreadState(threadId, next);
+      this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "suspended", threadId, runId: continuation.runId, toolCallId: continuation.toolCallId });
       return;
     }
     if (this.continuationHasCompletedHistory(continuation)) {
-      this.finishContinuation(continuation.threadId, continuation.runId, "complete");
-      if (this.runId === continuation.runId) this.runId = null;
-      if (this.selectedThreadId === continuation.threadId) this.publish({ status: this.idleStatus(), activeRun: null, error: null });
+      this.finishContinuation(threadId, continuation.runId, "complete");
+      this.releaseRun(continuation.runId);
+      if (this.selectedThreadId === threadId) this.publish({ status: this.idleStatus(), activeRun: null, error: null });
       return;
     }
-    if (this.nativeDriver.activeRunId(continuation.threadId) === continuation.runId) {
+    if (this.nativeDriver.activeRunId(threadId) === continuation.runId) {
       const active = { ...continuation, phase: "slow" as const, lastProgressAt: new Date().toISOString() };
-      this.threadState = { ...this.threadState, continuation: active };
-      if (this.selectedThreadId === continuation.threadId) this.publish({ status: "running", activeRun: { runId: continuation.runId, threadId: continuation.threadId, status: "running" }, continuation: active });
-      this.armContinuationTimers();
+      this.updateThreadState(threadId, (state) => ({ ...state, continuation: active }));
+      if (this.selectedThreadId === threadId) this.publish({ status: "running", activeRun: { runId: continuation.runId, threadId, status: "running" }, continuation: active });
+      this.armContinuationTimers(active);
       return;
     }
     this.clearContinuationTimers();
-    this.threadState = { ...this.threadState, continuation: null };
-    if (this.runId === continuation.runId) this.runId = null;
+    const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation: null }));
+    this.releaseRun(continuation.runId);
     const error: RuntimeError = { code: "unknown", message: "Proteus could not confirm that the response continued. Retry or continue the original turn.", retryable: true };
-    if (this.selectedThreadId === continuation.threadId) this.publish({ status: "error", activeRun: null, continuation: null, error });
-    await this.persistThreadState(continuation.threadId, this.threadState);
-    this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "missing", threadId: continuation.threadId, runId: continuation.runId, toolCallId: continuation.toolCallId, payload: { reason } });
+    if (this.selectedThreadId === threadId) this.publish({ status: "error", activeRun: null, continuation: null, error });
+    await this.persistThreadState(threadId, next);
+    this.diagnostics.record({ source: "runtime", type: "continuation_reconcile", phase: "missing", threadId, runId: continuation.runId, toolCallId: continuation.toolCallId, payload: { reason } });
   }
 
-  private async hydratePlanSuspension(toolCallId: string, pathValue: unknown, originMessageId?: string): Promise<void> {
+  /** Clear the shared run marker, but only when it still belongs to this run. */
+  private releaseRun(runId: string): void {
+    if (this.runId !== runId) return;
+    this.runId = null;
+    this.runThreadId = null;
+  }
+
+  private async hydratePlanSuspension(threadId: string, toolCallId: string, pathValue: unknown, originMessageId?: string): Promise<void> {
     if (typeof pathValue !== "string" || this.hydratingPlans.has(toolCallId) || this.hydratedPlans.has(toolCallId)) return;
     this.hydratingPlans.add(toolCallId);
     try {
@@ -1226,25 +1258,25 @@ export class TextRuntime {
       const plan = typeof content === "string" ? content : content.toString("utf8");
       if (!plan.trim()) throw new Error("Plan file is empty.");
       if (Buffer.byteLength(plan, "utf8") > 128 * 1024) throw new Error("Plan file is larger than 128 KiB.");
-      const previous = this.threadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
+      const previous = this.stateFor(threadId).pendingInteractions?.find((item) => item.toolCallId === toolCallId);
       const interaction = parseSuspendedInteraction(
         { toolCallId, toolName: "submit_plan", suspendPayload: { path, plan } },
-        previous?.plan?.version ?? this.nextPlanVersion(),
+        previous?.plan?.version ?? this.nextPlanVersion(threadId),
         originMessageId,
       );
       if (!interaction) throw new Error("Plan suspension could not be parsed.");
-      this.threadState = {
-        ...this.threadState,
-        pendingInteractions: upsertPendingInteraction(this.threadState.pendingInteractions ?? [], interaction),
-      };
+      const next = this.updateThreadState(threadId, (state) => ({
+        ...state,
+        pendingInteractions: upsertPendingInteraction(state.pendingInteractions ?? [], interaction),
+      }));
       this.hydratedPlans.add(toolCallId);
-      const threadId = this.selectedThreadId;
-      if (threadId) await this.persistThreadState(threadId, this.threadState);
-      if (threadId && this.selectedThreadId === threadId) {
-          this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
+      await this.persistThreadState(threadId, next);
+      if (this.selectedThreadId === threadId) {
+        const current = this.stateFor(threadId);
+        this.publish({ interactions: current.pendingInteractions ?? [], workbench: this.workbenchFromState(current, null) });
       }
     } catch (error) {
-      this.markInteractionFailed(toolCallId, {
+      this.markInteractionFailed(threadId, toolCallId, {
         code: "resume-failed",
         message: error instanceof Error ? error.message : "The submitted plan file could not be read.",
         retryable: Boolean(originMessageId),
@@ -1262,8 +1294,9 @@ export class TextRuntime {
     this.markContinuationProgress(chunk, threadId, runId);
 
     if (chunk.type === "start") {
-      if (this.threadState.continuation?.runId !== runId) this.runToolOutcomes.clear();
+      if (this.stateFor(threadId).continuation?.runId !== runId) this.runToolOutcomes.clear();
       this.runId = runId;
+      this.runThreadId = threadId;
       this.runOutcome = "streaming";
       this.runError = null;
       this.updateThreadActivity(threadId, "running", 0);
@@ -1273,19 +1306,17 @@ export class TextRuntime {
       this.nativeSuspensions.set(toolCallId, { runId, threadId });
       const interaction = parseSuspendedInteraction(
         { toolCallId, toolName: payload.toolName, suspendPayload: payload.suspendPayload },
-        this.nextPlanVersion(),
+        this.nextPlanVersion(threadId),
         this.runClientMessageId ?? undefined,
       );
       if (interaction) {
         const boundInteraction = { ...interaction, threadId, runId, toolName: payload.toolName };
-        this.threadState = { ...this.threadState, pendingInteractions: upsertPendingInteraction(this.threadState.pendingInteractions ?? [], boundInteraction) };
-        if (threadId === this.selectedThreadId) {
-              this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
-        }
+        const next = this.updateThreadState(threadId, (state) => ({ ...state, pendingInteractions: upsertPendingInteraction(state.pendingInteractions ?? [], boundInteraction) }));
+        if (threadId === this.selectedThreadId) this.publish({ interactions: next.pendingInteractions ?? [], workbench: this.workbenchFromState(next, null) });
       }
       if (payload.toolName === "submit_plan") {
         const suspendPayload = payload.suspendPayload && typeof payload.suspendPayload === "object" ? payload.suspendPayload as { path?: unknown } : {};
-        void this.hydratePlanSuspension(toolCallId, suspendPayload.path, this.runClientMessageId ?? undefined);
+        void this.hydratePlanSuspension(threadId, toolCallId, suspendPayload.path, this.runClientMessageId ?? undefined);
       }
       this.updateThreadActivity(threadId, "waiting", 1);
     }
@@ -1293,10 +1324,8 @@ export class TextRuntime {
     if (chunk.type === "tool-call-approval" && toolCallId && typeof payload.toolName === "string") {
       this.nativeSuspensions.set(toolCallId, { runId, threadId });
       const interaction = parseToolApproval({ threadId, runId, toolCallId, toolName: payload.toolName, args: payload.args });
-      this.threadState = { ...this.threadState, pendingInteractions: upsertPendingInteraction(this.threadState.pendingInteractions ?? [], interaction) };
-      if (threadId === this.selectedThreadId) {
-        this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
-      }
+      const next = this.updateThreadState(threadId, (state) => ({ ...state, pendingInteractions: upsertPendingInteraction(state.pendingInteractions ?? [], interaction) }));
+      if (threadId === this.selectedThreadId) this.publish({ interactions: next.pendingInteractions ?? [], workbench: this.workbenchFromState(next, null) });
       this.updateThreadActivity(threadId, "waiting", 1);
     }
 
@@ -1321,13 +1350,13 @@ export class TextRuntime {
         activeRun: projection.terminal ? null : { runId, threadId, status: "running" },
         messages: upsertChatMessage(this.snapshot.messages, projectedMessage),
         ...(projection.terminal === "complete" ? { error: null } : terminalError ? { error: terminalError } : {}),
-        ...(projection.usage ? { workbench: { ...this.workbenchFromState(this.threadState, null), tokenUsage: projection.usage } } : {}),
+        ...(projection.usage ? { workbench: { ...this.workbenchFromState(this.stateFor(threadId), null), tokenUsage: projection.usage } } : {}),
       });
     }
 
     if (projection.terminal) {
       this.finishContinuation(threadId, runId, projection.terminal);
-      if (this.runId === runId) this.runId = null;
+      this.releaseRun(runId);
       this.runOutcome = projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error";
       this.runError = terminalError;
       this.updateThreadActivity(threadId, projection.terminal === "complete" ? "complete" : projection.terminal === "interrupted" ? "interrupted" : "error", 0);
@@ -1338,13 +1367,18 @@ export class TextRuntime {
   private handleNativeDriverError(error: unknown, threadId: string): void {
     const normalized = normalizeError(error);
     this.diagnostics.record({ source: "mastra", type: "stream_consume_error", threadId, runId: this.runId, payload: error });
-    if (this.threadState.continuation?.threadId === threadId) {
-      void this.reconcileContinuation("stream-error");
+    const continuation = this.stateFor(threadId).continuation;
+    if (continuation) {
+      void this.reconcileContinuation("stream-error", continuation);
       return;
     }
-    this.runOutcome = "error";
-    this.runError = normalized;
-    this.runId = null;
+    // An error from another thread must not end the run that owns the shared marker.
+    if (this.runThreadId === threadId || !this.runId) {
+      this.runOutcome = "error";
+      this.runError = normalized;
+      this.runId = null;
+      this.runThreadId = null;
+    }
     this.updateThreadActivity(threadId, "error", 0);
     if (threadId === this.selectedThreadId) this.publish({ status: "error", activeRun: null, error: normalized });
     void this.settleNativeRun(threadId, "error", normalized);
@@ -1352,14 +1386,15 @@ export class TextRuntime {
 
   private handleNativeDriverClose(threadId: string, activeRunId: string | null): void {
     this.diagnostics.record({ source: "mastra", type: "stream_closed", threadId, runId: activeRunId ?? this.runId ?? undefined });
-    if (this.threadState.continuation?.threadId === threadId) {
-      void this.reconcileContinuation("stream-close");
+    const continuation = this.stateFor(threadId).continuation;
+    if (continuation) {
+      void this.reconcileContinuation("stream-close", continuation);
       return;
     }
-    const runId = activeRunId ?? (this.runId && this.snapshot.activeRun?.threadId === threadId ? this.runId : null);
+    const runId = activeRunId ?? (this.runId && this.runThreadId === threadId ? this.runId : null);
     if (!runId) return;
     const error: RuntimeError = { code: "unknown", message: "The response stream closed before Proteus reported a final result.", retryable: true };
-    this.runId = null;
+    this.releaseRun(runId);
     this.runOutcome = "error";
     this.runError = error;
     this.updateThreadActivity(threadId, "error", 0);
@@ -1384,11 +1419,8 @@ export class TextRuntime {
   private async refreshNativeTasks(threadId: string): Promise<void> {
     const tasks = await this.loadNativeTasks(threadId).catch(() => null);
     if (!tasks) return;
-    if (threadId === this.selectedThreadId) this.threadState = { ...this.threadState, tasks };
-    if (threadId === this.selectedThreadId) {
-      this.threadState = { ...this.threadState, tasks };
-      this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
-    }
+    const next = this.updateThreadState(threadId, (state) => ({ ...state, tasks }));
+    if (threadId === this.selectedThreadId) this.publish({ workbench: this.workbenchFromState(next, null) });
   }
 
   private async syncMessagesSafely(threadId?: string, guard?: { selectionGeneration?: number; syncGeneration?: number }, assistantRunId?: string): Promise<boolean> {
@@ -1469,7 +1501,7 @@ export class TextRuntime {
     return assistantRunId ? !this.assistantProjections.has(assistantRunId) : true;
   }
 
-  private async syncThreadState(options: { clearError?: boolean } = {}, selectionGeneration = this.threadSelectionGeneration): Promise<void> {
+  private async syncThreadState(options: { clearError?: boolean; threadId?: string } = {}, selectionGeneration = this.threadSelectionGeneration): Promise<void> {
     const syncGeneration = ++this.threadStateSyncGeneration;
     const projectSummaries = await this.projectSummaries();
     let threads = (await this.threads.list())
@@ -1488,13 +1520,17 @@ export class TextRuntime {
         },
       }))];
     }
-    const activeThreadId = this.selectedThreadId && threads.some((thread) => thread.id === this.selectedThreadId) ? this.selectedThreadId : threads[0].id;
+    const wantedThreadId = options.threadId ?? this.selectedThreadId;
+    const activeThreadId = wantedThreadId && threads.some((thread) => thread.id === wantedThreadId) ? wantedThreadId : threads[0].id;
     if (selectionGeneration !== this.threadSelectionGeneration || syncGeneration !== this.threadStateSyncGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)) return;
     const nextThreadState = activeThreadId ? await this.loadThreadState(activeThreadId) : {};
     if (selectionGeneration !== this.threadSelectionGeneration || syncGeneration !== this.threadStateSyncGeneration || (this.pendingThreadSelectionId !== null && this.pendingThreadSelectionId !== activeThreadId)) return;
     for (const [id, optimistic] of this.optimisticUserMessages) {
       if (optimistic.threadId !== activeThreadId) this.optimisticUserMessages.delete(id);
     }
+    // Keep the thread we leave in the per-thread cache so background runs still find its state. The
+    // selection changes only here, after the target loaded, so no save can write one thread's state under another id.
+    if (this.selectedThreadId && this.selectedThreadId !== activeThreadId && threads.some((thread) => thread.id === this.selectedThreadId)) this.threadStateCache.set(this.selectedThreadId, uiStateOf(this.threadState));
     this.selectedThreadId = activeThreadId;
     let modelSelection = resolveRememberedModelSelection(
       nextThreadState.modelSelection,
@@ -1561,8 +1597,9 @@ export class TextRuntime {
     };
   }
 
-  private nextPlanVersion(): number {
-    const versions = [...(this.threadState.pendingInteractions ?? []), ...(this.threadState.resolvedInteractions ?? [])].map((item) => item.plan?.version ?? 0);
+  private nextPlanVersion(threadId: string): number {
+    const state = this.stateFor(threadId);
+    const versions = [...(state.pendingInteractions ?? []), ...(state.resolvedInteractions ?? [])].map((item) => item.plan?.version ?? 0);
     return Math.max(0, ...versions) + 1;
   }
 
@@ -1584,43 +1621,41 @@ export class TextRuntime {
     };
   }
 
-  private finalizeResolvingInteractions(toolCallId?: string, terminalStatus?: PendingInteraction["status"], feedback?: string): void {
+  private finalizeResolvingInteractions(threadId: string, toolCallId?: string, terminalStatus?: PendingInteraction["status"], feedback?: string): void {
     const entries = [...this.resolvingInteractions.entries()].filter(([id]) => !toolCallId || id === toolCallId);
     if (entries.length === 0) return;
     const resolved = entries.map(([, entry]) => this.resolvedInteraction(entry, terminalStatus ?? entry.status, feedback));
     const resolvedIds = new Set(entries.map(([id]) => id));
     for (const id of resolvedIds) this.resolvingInteractions.delete(id);
     for (const id of resolvedIds) this.hydratedPlans.delete(id);
-    this.threadState = {
-      ...this.threadState,
-      pendingInteractions: (this.threadState.pendingInteractions ?? []).filter((item) => !resolvedIds.has(item.toolCallId)),
-      resolvedInteractions: [...(this.threadState.resolvedInteractions ?? []), ...resolved],
-    };
-    const threadId = this.selectedThreadId;
-    if (threadId) void this.persistThreadState(threadId, this.threadState);
-    if (threadId && this.selectedThreadId === threadId) {
+    const next = this.updateThreadState(threadId, (state) => ({
+      ...state,
+      pendingInteractions: (state.pendingInteractions ?? []).filter((item) => !resolvedIds.has(item.toolCallId)),
+      resolvedInteractions: [...(state.resolvedInteractions ?? []), ...resolved],
+    }));
+    void this.persistThreadState(threadId, next);
+    if (this.selectedThreadId === threadId) {
       this.publish({
-        interactions: this.threadState.pendingInteractions ?? [],
-        workbench: this.workbenchFromState(this.threadState, null),
+        interactions: next.pendingInteractions ?? [],
+        workbench: this.workbenchFromState(next, null),
       });
     }
   }
 
-  private markInteractionFailed(toolCallId: string, error: InteractionError): void {
+  private markInteractionFailed(threadId: string, toolCallId: string, error: InteractionError): void {
     this.resolvingInteractions.delete(toolCallId);
     this.hydratedPlans.delete(toolCallId);
-    this.threadState = {
-      ...this.threadState,
-      pendingInteractions: (this.threadState.pendingInteractions ?? []).map((item) =>
+    const next = this.updateThreadState(threadId, (state) => ({
+      ...state,
+      pendingInteractions: (state.pendingInteractions ?? []).map((item) =>
         item.toolCallId === toolCallId ? { ...item, status: "failed", error } : item,
       ),
-    };
-    const threadId = this.selectedThreadId;
-    if (threadId) void this.persistThreadState(threadId, this.threadState);
-    if (threadId && this.selectedThreadId === threadId) {
+    }));
+    void this.persistThreadState(threadId, next);
+    if (this.selectedThreadId === threadId) {
       this.publish({
-        interactions: this.threadState.pendingInteractions ?? [],
-        workbench: this.workbenchFromState(this.threadState, null),
+        interactions: next.pendingInteractions ?? [],
+        workbench: this.workbenchFromState(next, null),
       });
     }
   }
@@ -1729,7 +1764,10 @@ export class TextRuntime {
       resolveManual = resolve;
       rejectManual = reject;
     });
-    this.codexManualInput = mode === "browser" ? { resolve: resolveManual, reject: rejectManual } : null;
+    const manualHandle = mode === "browser" ? { resolve: resolveManual, reject: rejectManual } : null;
+    this.codexManualInput = manualHandle;
+    // A cancelled login rejects this promise; nothing may be left to await it.
+    manualInput.catch(() => undefined);
     this.publish({
       providerAuth: { providerId: "codex", mode, status: "starting", instructions: "Starting secure ChatGPT authorization…" },
       error: null,
@@ -1782,7 +1820,8 @@ export class TextRuntime {
       console.warn("Codex OAuth failed", { stage: failureStage, code: failure.code });
     }).finally(() => {
       if (this.codexAuthAbortController === abortController) this.codexAuthAbortController = null;
-      this.codexManualInput = null;
+      // A newer login may already own the manual-input handle after a cancel.
+      if (this.codexManualInput === manualHandle) this.codexManualInput = null;
     });
   }
 
@@ -2155,8 +2194,7 @@ export class TextRuntime {
         if (generation !== this.threadSelectionGeneration) return;
         await this.enqueueThreadSwitch(async () => {
           if (generation !== this.threadSelectionGeneration) return;
-          this.selectedThreadId = threadId;
-          await this.syncThreadState({}, generation);
+          await this.syncThreadState({ threadId }, generation);
           await this.nativeDriver.ensureSubscription(threadId);
           if (generation === this.threadSelectionGeneration) this.pendingThreadSelectionId = null;
         });
@@ -2183,6 +2221,7 @@ export class TextRuntime {
     await this.ensureInitialized();
     if (this.startingRun || this.runId) throw makeRuntimeError("busy");
     await this.threads.delete(threadId);
+    this.threadStateCache.delete(threadId);
     this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
     const remaining = (await this.threads.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -2193,7 +2232,8 @@ export class TextRuntime {
           modelSelection: this.defaultModelSelection(),
         },
       }));
-      this.selectedThreadId = next.id;
+      await this.syncThreadState({ threadId: next.id });
+      return;
     }
     await this.syncThreadState();
   }
@@ -2224,10 +2264,18 @@ export class TextRuntime {
       });
       this.publish({ messages: this.mergeTransientMessages(threadId, this.snapshot.messages), error: null, retryMessageId: null });
     }
-    const result = await this.nativeDriver.queue(threadId, candidate, { clientMessageId: messageId }, await this.requestContextFor(threadId));
+    let result: { runId: string; queued: boolean };
+    try {
+      result = await this.nativeDriver.queue(threadId, candidate, { clientMessageId: messageId }, await this.requestContextFor(threadId));
+    } catch (error) {
+      // Roll the optimistic message back so a resend does not show it twice.
+      if (options.optimistic !== false && this.optimisticUserMessages.delete(messageId)) this.publish({ messages: this.snapshot.messages.filter((message) => message.id !== messageId) });
+      throw error;
+    }
     if (!result.queued) {
       this.runClientMessageId = options.optimistic === false ? null : messageId;
       this.runId = result.runId;
+      this.runThreadId = threadId;
       this.publish({ status: "running", activeRun: { runId: result.runId, threadId, status: "running" } });
     } else {
       this.publish({ workbench: this.workbenchFromState(this.threadState, null) });
@@ -2238,13 +2286,13 @@ export class TextRuntime {
   async respondToInteraction(toolCallId: string, response: unknown): Promise<InteractionResponseResult> {
     const requestStartedAt = performance.now();
     await this.ensureInitialized();
+    const threadId = this.selectedThreadId;
     const interaction = this.threadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
-    if (!interaction) return this.interactionFailure({ code: "stale", message: "That request is no longer waiting for an answer.", retryable: false });
-    this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "received", threadId: interaction.threadId ?? this.selectedThreadId ?? undefined, runId: interaction.runId, toolCallId, payload: { kind: interaction.kind } });
+    if (!threadId || !interaction) return this.interactionFailure({ code: "stale", message: "That request is no longer waiting for an answer.", retryable: false });
+    this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "received", threadId, runId: interaction.runId, toolCallId, payload: { kind: interaction.kind } });
     if (interaction.status !== "pending") return this.interactionFailure({ code: "busy", message: "That request is already being resolved.", retryable: interaction.status === "failed" });
     if (this.resolvingInteractions.size > 0) return this.interactionFailure({ code: "busy", message: "Another response is already being resolved.", retryable: true });
-    const nativeThreadId = this.selectedThreadId;
-    const nativeSuspension = nativeThreadId ? await this.nativeDriver.findSuspension(nativeThreadId, toolCallId) : null;
+    const nativeSuspension = await this.nativeDriver.findSuspension(threadId, toolCallId);
     if (!nativeSuspension) return this.interactionFailure({ code: "stale", message: "This approval expired. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) });
     let resumeData: unknown;
     let nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">;
@@ -2275,26 +2323,24 @@ export class TextRuntime {
       feedback,
     };
     this.resolvingInteractions.set(toolCallId, resolution);
-    this.threadState = {
-      ...this.threadState,
-      pendingInteractions: (this.threadState.pendingInteractions ?? []).map((item) => (item.toolCallId === toolCallId ? resolving : item)),
-    };
-    const responseThreadId = interaction.threadId ?? this.selectedThreadId;
-    if (this.selectedThreadId === responseThreadId) {
+    const resolvingState = this.updateThreadState(threadId, (state) => ({
+      ...state,
+      pendingInteractions: (state.pendingInteractions ?? []).map((item) => (item.toolCallId === toolCallId ? resolving : item)),
+    }));
+    if (this.selectedThreadId === threadId) {
       this.publish({
-        interactions: this.threadState.pendingInteractions ?? [],
-        workbench: this.workbenchFromState(this.threadState, null),
+        interactions: resolvingState.pendingInteractions ?? [],
+        workbench: this.workbenchFromState(resolvingState, null),
       });
     }
-    this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "ui_resolving", threadId: this.selectedThreadId, runId: this.runId, toolCallId, durationMs: performance.now() - requestStartedAt });
-    return await this.completeInteractionResponse(toolCallId, resumeData, interaction, nextStatus, feedback);
+    this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "ui_resolving", threadId, runId: this.runId, toolCallId, durationMs: performance.now() - requestStartedAt });
+    return await this.completeInteractionResponse(threadId, toolCallId, resumeData, interaction, nextStatus, feedback);
   }
 
-  private async completeInteractionResponse(toolCallId: string, resumeData: unknown, interaction: PendingInteraction, nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">, feedback?: string): Promise<InteractionResponseResult> {
-    const threadId = interaction.threadId ?? this.selectedThreadId ?? undefined;
+  private async completeInteractionResponse(threadId: string, toolCallId: string, resumeData: unknown, interaction: PendingInteraction, nextStatus: Extract<PendingInteraction["status"], "approved" | "rejected" | "answered">, feedback?: string): Promise<InteractionResponseResult> {
     try {
-      const nativeSuspension = threadId ? await this.nativeDriver.findSuspension(threadId, toolCallId) : null;
-      if (!threadId || !nativeSuspension) throw new Error("Mastra no longer has this suspended run.");
+      const nativeSuspension = await this.nativeDriver.findSuspension(threadId, toolCallId);
+      if (!nativeSuspension) throw new Error("Mastra no longer has this suspended run.");
       if (interaction.runId && nativeSuspension.runId !== interaction.runId) throw new Error("The suspended run changed before this response was accepted.");
       if (nativeSuspension.requiresApproval) throw new Error("This response belongs to an approval request, not a suspended interaction.");
       const resumeStartedAt = performance.now();
@@ -2309,13 +2355,13 @@ export class TextRuntime {
       } else {
         this.recordToolOutcome(toolCallId, { content: "Response received" }, false, "completed");
       }
-      this.finalizeResolvingInteractions(toolCallId);
-      await this.beginContinuation(interaction, nativeSuspension.runId, interaction.kind === "submit_plan" ? nextStatus === "approved" ? "plan-approved" : "plan-rejected" : "answered");
+      this.finalizeResolvingInteractions(threadId, toolCallId);
+      await this.beginContinuation(threadId, interaction, nativeSuspension.runId, interaction.kind === "submit_plan" ? nextStatus === "approved" ? "plan-approved" : "plan-rejected" : "answered");
       this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "native_resume_boundary", threadId, runId: nativeSuspension.runId, toolCallId, durationMs: performance.now() - resumeStartedAt });
       return { accepted: true };
     } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not resume this request. Resubmit the original turn to try again.", retryable: Boolean(interaction.originMessageId) };
-      this.markInteractionFailed(toolCallId, failure);
+      this.markInteractionFailed(threadId, toolCallId, failure);
       this.diagnostics.record({ source: "runtime", type: "interaction_response", phase: "error", threadId, runId: this.runId, toolCallId, payload: error });
       return this.interactionFailure(failure);
     }
@@ -2323,17 +2369,17 @@ export class TextRuntime {
 
   async dismissInteraction(toolCallId: string): Promise<InteractionResponseResult> {
     await this.ensureInitialized();
-    const interaction = this.threadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
-    if (!interaction || interaction.status !== "failed") return this.interactionFailure({ code: "stale", message: "That failed interaction is no longer available.", retryable: false });
-    this.threadState = {
-      ...this.threadState,
-      pendingInteractions: (this.threadState.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId),
-      resolvedInteractions: [...(this.threadState.resolvedInteractions ?? []), { ...interaction, status: "cancelled" }],
-    };
     const threadId = this.selectedThreadId;
-    if (threadId) await this.persistThreadState(threadId, this.threadState);
-    if (threadId && this.selectedThreadId === threadId) {
-      this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
+    const interaction = this.threadState.pendingInteractions?.find((item) => item.toolCallId === toolCallId);
+    if (!threadId || !interaction || interaction.status !== "failed") return this.interactionFailure({ code: "stale", message: "That failed interaction is no longer available.", retryable: false });
+    const next = this.updateThreadState(threadId, (state) => ({
+      ...state,
+      pendingInteractions: (state.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId),
+      resolvedInteractions: [...(state.resolvedInteractions ?? []), { ...interaction, status: "cancelled" }],
+    }));
+    await this.persistThreadState(threadId, next);
+    if (this.selectedThreadId === threadId) {
+      this.publish({ interactions: next.pendingInteractions ?? [], workbench: this.workbenchFromState(next, null) });
     }
     return { accepted: true };
   }
@@ -2343,7 +2389,7 @@ export class TextRuntime {
     const pending = this.threadState.pendingInteractions?.find((item) => item.kind === "tool_approval" && item.toolCallId === toolCallId);
     if (!pending) return this.interactionFailure({ code: "stale", message: "That tool approval is no longer available.", retryable: false });
     if (pending.status !== "pending") return this.interactionFailure({ code: "busy", message: "That tool approval is already being resolved.", retryable: pending.status === "failed" });
-    const threadId = pending.threadId ?? this.selectedThreadId;
+    const threadId = this.selectedThreadId;
     if (!threadId) return this.interactionFailure({ code: "stale", message: "The approval conversation is no longer available.", retryable: false });
     const nativeSuspension = await this.nativeDriver.findSuspension(threadId, toolCallId);
     if (!nativeSuspension || !nativeSuspension.requiresApproval) return this.interactionFailure({ code: "stale", message: "That tool approval has expired.", retryable: false });
@@ -2351,27 +2397,27 @@ export class TextRuntime {
     const currentFingerprint = approvalFingerprint(nativeSuspension.toolName ?? pending.toolName ?? "", nativeSuspension.args);
     if (!fingerprint || fingerprint !== pending.fingerprint || fingerprint !== currentFingerprint) return this.interactionFailure({ code: "invalid-response", message: "The tool request changed before approval. Review its current arguments.", retryable: false });
     this.diagnostics.record({ source: "runtime", type: "tool_approval_response", phase: "received", threadId, runId: nativeSuspension.runId, toolCallId, payload: { approved } });
-    this.threadState = {
-      ...this.threadState,
-      pendingInteractions: (this.threadState.pendingInteractions ?? []).map((item) => item.toolCallId === toolCallId ? { ...item, status: "resolving" as const } : item),
-    };
-    this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
+    const resolvingState = this.updateThreadState(threadId, (state) => ({
+      ...state,
+      pendingInteractions: (state.pendingInteractions ?? []).map((item) => item.toolCallId === toolCallId ? { ...item, status: "resolving" as const } : item),
+    }));
+    this.publish({ interactions: resolvingState.pendingInteractions ?? [], workbench: this.workbenchFromState(resolvingState, null) });
     try {
       await this.nativeDriver.approve(threadId, nativeSuspension.runId, toolCallId, approved, await this.requestContextFor(threadId));
       this.nativeSuspensions.delete(toolCallId);
       this.recordToolOutcome(toolCallId, approved ? undefined : { content: MASTRA_TOOL_DECLINED_MESSAGE }, false, approved ? "running" : "declined");
-      this.threadState = {
-        ...this.threadState,
-        pendingInteractions: (this.threadState.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId),
-        resolvedInteractions: [...(this.threadState.resolvedInteractions ?? []), { ...pending, status: approved ? "approved" : "rejected" }],
-      };
-      this.publish({ interactions: this.threadState.pendingInteractions ?? [], workbench: this.workbenchFromState(this.threadState, null) });
-      await this.beginContinuation(pending, nativeSuspension.runId, approved ? "approved" : "declined");
+      const resolvedState = this.updateThreadState(threadId, (state) => ({
+        ...state,
+        pendingInteractions: (state.pendingInteractions ?? []).filter((item) => item.toolCallId !== toolCallId),
+        resolvedInteractions: [...(state.resolvedInteractions ?? []), { ...pending, status: approved ? "approved" : "rejected" }],
+      }));
+      if (this.selectedThreadId === threadId) this.publish({ interactions: resolvedState.pendingInteractions ?? [], workbench: this.workbenchFromState(resolvedState, null) });
+      await this.beginContinuation(threadId, pending, nativeSuspension.runId, approved ? "approved" : "declined");
       this.diagnostics.record({ source: "runtime", type: "tool_approval_response", phase: "native_resume_boundary", threadId, runId: nativeSuspension.runId, toolCallId, payload: { approved } });
       return { accepted: true };
     } catch (error) {
       const failure: InteractionError = { code: "resume-failed", message: "Mastra could not apply this tool decision. Try again.", retryable: true };
-      this.markInteractionFailed(toolCallId, failure);
+      this.markInteractionFailed(threadId, toolCallId, failure);
       this.diagnostics.record({ source: "runtime", type: "tool_approval_response", phase: "error", threadId, runId: nativeSuspension.runId, toolCallId, payload: normalizeError(error) });
       return this.interactionFailure(failure);
     }
@@ -2442,11 +2488,13 @@ export class TextRuntime {
     }
     const originalThread = await this.threads.get(sourceThreadId);
     const sourceState = await this.loadThreadState(sourceThreadId);
+    if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     const { thread: retryThread } = await this.memory.cloneThread({
       sourceThreadId,
       title: `${originalThread?.title?.trim() || "Conversation"} · retry`,
       resourceId: RESOURCE_ID,
     });
+    try {
     const staleInteractions = sourceState.pendingInteractions ?? [];
     const retryState: PersistedThreadState = {
       ...sourceState,
@@ -2477,8 +2525,13 @@ export class TextRuntime {
     const removeIds = retryMessages.slice(retrySourceIndex).map((message) => message.id);
     if (removeIds.length > 0) await this.memory.deleteMessages(removeIds);
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
-    this.selectedThreadId = retryThread.id;
-    await this.syncThreadState();
+    } catch (error) {
+      // A clone nobody will ever open must not linger as an orphan "· retry" conversation.
+      this.threadStateCache.delete(retryThread.id);
+      await this.threads.delete(retryThread.id).catch(() => undefined);
+      throw error;
+    }
+    await this.syncThreadState({ threadId: retryThread.id });
     if (this.startingRunAbortRequested) throw makeRuntimeError("aborted");
     this.retryingText = null;
     this.hideSingleRetry = false;
@@ -2552,49 +2605,48 @@ export class TextRuntime {
       }
       return;
     }
+    const runId = this.runId;
+    const threadId = this.runThreadId ?? this.selectedThreadId;
     this.runOutcome = "interrupted";
     this.runError = makeRuntimeError("aborted");
-    const continuation = this.threadState.continuation;
-    if (continuation) {
+    const continuation = threadId ? this.stateFor(threadId).continuation : null;
+    if (threadId && continuation) {
       this.clearContinuationTimers();
-      this.threadState = { ...this.threadState, continuation: null };
-      void this.persistThreadState(continuation.threadId, this.threadState);
-      if (this.selectedThreadId === continuation.threadId) this.publish({ continuation: null });
-      this.diagnostics.record({ source: "runtime", type: "continuation", phase: "aborted", threadId: continuation.threadId, runId: continuation.runId, toolCallId: continuation.toolCallId });
+      const next = this.updateThreadState(threadId, (state) => ({ ...state, continuation: null }));
+      void this.persistThreadState(threadId, next);
+      if (this.selectedThreadId === threadId) this.publish({ continuation: null });
+      this.diagnostics.record({ source: "runtime", type: "continuation", phase: "aborted", threadId, runId: continuation.runId, toolCallId: continuation.toolCallId });
     }
-    const pendingInteractions = this.threadState.pendingInteractions ?? [];
-    if (pendingInteractions.length > 0) {
+    const pendingInteractions = threadId ? this.stateFor(threadId).pendingInteractions ?? [] : [];
+    if (threadId && pendingInteractions.length > 0) {
       this.resolvingInteractions.clear();
-      this.threadState = {
-        ...this.threadState,
+      const next = this.updateThreadState(threadId, (state) => ({
+        ...state,
         pendingInteractions: [],
         resolvedInteractions: [
-          ...(this.threadState.resolvedInteractions ?? []),
+          ...(state.resolvedInteractions ?? []),
           ...pendingInteractions.map((item) => ({
             ...item,
             status: "cancelled" as const,
           })),
         ],
-      };
-      const threadId = this.selectedThreadId;
-      if (threadId) void this.persistThreadState(threadId, this.threadState);
-      if (threadId && this.selectedThreadId === threadId)
+      }));
+      void this.persistThreadState(threadId, next);
+      if (this.selectedThreadId === threadId)
         this.publish({
           interactions: [],
-          workbench: this.workbenchFromState(this.threadState, null),
+          workbench: this.workbenchFromState(next, null),
         });
     }
-    const activeThreadId = this.selectedThreadId;
-    if (activeThreadId) this.nativeDriver.abort(activeThreadId);
-    this.publish({
-      activeRun: {
-        runId: this.runId,
-        threadId: this.selectedThreadId ?? "unknown",
-        status: "aborted",
-      },
-      error: this.runError,
-    });
+    // Mastra only reports an abort for a run it still has; with none, no terminal chunk will ever arrive.
+    if (threadId && this.nativeDriver.abort(threadId)) {
+      this.publish({ activeRun: { runId, threadId, status: "aborted" }, error: this.runError });
+      return;
+    }
+    this.clearContinuationTimers();
+    this.releaseRun(runId);
+    if (threadId) this.updateThreadActivity(threadId, "interrupted", 0);
+    if (!threadId || this.selectedThreadId === threadId) this.publish({ status: this.idleStatus(), activeRun: null, error: this.runError });
   }
-
 
 }

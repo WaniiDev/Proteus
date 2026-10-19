@@ -1,0 +1,273 @@
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { approvalFingerprint } from "./approval-policy";
+import { parseSuspendedInteraction, parseToolApproval } from "./runtime-projection";
+
+// The runtime is a per-process singleton over Electrobun paths; give it a throwaway user-data directory.
+let userData = "";
+let TextRuntime: typeof import("./runtime").TextRuntime;
+const runtimes: Array<{ shutdown(): Promise<void> }> = [];
+
+beforeAll(async () => {
+  userData = await mkdtemp(join(tmpdir(), "proteus-isolation-"));
+  mock.module("electrobun/bun", () => ({
+    Utils: { paths: { userData }, openExternal: () => undefined, openPath: () => undefined, openFileDialog: async () => [] },
+  }));
+  const realCodexAuth = await import("@mastra/code-sdk/auth/providers/openai-codex");
+  mock.module("@mastra/code-sdk/auth/providers/openai-codex", () => ({
+    ...realCodexAuth,
+    loginOpenAICodex: ({ signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("Login cancelled")));
+    }),
+  }));
+  ({ TextRuntime } = await import("./runtime"));
+}, 60_000);
+
+afterAll(async () => {
+  await Promise.all(runtimes.map((runtime) => runtime.shutdown().catch(() => undefined)));
+  await rm(userData, { recursive: true, force: true }).catch(() => undefined);
+});
+
+const vault = { get: async () => null, set: async () => undefined, delete: async () => undefined };
+const codexStore = { setOAuth: () => undefined, clear: () => undefined } as never;
+
+type Writes = Array<{ id: string; state: Record<string, unknown> }>;
+
+function threadRow(id: string) {
+  return { id, title: id, createdAt: new Date(0), updatedAt: new Date(0), metadata: {} };
+}
+
+/** A runtime whose Mastra boundary (storage, driver, request context) is replaced by recording fakes. */
+function fixture(options: { failWrites?: boolean } = {}) {
+  const runtime = new TextRuntime(vault, codexStore);
+  runtimes.push(runtime);
+  const rt = runtime as any;
+  const writes: Writes = [];
+  const gates = { load: null as Promise<void> | null };
+  const memoryStore = {
+    getThreadById: async ({ threadId }: { threadId: string }) => {
+      if (gates.load) await gates.load;
+      return { id: threadId, title: threadId, metadata: {} };
+    },
+    updateThread: async ({ id, metadata }: { id: string; metadata: Record<string, unknown> }) => {
+      if (options.failWrites) throw new Error("disk full");
+      writes.push({ id, state: metadata["proteus.ui.v2"] as Record<string, unknown> });
+    },
+  };
+  rt.storage = { getStore: async (name: string) => (name === "memory" ? memoryStore : undefined) };
+  rt.ensureInitialized = async () => undefined;
+  rt.requestContextFor = async () => ({ get: () => undefined });
+  rt.projectSummaries = async () => [];
+  rt.threads = { get: async (id: string) => threadRow(id), list: async () => [threadRow("A"), threadRow("B")], recall: async () => [], create: async () => threadRow("new") };
+  const calls = { abort: [] as string[], queue: 0 };
+  const driver = {
+    findSuspension: async () => null as unknown,
+    resume: async () => ({ runId: "r1" }),
+    approve: async () => ({ runId: "r1" }),
+    abort: (threadId: string) => { calls.abort.push(threadId); return false; },
+    activeRunId: () => null,
+    listSuspensions: async () => [],
+    queuedCount: () => 0,
+    ensureSubscription: async () => undefined,
+    queue: async () => { calls.queue += 1; return { runId: "r1", queued: false }; },
+    dispose: () => undefined,
+  };
+  rt.nativeDriver = driver;
+  const select = (id: string, state: Record<string, unknown>) => {
+    rt.selectedThreadId = id;
+    rt.threadState = state;
+    rt.threadStateCache.set(id, structuredClone(state));
+  };
+  return { rt, writes, driver, calls, gates, select };
+}
+
+const stateA = { workspaceBinding: { kind: "project", projectId: "project-a" }, modelSelection: { providerId: "openrouter", modelId: "openrouter/model-a" } };
+const stateB = { workspaceBinding: { kind: "app" }, modelSelection: { providerId: "codex", modelId: "codex/model-b" } };
+
+function approvalFor(threadId: string, toolCallId = "t1") {
+  return parseToolApproval({ threadId, runId: "r1", toolCallId, toolName: "mastra_workspace_write_file", args: { path: "a.txt" } });
+}
+
+function projection(threadId: string, runId = "r1") {
+  return { runId, threadId, message: { id: `${runId}:m`, role: "assistant", turnId: runId, parts: [], status: "streaming", createdAt: new Date(0).toISOString() }, terminal: null } as never;
+}
+
+describe("runtime thread isolation (WAN-503)", () => {
+  test("H1: approving in A then switching to B persists A's own state", async () => {
+    const { rt, writes, driver, select } = fixture();
+    const pending = approvalFor("A");
+    select("A", { ...stateA, pendingInteractions: [pending] });
+    driver.findSuspension = async () => ({ runId: "r1", toolCallId: "t1", toolName: pending.toolName, args: { path: "a.txt" }, requiresApproval: true });
+    driver.approve = async () => {
+      select("B", stateB);
+      return { runId: "r1" };
+    };
+    expect(await rt.respondToToolApproval("t1", true, approvalFingerprint(pending.toolName!, { path: "a.txt" }))).toEqual({ accepted: true });
+    const savedForA = writes.filter((write) => write.id === "A");
+    expect(savedForA.length).toBeGreaterThan(0);
+    for (const write of savedForA) {
+      expect(write.state.workspaceBinding).toEqual(stateA.workspaceBinding);
+      expect(write.state.modelSelection).toEqual(stateA.modelSelection);
+    }
+    expect(savedForA.at(-1)?.state.continuation).toMatchObject({ threadId: "A", toolCallId: "t1" });
+    expect(rt.threadState).toEqual(stateB);
+  });
+
+  test("H1: answering a plan in A then switching to B resolves it in A only", async () => {
+    const { rt, writes, driver, select } = fixture();
+    const plan = { ...parseSuspendedInteraction({ toolCallId: "p1", toolName: "submit_plan", suspendPayload: { path: "p.md", plan: "# Plan" } }, 1)!, threadId: "A", runId: "r1" };
+    select("A", { ...stateA, pendingInteractions: [plan] });
+    driver.findSuspension = async () => ({ runId: "r1", toolCallId: "p1", toolName: "submit_plan", requiresApproval: false });
+    driver.resume = async () => {
+      select("B", stateB);
+      return { runId: "r1" };
+    };
+    expect(await rt.respondToInteraction("p1", { action: "approved" })).toEqual({ accepted: true });
+    const last = writes.filter((write) => write.id === "A").at(-1)!;
+    expect(last.state.workspaceBinding).toEqual(stateA.workspaceBinding);
+    expect((last.state.pendingInteractions as unknown[]) ?? []).toEqual([]);
+    expect((last.state.resolvedInteractions as Array<{ toolCallId: string }>).map((item) => item.toolCallId)).toContain("p1");
+    expect(rt.threadState).toEqual(stateB);
+  });
+
+  test("H2: the selection changes only after the target thread loaded", async () => {
+    const { rt, gates, select } = fixture();
+    select("A", stateA);
+    let release!: () => void;
+    gates.load = new Promise<void>((resolve) => { release = resolve; });
+    rt.threadStateCache.delete("B");
+    const switching = rt.selectThread("B");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(rt.selectedThreadId).toBe("A");
+    expect(rt.threadState).toEqual(stateA);
+    release();
+    gates.load = null;
+    await switching;
+    expect(rt.selectedThreadId).toBe("B");
+    expect(rt.threadStateCache.get("A")).toMatchObject({ workspaceBinding: stateA.workspaceBinding, modelSelection: stateA.modelSelection });
+  });
+
+  test("H3: a suspension from a background thread never reaches the selected thread", async () => {
+    const { rt, select } = fixture();
+    select("B", stateB);
+    select("A", stateA);
+    select("B", stateB);
+    rt.handleNativeProjection(projection("A"), { type: "tool-call-approval", payload: { toolCallId: "t1", toolName: "mastra_workspace_write_file", args: { path: "a.txt" } } });
+    expect(rt.threadState.pendingInteractions ?? []).toEqual([]);
+    expect(rt.snapshot.interactions).toEqual([]);
+    expect(rt.threadStateCache.get("A")?.pendingInteractions?.map((item: { toolCallId: string }) => item.toolCallId)).toEqual(["t1"]);
+    expect(rt.threadActivity.get("A")).toMatchObject({ activity: "waiting" });
+  });
+
+  test("H3: plan versions count within the suspended thread", async () => {
+    const { rt, select } = fixture();
+    const earlier = { ...parseSuspendedInteraction({ toolCallId: "old", toolName: "submit_plan", suspendPayload: { path: "p.md", plan: "# Old" } }, 7)!, status: "approved" as const };
+    select("B", { ...stateB, resolvedInteractions: [earlier] });
+    rt.threadStateCache.set("A", structuredClone(stateA));
+    rt.handleNativeProjection(projection("A"), { type: "tool-call-suspended", payload: { toolCallId: "p1", toolName: "submit_plan", suspendPayload: { path: "../outside.md" } } });
+    expect(rt.threadStateCache.get("A")?.pendingInteractions?.[0]?.plan?.version).toBe(1);
+  });
+
+  test("H4: abort returns to idle when Mastra has no run to abort", () => {
+    const { rt, calls, select } = fixture();
+    select("A", stateA);
+    rt.runId = "r1";
+    rt.runThreadId = "A";
+    rt.snapshot.status = "running";
+    rt.snapshot.activeRun = { runId: "r1", threadId: "A", status: "running" };
+    rt.abort();
+    expect(calls.abort).toEqual(["A"]);
+    expect(rt.runId).toBeNull();
+    expect(rt.snapshot.activeRun).toBeNull();
+    expect(rt.snapshot.status).not.toBe("running");
+    expect(rt.snapshot.error?.code).toBe("aborted");
+  });
+
+  test("H4: abort targets the thread that owns the run, not the selected one", () => {
+    const { rt, calls, driver, select } = fixture();
+    select("B", stateB);
+    rt.runId = "r1";
+    rt.runThreadId = "A";
+    driver.abort = (threadId: string) => { calls.abort.push(threadId); return true; };
+    rt.abort();
+    expect(calls.abort).toEqual(["A"]);
+    expect(rt.runId).toBe("r1");
+  });
+
+  test("M1: continuation progress and finish match the thread, not the selection", () => {
+    const { rt, select } = fixture();
+    const continuation = { interactionId: "i", toolCallId: "t1", threadId: "A", runId: "r1", kind: "tool_approval", decision: "approved", phase: "slow", startedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString() };
+    select("B", stateB);
+    rt.threadStateCache.set("A", { ...stateA, continuation });
+    rt.markContinuationProgress({ type: "text-delta", payload: { text: "hi" } }, "A", "r1");
+    expect(rt.threadStateCache.get("A").continuation.phase).toBe("resuming");
+    rt.finishContinuation("A", "r1", "complete");
+    expect(rt.threadStateCache.get("A").continuation).toBeNull();
+    expect(rt.threadState.continuation).toBeUndefined();
+    rt.clearContinuationTimers();
+  });
+
+  test("M2: a failed queue call rolls the optimistic message back", async () => {
+    const { rt, driver, select } = fixture();
+    select("A", stateA);
+    driver.queue = async () => { throw new Error("blocked"); };
+    await expect(rt.queueNativeMessage("A", "hello", { clientMessageId: "m1", optimistic: true })).rejects.toThrow("blocked");
+    expect(rt.optimisticUserMessages.size).toBe(0);
+    expect(rt.snapshot.messages.some((message: { id: string }) => message.id === "m1")).toBeFalse();
+  });
+
+  test("L2: a failed write neither keeps the cache ahead of storage nor stays silent", async () => {
+    const { rt } = fixture({ failWrites: true });
+    rt.threadStateCache.set("A", structuredClone(stateA));
+    await rt.persistThreadState("A", { ...stateA, events: [{ id: "e", type: "system", text: "x", createdAt: "" }] });
+    expect(rt.threadStateCache.get("A")).toEqual(stateA);
+    expect(rt.snapshot.error?.message).toContain("could not be saved");
+    await expect(rt.persistThreadState("A", { ...stateA, events: [] }, true)).rejects.toThrow("disk full");
+    expect(rt.threadStateCache.get("A")).toEqual(stateA);
+  });
+
+  test("L3: a stream error from another thread leaves the owning run alone", () => {
+    const { rt, select } = fixture();
+    select("A", stateA);
+    rt.threadStateCache.set("B", structuredClone(stateB));
+    rt.runId = "r1";
+    rt.runThreadId = "A";
+    rt.handleNativeDriverError(new Error("boom"), "B");
+    expect(rt.runId).toBe("r1");
+    rt.handleNativeDriverError(new Error("boom"), "A");
+    expect(rt.runId).toBeNull();
+  });
+
+  test("L5: an abort requested while preparing a retry creates no orphan clone", async () => {
+    const { rt, select } = fixture();
+    select("A", stateA);
+    const message = (id: string, role: string, text: string) => ({ id, role, content: { format: 2, parts: [{ type: "text", text }] }, createdAt: new Date(0) });
+    rt.threads.recall = async () => [message("u1", "user", "hello"), message("a1", "assistant", "hi")];
+    rt.loadThreadState = async () => {
+      rt.startingRunAbortRequested = true;
+      return structuredClone(stateA);
+    };
+    let clones = 0;
+    rt.memory.cloneThread = async () => { clones += 1; return { thread: threadRow("clone") }; };
+    await expect(rt.retryReserved("a1")).rejects.toMatchObject({ code: "aborted" });
+    expect(clones).toBe(0);
+  });
+});
+
+describe("Codex login handoff (WAN-503 L1)", () => {
+  test("a login started after cancel keeps its own manual-input handle", async () => {
+    const runtime = new TextRuntime(vault, codexStore);
+    runtimes.push(runtime);
+    const rt = runtime as any;
+    rt.ensureInitialized = async () => undefined;
+    await rt.connectProvider("codex", { mode: "browser" });
+    await rt.cancelProviderAuth("codex");
+    await rt.connectProvider("codex", { mode: "browser" });
+    const second = rt.codexManualInput;
+    expect(second).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(rt.codexManualInput).toBe(second);
+  });
+});
