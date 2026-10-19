@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,8 +25,14 @@ beforeAll(async () => {
   ({ TextRuntime } = await import("./runtime"));
 }, 60_000);
 
+// Mastra's storage proxy runs the full schema init inside close(), even for runtimes whose init the fixture bypassed. Closing all of
+// them in one afterAll made ~27 concurrent inits contend on the one SQLite file (~1s idle, near the 5s hook limit under CPU load), so
+// each test closes its own runtimes one at a time and the file is already initialised for all but the first.
+afterEach(async () => {
+  for (const runtime of runtimes.splice(0)) await runtime.shutdown().catch(() => undefined);
+});
+
 afterAll(async () => {
-  await Promise.all(runtimes.map((runtime) => runtime.shutdown().catch(() => undefined)));
   await rm(userData, { recursive: true, force: true }).catch(() => undefined);
 });
 
