@@ -94,7 +94,7 @@ Other backend modules are grouped by feature under `src/bun/`: `core/` (projecti
 
 ## Initialization and thread load failures
 
-`initialize()` runs storage, preferences, diagnostics, legacy cutover and thread sync, then continues to the provider and credential steps (Codex model refresh, stored credential validation) even when loading the thread state fails. If a thread metadata read fails, the runtime keeps the previous selection and surfaces an error; it never defaults the thread to the app workspace, because that would silently redirect an attached project conversation.
+`initialize()` runs storage, preferences, diagnostics, legacy cutover and thread sync, then continues to the provider and credential steps (Codex model refresh, stored credential validation) even when loading the thread state fails. Thread sync publishes the thread list before loading the target thread. If a thread metadata read fails, the runtime keeps the previous selection (or clears it when that thread is gone), surfaces a retryable error and records a `thread_state_load` diagnostic; nothing is cached for the failed thread, and it never defaults the thread to the app workspace, because that would silently redirect an attached project conversation. `deleteThread` drops the deleted thread even when loading the next one fails, and both delete and retry-clone cleanup forget the thread's saved state and continuation track.
 
 ## Storage and packaging
 
