@@ -51,7 +51,7 @@ export class ThreadService {
 
   async loadThreadState(threadId: string): Promise<PersistedThreadState> {
     const cached = this.ctx.threadStateCache.get(threadId);
-    if (cached) return this.reconcileNativeThreadState(threadId, structuredClone(cached));
+    if (cached) return this.settleLoadedState(threadId, cached, await this.reconcileNativeThreadState(threadId, structuredClone(cached)));
     try {
       const memoryStore = await this.storage.getStore("memory");
       const thread = await memoryStore?.getThreadById({
@@ -62,7 +62,7 @@ export class ThreadService {
       if (value && typeof value === "object" && !Array.isArray(value)) {
         const state = structuredClone(value as PersistedThreadState);
         state.workspaceBinding ??= { kind: "app" };
-        return this.reconcileNativeThreadState(threadId, state);
+        return this.settleLoadedState(threadId, undefined, await this.reconcileNativeThreadState(threadId, state));
       }
     } catch {
       // Metadata is optional; an empty state is a valid first-run state.
@@ -70,6 +70,14 @@ export class ThreadService {
     const empty: PersistedThreadState = { workspaceBinding: { kind: "app" } };
     this.ctx.threadStateCache.set(threadId, empty);
     return structuredClone(empty);
+  }
+
+  /** Cache a freshly reconciled state, unless a background update landed meanwhile: that one is newer. */
+  private settleLoadedState(threadId: string, startedWith: PersistedThreadState | undefined, reconciled: PersistedThreadState): PersistedThreadState {
+    const current = this.ctx.threadStateCache.get(threadId);
+    if (current !== startedWith) return structuredClone(current!);
+    this.ctx.threadStateCache.set(threadId, uiStateOf(reconciled));
+    return structuredClone(reconciled);
   }
 
   private async loadNativeTasks(threadId: string): Promise<WorkbenchTask[]> {
@@ -128,7 +136,6 @@ export class ThreadService {
           resolvedInteractions: [...(state.resolvedInteractions ?? []), ...stale.map((item) => ({ ...item, status: "cancelled" as const }))],
         }
       : state;
-    this.ctx.threadStateCache.set(threadId, structuredClone(next));
     return structuredClone(next);
   }
 

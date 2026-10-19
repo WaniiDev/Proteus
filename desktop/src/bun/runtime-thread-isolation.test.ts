@@ -355,6 +355,24 @@ describe("review fixes: continuation history (WAN-503)", () => {
   });
 });
 
+describe("review fixes: loadThreadState (WAN-503)", () => {
+  test("R5: a background update made while suspensions are read is not overwritten", async () => {
+    const { rt, driver, select } = fixture();
+    select("A", stateA);
+    const continuation = { interactionId: "i", toolCallId: "t1", threadId: "B", runId: "r1", kind: "tool_approval", decision: "approved", phase: "resuming", startedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString() };
+    rt.ctx.threadStateCache.set("B", { ...stateB, continuation });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    driver.listSuspensions = async () => { await gate; return []; };
+    const loading = rt.threads.loadThreadState("B");
+    rt.continuation.finishContinuation("B", "r1", "complete");
+    release();
+    const loaded = await loading;
+    expect(rt.ctx.threadStateCache.get("B").continuation).toBeNull();
+    expect(loaded.continuation ?? null).toBeNull();
+  });
+});
+
 describe("Codex login handoff (WAN-503 L1)", () => {
   test("a login started after cancel keeps its own manual-input handle", async () => {
     const runtime = new TextRuntime(vault, codexStore);
