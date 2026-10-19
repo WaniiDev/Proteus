@@ -17,6 +17,8 @@ Each conversation has a workspace binding: either the private Proteus app worksp
 
 `RequestContext` carries the trusted thread ID, workspace kind, and canonical root from the Bun runtime into `Agent.queueMessage()` through `ifIdle.streamOptions`. A dynamic `LocalFilesystem` is constructed with `contained: true`, so traversal and symlink escapes outside that root are rejected by Mastra.
 
+`WorkspaceRegistry` (the UI file operations) resolves the nearest existing ancestor of every path, including missing write/move/copy/mkdir destinations, rejects it when it leaves the root, rejects destinations that are themselves symlinks or junctions, and re-checks the parent after `mkdir`.
+
 The filesystem tool allowlist is deny-by-default:
 
 - Read, list, stat, and grep run automatically.
