@@ -8,6 +8,8 @@ export interface ViewSwapOptions {
   reduced?: () => boolean;
   /** document.startViewTransition when the webview has it; pass null to force the two-beat classes. */
   viewTransition?: ((update: () => void) => unknown) | null;
+  /** Swap at once (no exit beat) for some moves, e.g. a first send that creates the conversation. */
+  immediate?: (from: unknown, to: unknown) => boolean;
 }
 
 const FALLBACK_EXIT_MS = 160;
@@ -49,7 +51,7 @@ export function useViewSwap<T>(target: T, options: ViewSwapOptions = {}): { show
       return;
     }
     const opts = optionsRef.current;
-    if ((opts.reduced ?? reducedMotion)()) {
+    if ((opts.reduced ?? reducedMotion)() || opts.immediate?.(shownRef.current, target)) {
       setShown(target);
       setLeaving(false);
       return;

@@ -58,6 +58,12 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   error: null,
 };
 
+/** Escape stops the run only from inside the Island, and never while an ask or an answer is open (Escape belongs to that surface then). */
+export function shouldAbortOnEscape(target: EventTarget | null, surfaceOpen: boolean): boolean {
+  if (surfaceOpen) return false;
+  return target instanceof Element && target.closest(".island") !== null;
+}
+
 function ignoreRpc(promise: Promise<unknown>): void {
   void promise.catch(() => undefined);
 }
@@ -65,13 +71,18 @@ function ignoreRpc(promise: Promise<unknown>): void {
 export default function App() {
   useScrollbars();
   const [view, setView] = useState<View>("companion");
-  const { shown: shownView, leaving: viewLeaving } = useViewSwap(view);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
   const [input, setInput] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [, setOrbState] = useState<OrbState>("idle");
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(DEFAULT_SNAPSHOT);
+  const { shown: shownView, leaving: viewLeaving } = useViewSwap(view);
+  // One conversation to another is the same two beats around the thread. The first send that creates a conversation (none -> some) is not a swap.
+  const { shown: shownThreadId, leaving: threadLeaving } = useViewSwap(snapshot.activeThreadId, { immediate: (from) => from === null });
+  const settledSnapshot = useRef(snapshot);
+  if (snapshot.activeThreadId === shownThreadId) settledSnapshot.current = snapshot;
+  const displaySnapshot = snapshot.activeThreadId === shownThreadId ? snapshot : settledSnapshot.current;
   const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
   const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
   const [intentPending, setIntentPending] = useState<ReadonlySet<string>>(() => new Set());
@@ -131,25 +142,26 @@ export default function App() {
   }, [snapshot.activeThreadId, snapshot.messages, snapshot.workbench.queuedFollowUpCount]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key === "Escape" && snapshot.activeRun) ignoreRpc(rpc.request["chat.abort"]());
+      if (event.defaultPrevented || event.key !== "Escape" || !snapshot.activeRun) return;
+      if (shouldAbortOnEscape(event.target, snapshot.interactions.length > 0 || document.querySelector(".island.is-open") !== null)) ignoreRpc(rpc.request["chat.abort"]());
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [snapshot.activeRun]);
+  }, [snapshot.activeRun, snapshot.interactions.length]);
   const activeTitle = useMemo(() => snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId)?.title ?? "New chat", [snapshot.threads, snapshot.activeThreadId]);
   const handleNavigate = (next: View) => {
     setView(next);
   };
   // `fromInput` clears the Island input on send and puts the text back if the send is refused; a follow-up leaves the input alone.
   const sendText = (text: string, fromInput: boolean) => {
-    if (!text || !snapshot.activeThreadId) return;
+    if (!text) return;
     const clientMessageId = crypto.randomUUID();
+    // With no conversation yet the runtime creates one on send; the optimistic bubble is dropped once a thread exists.
     const threadId = snapshot.activeThreadId;
-    const runningForThread = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === threadId;
+    const runningForThread = threadId !== null && snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === threadId;
     const createdAt = new Date().toISOString();
     if (runningForThread) {
-      setQueuedDrafts((current) => [...current, { id: clientMessageId, threadId, text, createdAt, state: "queued" }]);
+      setQueuedDrafts((current) => [...current, { id: clientMessageId, threadId: threadId as string, text, createdAt, state: "queued" }]);
     } else {
       setLocalMessages((current) =>
         new Map(current).set(clientMessageId, {
@@ -281,6 +293,8 @@ export default function App() {
     messages.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     return { ...snapshot, messages };
   }, [localMessages, snapshot]);
+  // During the exit beat of a conversation swap the old conversation stays on screen, with its own local messages.
+  const displayedSnapshot = displaySnapshot === snapshot ? renderedSnapshot : displaySnapshot;
   return (
     <>
       <div className="app-shell">
@@ -291,11 +305,12 @@ export default function App() {
           {shownView === "companion" && (
             <AnswerIntentStateContext.Provider value={intentState}>
             <Companion
-              snapshot={renderedSnapshot}
+              snapshot={displayedSnapshot}
+              threadLeaving={threadLeaving}
               activeTitle={activeTitle}
               input={input}
               setInput={setInput}
-              queuedDrafts={queuedDrafts.filter((draft) => draft.threadId === renderedSnapshot.activeThreadId)}
+              queuedDrafts={queuedDrafts.filter((draft) => draft.threadId === displayedSnapshot.activeThreadId)}
               transportError={transportError}
               onTransportRetry={() => transportRetryRef.current()}
               onSend={handleSend}
