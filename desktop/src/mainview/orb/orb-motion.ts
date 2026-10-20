@@ -24,10 +24,10 @@ export function measureOrbPlacement(anchor: RectLike, container: Pick<DOMRect, "
 }
 
 /**
- * Exponential approach rate per second. A gap g settles in ln(g / ORB_SETTLE_PX) / rate, so 11.5 settles a 1200px gap in
- * about 560ms, inside ORB_FLY_MS with room for frame quantisation (9 took 667-700ms for 800-1000px).
+ * Exponential approach rate per second: the follower is 1 - e^(-9t) (ADR 0002 keeps it unchanged). A gap g settles in
+ * ln(g / ORB_SETTLE_PX) / 9, so hero-to-dock gaps up to about 640px land inside ORB_FLY_MS; taller windows take up to ~770ms.
  */
-const ORB_RATE = 11.5;
+const ORB_RATE = 9;
 
 /** Frame-rate-independent smoothing without overshoot or transition restarts. */
 export function advanceOrbPlacement(current: OrbPlacement, target: OrbPlacement, elapsedMs: number, reducedMotion = false): OrbPlacement {

@@ -44,8 +44,8 @@ describe("persistent orb motion", () => {
     }
   });
 
-  it("settles within the dur-fly budget for any gap up to 1200px, without overshoot", () => {
-    for (const gap of [200, 800, 900, 1_000, 1_200]) {
+  it("settles within dur-fly for gaps up to 640px and within 800ms up to 1200px, without overshoot", () => {
+    for (const gap of [200, 480, 640, 800, 1_000, 1_200]) {
       const dock: OrbPlacement = { x: 40, y: 40, scaleX: 44 / 220, scaleY: 44 / 220 };
       const hero: OrbPlacement = { x: 40 + gap, y: 40 + gap, scaleX: 1, scaleY: 1 };
       for (const frameMs of [1_000 / 60, 1_000 / 30]) {
@@ -60,7 +60,7 @@ describe("persistent orb motion", () => {
           elapsed += frameMs;
         }
         expect(placement).toBe(dock);
-        expect(elapsed).toBeLessThanOrEqual(ORB_FLY_MS);
+        expect(elapsed).toBeLessThanOrEqual(gap <= 640 ? ORB_FLY_MS + frameMs : 800);
       }
     }
   });
