@@ -3,7 +3,7 @@ import { Brain, Check, HardDrive, Search, Settings2, ShieldCheck } from "lucide-
 import type { MemoryScope, ProviderModel, RuntimeError, RuntimeSnapshot } from "../../shared/contracts";
 import { MemorySettingsPanel } from "../components/MemorySettingsPanel";
 import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "../lib/model-sorting";
-import { PROVIDER_LOGOS } from "../lib/provider-assets";
+import { ProviderMark } from "../components/ProviderMark";
 import { ProviderSettings } from "../components/ProviderSettings";
 import { Icon } from "../components/Icon";
 import { DiagnosticsPanel } from "../components/DiagnosticsPanel";
@@ -50,7 +50,7 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
       <div className="settings-content">
       {section === "providers" ? <><ProviderSettings snapshot={snapshot} apiKey={apiKey} setApiKey={setApiKey} onConnect={onConnect} onDisconnect={onDisconnect} onStartCodexAuth={onStartCodexAuth} onSubmitCodexAuth={onSubmitCodexAuth} onCancelCodexAuth={onCancelCodexAuth} onRefresh={onRefresh} onSelectProvider={onSelectProvider} />{errorForUi(snapshot.error)}</> : section === "models" ? <section className="card settings-card model-settings-card">
         <div className="settings-section-head"><div><h2 className="title-md">Model</h2><p className="settings-intro">Selection applies to the current conversation and becomes the default for new chats.</p></div><button className="btn-outline sm" type="button" onClick={onRefresh}><Icon name="refresh" size={15} /> Refresh</button></div>
-        <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}><img src={PROVIDER_LOGOS[provider.id]} alt="" aria-hidden="true" /><span>{provider.name}</span></button>)}</div>
+        <div className="provider-switch" role="group" aria-label="Model provider">{snapshot.providers.map((provider) => <button type="button" key={provider.id} className={snapshot.selectedProviderId === provider.id ? "active" : ""} disabled={!provider.verified} onClick={() => onSelectProvider(provider.id)}><ProviderMark provider={provider.id} size={18} /><span>{provider.name}</span></button>)}</div>
         <div className="model-catalog-tools">
           <div className="model-search"><Search size={16} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models" aria-label="Search models" /></div>
           <select value={modelSort} onChange={(event) => setModelSort(event.target.value as ModelSort)} aria-label="Sort models">
