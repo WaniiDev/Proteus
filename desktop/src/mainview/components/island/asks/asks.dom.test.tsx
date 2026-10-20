@@ -75,12 +75,11 @@ describe("tool approval ask", () => {
     expect(approved).toBe(0);
   });
 
-  test("a command approval states the host-execution limitation in an island-note; an edit does not", async () => {
-    const command: PendingInteraction = { ...base, toolName: "mastra_workspace_execute_command", args: { command: "bun test" }, title: "Allow command?" };
-    const t = await mount(command, handlers().h);
+  test("every tool approval states the host-execution limitation in an island-note; a question does not", async () => {
+    const t = await mount(base, handlers().h);
     expect(t.q(".island-note").textContent).toBe("On Windows this runs on your machine without a sandbox.");
     await t.rerender(null);
-    await t.rerender(base);
+    await t.rerender({ ...base, kind: "ask_user", question: "Which?", toolName: undefined, args: undefined });
     expect(t.host.querySelector(".island-note")).toBeNull();
   });
 
@@ -88,7 +87,7 @@ describe("tool approval ask", () => {
     const { h } = handlers({ onApproval: () => new Promise(() => undefined) });
     const t = await mount(base, h);
     await act(async () => { t.buttons()[1]!.click(); });
-    expect(t.host.querySelector(".island-note")).toBeNull();
+    expect([...t.host.querySelectorAll(".island-note")].map((n) => n.textContent)).toEqual(["On Windows this runs on your machine without a sandbox."]);
     expect(t.host.textContent).not.toContain("Approving tool");
   });
 
@@ -96,7 +95,7 @@ describe("tool approval ask", () => {
     const { h } = handlers({ onApproval: async () => ({ accepted: false, code: "stale", message: "That request changed.", retryable: false }) });
     const t = await mount(base, h);
     await act(async () => { t.buttons()[1]!.click(); });
-    expect(t.q('.island-note').textContent).toBe("That request changed.");
+    expect([...t.host.querySelectorAll(".island-note")].map((n) => n.textContent)).toEqual(["On Windows this runs on your machine without a sandbox.", "That request changed."]);
     expect(t.buttons().map((b) => b.disabled)).toEqual([false, false]);
     expect(t.buttons()[1]!.textContent).toBe("Approve edit");
   });
