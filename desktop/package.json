@@ -12,7 +12,8 @@
     "build": "vite build && NODE_USE_SYSTEM_CA=1 electrobun build --env=stable",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "preview:ui": "vite --config vite.preview.config.ts --port 5181"
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.96",
