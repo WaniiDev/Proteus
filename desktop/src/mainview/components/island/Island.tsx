@@ -15,6 +15,8 @@ export const STOPPED_STATUS: IslandStatus = { label: "Stopped.", line: "Nothing 
 export type IslandHandle = {
   /** One ring across the glass: call on approve (send does it itself). */
   wave: () => void;
+  /** Bring the input forward and focus it (a reply drafted into it). */
+  focusInput: () => void;
 };
 
 export type IslandProps = {
@@ -51,6 +53,8 @@ export type IslandProps = {
   bodyScroll?: boolean;
   /** Under the capsule: the context chips row. */
   meta?: ReactNode;
+  /** Above the capsule: a notice about the app (a provider that is not connected). */
+  notice?: ReactNode;
   /** How long the stop confirmation shows. */
   stoppedMs?: number;
   ref?: Ref<IslandHandle>;
@@ -65,7 +69,7 @@ const emptyStatus: IslandStatus = { label: "", line: "" };
  * alternating status lines, the ask kicker) and of the end slot (send, Stop) stays mounted and is switched with `data-on`;
  * hidden ones are inert. It is also the app's one live region.
  */
-export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askKind, answerLabel = "Answer", answerLine = "", onDone, announcement = "", input, placeholder, inputDisabled, sendLabel, sendDisabled, onInput, onSubmit, onStop, onNudge, open = false, body, bodyScroll = false, meta, stoppedMs = STOPPED_MS, ref }: IslandProps) {
+export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askKind, answerLabel = "Answer", answerLine = "", onDone, announcement = "", input, placeholder, inputDisabled, sendLabel, sendDisabled, onInput, onSubmit, onStop, onNudge, open = false, body, bodyScroll = false, meta, notice, stoppedMs = STOPPED_MS, ref }: IslandProps) {
   const waveRef = useRef<HTMLSpanElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -81,7 +85,7 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
   };
   const [slots, setSlots] = useState<Slots>({ on: "a", key: "", a: emptyStatus, b: emptyStatus });
 
-  useImperativeHandle(ref, () => ({ wave: () => wave(waveRef.current) }), []);
+  useImperativeHandle(ref, () => ({ wave: () => wave(waveRef.current), focusInput: () => { focusInputRef.current = true; setEngaged(true); inputRef.current?.focus({ preventScroll: true }); } }), []);
 
   // Stop confirmation: when a run that was stopped from here ends, say so for a moment instead of going quiet.
   const running = end === "stop";
@@ -146,9 +150,11 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
   const inputOn = visibleMode === "input";
   const askOn = visibleMode === "ask";
   const answerOn = visibleMode === "answer";
-  // An ask answers from its body (Decline / Approve), so Send and Stop both fade out while it is open; an answer ends with Done.
+  // An ask answers from its body (Decline / Approve), so Send and Stop both fade out while it is open. An answer keeps Stop while the run is
+  // still going (it is still streaming) and ends with Done once the run is over.
   const sendOn = end === "send" && !askOn && !answerOn;
-  const stopOn = end === "stop" && !askOn && !answerOn;
+  const stopOn = end === "stop" && !askOn;
+  const doneOn = answerOn && end !== "stop";
   const flag = (on: boolean) => (on ? "true" : "false");
   const slotProps = (on: boolean) => ({ "data-on": flag(on), "aria-hidden": !on, inert: !on });
   // Live regions are the status slots and the announcement only: the body (an ask or a streamed answer) is never read out block by block.
@@ -156,6 +162,7 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
 
   return (
     <div className="island-dock">
+      {notice && <div className="island-notice">{notice}</div>}
       <div className={`island lens${open ? " is-open" : ""}${morphing ? " is-morphing" : ""}`} data-orb={orbState}>
         <span className="island-wave" ref={waveRef} aria-hidden="true" />
         <form
@@ -219,7 +226,7 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
             >
               <Square className="i sm" aria-hidden="true" />Stop
             </button>
-            <button type="button" className="btn btn-island-quiet" data-on={flag(answerOn)} disabled={!answerOn} tabIndex={answerOn ? undefined : -1} onClick={onDone}>Done</button>
+            <button type="button" className="btn btn-island-quiet" data-on={flag(doneOn)} disabled={!doneOn} tabIndex={doneOn ? undefined : -1} onClick={onDone}>Done</button>
           </div>
         </form>
         <span className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</span>

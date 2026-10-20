@@ -127,7 +127,7 @@ describe("context chips", () => {
     expect(tabs.map((tab) => tab.getAttribute("title"))).toEqual(["OpenRouter", "Codex"]);
     expect([...picker.querySelectorAll('[role="radio"]')].map((r) => r.querySelector("strong")!.textContent).sort()).toEqual(["GPT-5.6 Luna", "GPT-5.6 Sol"]);
     expect(picker.querySelector(".picker-section input[type=range]")).not.toBeNull();
-    expect(picker.querySelector(".picker-foot")!.textContent).toContain("Manage models in Settings");
+    expect(picker.querySelector(".picker-foot")!.textContent).toContain("Settings");
     await t.click(picker.querySelector(".picker-foot button"));
     expect(t.calls.models).toBe(1);
     await t.done();

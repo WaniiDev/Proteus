@@ -98,6 +98,21 @@ The prototype's `genBlockOk` and `genAnswerOk` are the reference for the schema'
 - **Toasts are announced through one live region.** `components/ds/Toast.tsx` is `role="status"` only where no Island is mounted; with an Island mounted its text goes out through `useToastAnnouncement()` into the Island's own region, so a page never has two.
 - **Upstream to DS:** a disabled menu item and its one-line reason (`.menu > button.is-disabled`, `.menu-reason`) and the fold of a removed sidebar row (`.session.is-leaving`) are app rules in `sidebar.css` because the system has neither.
 
+## Listed deviations and follow-ups (final review)
+
+- **WAN-529 "requests that need approvals start their own conversation" is not implemented (follow-up).** A follow-up that needs approvals is sent in the same conversation; the prototype starts a new one.
+- **Queued-message Cancel is not wired.** It needs a runtime dequeue RPC; the queued bubble shows its state only.
+- **A question ask has no Cancel.** The runtime cannot cancel `ask_user`; the prototype's Cancel has no counterpart.
+- **Stop is hidden while an ask is open** (`motion.md`: the ask answers from its body). While an answer streams, Stop stays and Done takes its place once the run is over.
+- **Skills moved to the project page.** The prototype has no Skills surface.
+- **The orb follower rate stays at ADR 0002's `1 - e^(-9t)`.** Hero to dock gaps over about 640px therefore take up to about 770ms.
+- **The warn chip says "Connect <provider>"** (README), not the issue's "Not connected".
+- **The Settings thinking slider does not play the focusing moment.** No orb is on that page.
+- **A new chat is not listed in the sidebar until its first message**, as in the prototype; the app creates the thread at New chat, the sidebar hides it while it is empty and idle.
+- **The thread records one resolved line per approved tool**, not one per ask group ("Approved · Edit notes/launch-faq.md" twice, where the prototype says "Edit 2 files in notes/"). The snapshot carries tool parts, not ask groups. An approved tool that then failed reads "Approved · ... — failed".
+- **A new-chat error uses the system's `.notice.error`** in a fixed corner wrapper (`.app-shell-notice`, tokens only).
+- **A reply that drafts text settles the open answer into the thread**, puts the draft in the input, focuses it and shows a "Draft saved" toast.
+
 ## Each phase ships when
 
 - Every screen it touched passes the system's **Done means** checklist (Day and Night against the card, keyboard, reduced motion, reduced transparency, more contrast, forced colours, copy, states covered by tests).

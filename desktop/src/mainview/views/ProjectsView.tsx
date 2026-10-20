@@ -68,7 +68,7 @@ export function ProjectsView({ snapshot, onCreateChat, onSelectThread, onOpenMem
 
   if (selected) {
     const ready = selected.availability === "ready";
-    const memoryCount = memoryError ? "Unavailable" : selectedMemory ? `${selectedMemory.entries.length} saved` : "";
+    const memoryCount = memoryError ? "Unavailable" : selectedMemory ? `${selectedMemory.entries.length} saved ${selectedMemory.entries.length === 1 ? "item" : "items"}` : "";
     return <section className="projects-view" ref={scroller}><div className={`page ${body}`}>
       <button className="btn btn-ghost sm page-back" type="button" onClick={() => { setSelectedProjectId(null); setConfirmForget(false); }}><ArrowLeft className="i sm" aria-hidden="true" />Projects</button>
       <div className="page-head">

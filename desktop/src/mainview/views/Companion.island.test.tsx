@@ -101,7 +101,7 @@ describe("answers in the Island", () => {
     return { ...snapshot, activeRun: null, messages: [...snapshot.messages.slice(0, -1), { ...last, status: "complete" as const, parts: last.parts.map((part) => (part.type === "answer" ? { ...part, streaming: false, blocks: [...part.blocks, { type: "suggest" as const, items: ["Show Friday"] }] } : part)) }] };
   };
 
-  test("the latest answer opens the Island while it streams: Speaking, the question, Done, and no card yet", async () => {
+  test("the latest answer opens the Island while it streams: Speaking, the question, Stop, and no card yet", async () => {
     const t = await mount(streaming());
     const island = t.q(".island")!;
     expect(island.classList.contains("is-open")).toBe(true);
@@ -111,8 +111,10 @@ describe("answers in the Island", () => {
     const status = [...t.host.querySelectorAll(".island-status")].find((el) => el.getAttribute("data-on") === "true")!;
     expect(status.textContent).toContain("Speaking");
     expect(status.textContent).toContain("What needs my attention this week?");
-    const done = [...t.host.querySelectorAll<HTMLButtonElement>(".island-end .btn")].find((b) => b.textContent === "Done")!;
-    expect(done.getAttribute("data-on")).toBe("true");
+    // The run is still going, so Stop stays reachable and Done waits for the end of the stream.
+    const endButton = (label: string) => [...t.host.querySelectorAll<HTMLButtonElement>(".island-end .btn")].find((b) => b.textContent === label)!;
+    expect(endButton("Stop").getAttribute("data-on")).toBe("true");
+    expect(endButton("Done").getAttribute("data-on")).toBe("false");
     // The older, finished answer is already a card; the streaming one is not.
     expect(t.thread().querySelectorAll(".gen-card")).toHaveLength(1);
   });

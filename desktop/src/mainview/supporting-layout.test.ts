@@ -29,7 +29,7 @@ describe("supporting page layout", () => {
     expect(base).not.toContain(".memory-cols");
     expect(base).not.toContain(".setting-row");
     expect(current).not.toContain(".settings-tabs");
-    expect(current.match(/^\.page-narrow \{/gm)).toHaveLength(1);
+    expect(current).not.toContain(".page-narrow");
   });
 
   test("projects and the delete/forget modals rely on the design system, not app CSS", async () => {
@@ -42,9 +42,8 @@ describe("supporting page layout", () => {
     expect(view).toContain("page-back");
   });
 
-  test("keeps explicit desktop, tablet, and compact layouts for new surfaces", async () => {
+  test("keeps a compact layout for the stage below 760px", async () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
-    expect(css).toContain("@media (max-width: 860px)");
-    expect(css).toContain("@media (max-width: 620px)");
+    expect(css).toContain("@media (max-width: 760px)");
   });
 });

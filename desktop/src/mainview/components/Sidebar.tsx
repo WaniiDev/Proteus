@@ -86,7 +86,9 @@ function RenameField({ initial, label, onCommit, onCancel }: { initial: string; 
   return <input ref={ref} className="session-rename" aria-label={label} defaultValue={initial} maxLength={120} onKeyDown={onKeyDown} onBlur={onBlur} />;
 }
 
-export function Sidebar({ view, disabled, onView, onMemory, onSettings, onCreate, threads = [], activeThreadId, messages = [], onSwitch, onRename, onPin, onDeleteRequest }: SidebarProps) {
+export function Sidebar({ view, disabled, onView, onMemory, onSettings, onCreate, threads: allThreads = [], activeThreadId, messages = [], onSwitch, onRename, onPin, onDeleteRequest }: SidebarProps) {
+  // A new chat with nothing sent yet is not a session: it joins the list with its first message, as in the prototype.
+  const threads = useMemo(() => allThreads.filter((thread) => !(thread.id === activeThreadId && messages.length === 0 && thread.activity === "idle")), [allThreads, activeThreadId, messages.length]);
   const [menu, setMenu] = useState<{ threadId: string; anchor: HTMLButtonElement } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const menuThread = menu ? threads.find((thread) => thread.id === menu.threadId) : undefined;

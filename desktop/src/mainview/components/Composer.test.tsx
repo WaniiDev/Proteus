@@ -102,3 +102,15 @@ describe("Claude-style composer", () => {
     await act(async () => { root.unmount(); host.remove(); });
   });
 });
+
+describe("composer when the provider is not connected", () => {
+  test("a warn notice sits above the Island and names the provider", () => {
+    const html = renderToStaticMarkup(
+      <Composer snapshot={snapshot()} input="" queuedDraftCount={0} canChat={false} runningForSelected={false} runningElsewhere={false} providerName="OpenRouter" orbState="idle" docked={false} orbAnchorRef={() => undefined} onInput={() => undefined} onSubmit={() => undefined} onAbort={() => undefined} onSettings={() => undefined} onNudge={() => undefined} onWorkspaceSelect={async () => ({ accepted: true })} onModelSelect={async () => true} onReasoningSelect={async () => true} />,
+    );
+    expect(html).toContain("island-notice");
+    expect(html).toContain("OpenRouter isn’t connected.");
+    expect(html).toContain("Open Settings");
+    expect(render(snapshot())).not.toContain("island-notice");
+  });
+});

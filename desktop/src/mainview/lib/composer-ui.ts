@@ -106,7 +106,7 @@ export function islandStatus(snapshot: RuntimeSnapshot, orbState: OrbState, queu
 
 export function islandPlaceholder(snapshot: RuntimeSnapshot, canChat: boolean, runningElsewhere: boolean, providerName: string): string {
   if (runningElsewhere) return "Another conversation is running…";
-  if (!canChat) return `Configure ${providerName} in Settings to chat`;
+  if (!canChat) return `Connect ${providerName} in Settings to chat`;
   return snapshot.messages.length === 0 && snapshot.activeRun === null ? "Ask Proteus anything" : "Ask a follow-up…";
 }
 

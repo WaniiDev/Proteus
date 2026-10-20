@@ -26,10 +26,7 @@ import { describe, expect, it } from "bun:test";
 type Rule = "colour" | "z-index" | "scrollbar" | "style" | "outline";
 type Counts = Partial<Record<Rule, number>>;
 
-const BASELINE: Record<string, Counts> = {
-  "index.css": { colour: 27, "z-index": 6 },
-  "proteus.css": { colour: 30, "z-index": 5 },
-};
+const BASELINE: Record<string, Counts> = {};
 
 /** Custom properties that may be set through `style={{ ... }}`. */
 const STYLE_ALLOWLIST = new Set(["--pos", "--sx", "--sy"]);

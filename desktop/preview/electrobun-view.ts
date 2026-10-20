@@ -80,16 +80,14 @@ function memoryState() {
     enabled: true,
     scopes: [
       {
-        scope: { kind: "global" }, key: "global", label: "Everywhere", status: "active",
+        scope: { kind: "global" }, key: "global", label: "Global", status: "active",
         entries: [
-          entry("mem1", "preference", "Prefers short answers with a clear next step."),
-          entry("mem2", "preference", "Writes in British English."),
-          entry("mem3", "profile", "Product designer at a small studio in Leeds."),
-          entry("mem4", "work-style", "Wants the plan first, then the work."),
+          entry("mem1", "preference", "Hold drafts for my review before anything is sent."),
+          entry("mem2", "work-style", "Keep summaries to five bullets or fewer."),
         ],
       },
-      { scope: { kind: "project", projectId: "p1" }, key: "project:p1", label: "Website redesign", status: "active", entries: [entry("mem5", "project-context", "The launch is in the second week of November.")] },
-      { scope: { kind: "project", projectId: "p2" }, key: "project:p2", label: "Tax documents", status: "active", entries: [] },
+      { scope: { kind: "project", projectId: "p1" }, key: "project:p1", label: "Proteus", status: "active", entries: [entry("mem3", "decision", "Beta moved to September 26 after the October 14 review.")] },
+      { scope: { kind: "project", projectId: "p2" }, key: "project:p2", label: "Launch notes", status: "active", entries: [entry("mem4", "project-context", "Mai owns the launch review; replies go to her first.")] },
     ],
   };
 }
