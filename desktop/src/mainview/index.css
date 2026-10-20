@@ -241,10 +241,10 @@ body { overflow: hidden; }
 .runtime-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--muted-soft); }
 .runtime-dot.ok { background: var(--success); box-shadow: 0 0 0 3px rgba(22,163,74,.12); }
 .runtime-dot.off { background: var(--error); }
-/* StepList extras: the verb cross-fade and the collapsed-group toggle. Both verbs share one grid cell, so the row never changes width or height. */
-.step-verb-swap { display: inline-grid; }
-.step-verb-swap > span { grid-area: 1 / 1; transition: opacity var(--dur-hover) var(--ease-out); }
-.step-verb-swap > span[data-on="false"] { opacity: 0; }
+/* StepList extras: the verb cross-fade and the collapsed-group toggle. The visible verb sizes the cell; the leaving one overlays it, so no gap is reserved after "Read". */
+.step-verb-swap { position: relative; display: inline-block; }
+.step-verb-swap > span { transition: opacity var(--dur-hover) var(--ease-out); }
+.step-verb-swap > span[data-on="false"] { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; }
 .step-group { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; padding: 7px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
 .step-group-chevron { justify-self: center; transition: transform var(--dur-hover) var(--ease-out); }
 .step-group[aria-expanded="true"] .step-group-chevron { transform: rotate(90deg); }
@@ -518,9 +518,12 @@ body { overflow: hidden; }
 .companion-view { --island-clearance: 148px; }
 .stage > .island-dock { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 12px 16px; pointer-events: none; }
 .island-dock > * { pointer-events: auto; }
-.island-orb-slot { flex: none; width: 44px; height: 44px; margin-right: -56px; transition: margin-right var(--dur-morph) var(--ease-morph); }
+/* The slot opens at once, when the flight starts: nothing but the Island's height animates (motion rule 7), so the input never slides. */
+.island-orb-slot { flex: none; width: 44px; height: 44px; margin-right: -56px; }
 .island-orb-slot.is-docked { margin-right: 0; }
 .island-dock .island-meta { margin-top: 10px; }
+/* The ask title takes focus from script when it opens: hug the words so the global focus ring is not a full-width box. */
+.island-title { width: fit-content; max-width: 100%; }
 /* The pickers' anchor (a 0-height box) sits on the capsule's top edge, below the dock's padding, so a picker always rises above the Island. */
 .island-dock > .island-anchor { position: absolute; top: 8px; left: 12px; right: 12px; }
 .picker-group { display: grid; gap: 2px; }

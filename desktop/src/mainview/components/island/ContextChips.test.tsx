@@ -249,17 +249,27 @@ describe("context chips", () => {
     await t.done();
   });
 
-  test("the warn chip says Not connected and opens Settings › Providers", async () => {
+  test("the warn chip says Connect <provider>, has a caret, and opens the picker at its connect row", async () => {
     const value = snapshot();
     value.providers[1] = { ...value.providers[1]!, verified: false, availability: "needs-configuration" };
     const t = await mount(value);
     const chip = t.q<HTMLButtonElement>(".island-chip.is-warn")!;
-    expect(chip.textContent).toBe("Not connected");
+    expect(chip.textContent).toBe(`Connect ${value.providers[1]!.name}`);
+    expect(chip.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
     expect(chip.querySelector(".dot")).not.toBeNull();
+    expect(chip.querySelector(".chip-caret")).not.toBeNull();
     expect(t.q(".island-chip.split")).toBeNull();
     await t.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    const picker = t.q(".picker.from-end")!;
+    expect(picker).not.toBeNull();
+    expect(t.calls.providers).toBe(0);
+    const row = picker.querySelector<HTMLButtonElement>(".picker-option")!;
+    expect(row.textContent).toContain(`Connect ${value.providers[1]!.name}`);
+    await t.click(row);
     expect(t.calls.providers).toBe(1);
-    expect(t.q(".picker")).toBeNull();
+    expect(t.q(".picker.is-leaving") ?? t.q(".picker")).toBeTruthy();
     await t.done();
   });
 

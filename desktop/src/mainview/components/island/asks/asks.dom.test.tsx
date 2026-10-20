@@ -75,11 +75,27 @@ describe("tool approval ask", () => {
     expect(approved).toBe(0);
   });
 
+  test("every tool approval states the host-execution limitation in an island-note; a question does not", async () => {
+    const t = await mount(base, handlers().h);
+    expect(t.q(".island-note").textContent).toBe("On Windows this runs on your machine without a sandbox.");
+    await t.rerender(null);
+    await t.rerender({ ...base, kind: "ask_user", question: "Which?", toolName: undefined, args: undefined });
+    expect(t.host.querySelector(".island-note")).toBeNull();
+  });
+
+  test("busy is the spinner and the participle on the primary only: no extra line", async () => {
+    const { h } = handlers({ onApproval: () => new Promise(() => undefined) });
+    const t = await mount(base, h);
+    await act(async () => { t.buttons()[1]!.click(); });
+    expect([...t.host.querySelectorAll(".island-note")].map((n) => n.textContent)).toEqual(["On Windows this runs on your machine without a sandbox."]);
+    expect(t.host.textContent).not.toContain("Approving tool");
+  });
+
   test("a refused decision re-enables the buttons and says why", async () => {
     const { h } = handlers({ onApproval: async () => ({ accepted: false, code: "stale", message: "That request changed.", retryable: false }) });
     const t = await mount(base, h);
     await act(async () => { t.buttons()[1]!.click(); });
-    expect(t.q('.island-note').textContent).toBe("That request changed.");
+    expect([...t.host.querySelectorAll(".island-note")].map((n) => n.textContent)).toEqual(["On Windows this runs on your machine without a sandbox.", "That request changed."]);
     expect(t.buttons().map((b) => b.disabled)).toEqual([false, false]);
     expect(t.buttons()[1]!.textContent).toBe("Approve edit");
   });
@@ -112,11 +128,16 @@ describe("question ask", () => {
     const { h, calls } = handlers();
     const t = await mount(question, h);
     expect(t.host.querySelectorAll(".island-options input[type=radio]")).toHaveLength(3);
-    expect(t.buttons().map((b) => b.textContent)).toEqual(["Send answer"]);
+    expect(t.buttons().map((b) => b.textContent)).toEqual(["Answer"]);
     expect(t.buttons()[0]!.disabled).toBe(true);
     await act(async () => { t.host.querySelectorAll<HTMLInputElement>(".island-options input")[1]!.click(); });
     await act(async () => { t.buttons()[0]!.click(); });
     expect(calls).toEqual([["respond", "t2", "Staging"]]);
+  });
+
+  test("a question offers Answer only: ask_user has no cancel value to send", async () => {
+    const t = await mount(question, handlers().h);
+    expect(t.buttons().map((b) => b.textContent)).toEqual(["Answer"]);
   });
 
   test("Other reveals a field and sends the typed value", async () => {

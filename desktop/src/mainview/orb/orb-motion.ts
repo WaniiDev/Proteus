@@ -43,6 +43,16 @@ export function advanceOrbPlacement(current: OrbPlacement, target: OrbPlacement,
   return orbPlacementGap(next, target) <= ORB_SETTLE_PX ? target : next;
 }
 
+/**
+ * One frame of the orb's placement. The follower only carries the orb across a hero <-> dock transition; once it has landed
+ * (`settled`) the orb rides its anchor exactly every frame, so an Island that grows or shrinks never leaves it behind.
+ */
+export function stepOrbPlacement(current: OrbPlacement | null, target: OrbPlacement, elapsedMs: number, settled: boolean, reducedMotion = false): { placement: OrbPlacement; settled: boolean } {
+  if (settled || !current || reducedMotion) return { placement: target, settled: true };
+  const placement = advanceOrbPlacement(current, target, elapsedMs);
+  return { placement, settled: placement === target };
+}
+
 /** The largest remaining edge in px between a placement and its target. */
 export function orbPlacementGap(placement: OrbPlacement, target: OrbPlacement): number {
   return Math.max(

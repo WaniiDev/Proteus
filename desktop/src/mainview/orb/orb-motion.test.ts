@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ORB_FLY_MS, advanceOrbPlacement, measureOrbPlacement, orbPlacementGap, orbPlacementTransform, type OrbPlacement } from "./orb-motion";
+import { ORB_FLY_MS, advanceOrbPlacement, measureOrbPlacement, stepOrbPlacement, orbPlacementGap, orbPlacementTransform, type OrbPlacement } from "./orb-motion";
 
 describe("persistent orb motion", () => {
   it("measures an anchor relative to the companion and preserves a fixed canvas size", () => {
@@ -75,5 +75,34 @@ describe("persistent orb motion", () => {
     }
     expect(placement).toEqual(anchorAt(elapsed - 16));
     expect(elapsed).toBeLessThanOrEqual(ORB_FLY_MS + 16);
+  });
+
+  it("rides a moving anchor exactly every frame once settled, so a growing Island never leaves the orb behind", () => {
+    let state: { placement: OrbPlacement; settled: boolean } = { placement: { x: 300, y: 100, scaleX: 1, scaleY: 1 }, settled: false };
+    const dock = (y: number): OrbPlacement => ({ x: 40, y, scaleX: 0.2, scaleY: 0.2 });
+    let elapsed = 0;
+    while (!state.settled && elapsed < 2_000) {
+      state = stepOrbPlacement(state.placement, dock(640), 16, state.settled);
+      elapsed += 16;
+    }
+    expect(state.settled).toBe(true);
+    expect(state.placement).toEqual(dock(640));
+    // The Island opens upward by 182px over the next frames: the orb is on its anchor at every one of them.
+    for (let frame = 1; frame <= 30; frame += 1) {
+      const target = dock(640 - (182 * frame) / 30);
+      state = stepOrbPlacement(state.placement, target, 16, state.settled);
+      expect(state.placement).toEqual(target);
+    }
+  });
+
+  it("flies while unsettled, starts settled with no previous placement, and snaps under reduced motion", () => {
+    const hero: OrbPlacement = { x: 300, y: 100, scaleX: 1, scaleY: 1 };
+    const dock: OrbPlacement = { x: 40, y: 640, scaleX: 0.2, scaleY: 0.2 };
+    const flying = stepOrbPlacement(hero, dock, 16, false);
+    expect(flying.settled).toBe(false);
+    expect(flying.placement.y).toBeGreaterThan(hero.y);
+    expect(flying.placement.y).toBeLessThan(dock.y);
+    expect(stepOrbPlacement(null, dock, 16, false)).toEqual({ placement: dock, settled: true });
+    expect(stepOrbPlacement(hero, dock, 16, false, true)).toEqual({ placement: dock, settled: true });
   });
 });

@@ -173,13 +173,17 @@ export function ContextChips({ snapshot, queuedDraftCount, runningElsewhere, ask
             ref={modelRef}
             type="button"
             className="island-chip is-warn"
-            aria-label={chips.modelAria}
+            aria-haspopup="dialog"
+            aria-expanded={pop === "model"}
+            aria-label={`Connect ${chips.providerName}. Choose how in the model picker.`}
             title={chips.modelTitle}
             aria-disabled={chips.modelLocked || undefined}
-            onClick={() => { if (!chips.modelLocked) { close(false); onProviders(); } }}
+            onClick={() => { if (!chips.modelLocked) toggle("model"); }}
+            onKeyDown={(event) => chipKey(event, "model", chips.modelLocked)}
           >
             <span className="dot warn" />
-            <span className="chip-label">Not connected</span>
+            <span className="chip-label">Connect {chips.providerName}</span>
+            <ChevronDown className="i chip-caret" aria-hidden="true" />
           </button>
         ) : (
           <div className="island-chip split" role="group" aria-label="Model and thinking" aria-disabled={chips.modelLocked || undefined} title={chips.modelTitle}>

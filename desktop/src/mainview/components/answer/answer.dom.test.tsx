@@ -1,9 +1,10 @@
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { useDom } from "../../test/dom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ChatAnswerPart } from "../../../shared/contracts";
 import { AnswerBody } from "./AnswerBody";
+import { resetDraftPicks } from "./intent-state";
 import { fullBlocks, makeAnswer } from "./test-fixtures";
 import type { AnswerIntentEvent } from "./types";
 
@@ -20,7 +21,23 @@ async function mount(answer: ChatAnswerPart, props: Partial<Parameters<typeof An
 const radios = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('[role="radio"]')];
 const key = (el: Element, k: string) => act(async () => { el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })); });
 
+beforeEach(resetDraftPicks);
+
 describe("choice keyboard", () => {
+  it("keeps a picked, unconfirmed option when the answer settles and the block remounts", async () => {
+    const live = makeAnswer(fullBlocks, { streaming: true });
+    const first = await mount(live);
+    await act(async () => { radios(first.host)[2]!.click(); });
+    expect(radios(first.host)[2]!.getAttribute("aria-checked")).toBe("true");
+    await first.unmount();
+    const settled = await mount(makeAnswer(fullBlocks));
+    expect(radios(settled.host).map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+    expect(settled.host.querySelector<HTMLButtonElement>(".gen-choice-foot button")!.disabled).toBe(false);
+    // Another answer's block with the same id is its own draft.
+    const other = await mount(makeAnswer(fullBlocks, { answerId: "a2" }));
+    expect(radios(other.host).every((r) => r.getAttribute("aria-checked") === "false")).toBe(true);
+  });
+
   it("has one tab stop, arrows move and pick, focus follows, Home and End jump", async () => {
     const { host } = await mount(makeAnswer(fullBlocks));
     expect(radios(host).map((r) => r.tabIndex)).toEqual([0, -1, -1]);

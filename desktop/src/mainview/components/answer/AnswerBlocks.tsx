@@ -2,7 +2,7 @@ import { Check, FileWarning, TrendingUp } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import type { AnswerRow } from "../../../shared/answer-catalog";
 import type { AnswerPartBlock } from "../../../shared/contracts";
-import { useIntentState } from "./intent-state";
+import { useDraftPick, useIntentState } from "./intent-state";
 import type { AnswerContext } from "./types";
 
 type Of<T extends AnswerPartBlock["type"]> = Extract<AnswerPartBlock, { type: T }>;
@@ -164,7 +164,7 @@ function Choice({ block, ctx }: BlockProps<"choice">) {
   const outcome = ctx.outcomes[block.id];
   const done = outcome !== undefined;
   const { pending, note } = useIntentState(ctx.answerId, block.id);
-  const [picked, setPicked] = useState<string | undefined>();
+  const [picked, setPicked] = useDraftPick(ctx.answerId, block.id);
   const group = useRef<HTMLDivElement>(null);
   const focusIndex = useRef<number | null>(null);
   // After a locked choice the checked option is the one the outcome names.

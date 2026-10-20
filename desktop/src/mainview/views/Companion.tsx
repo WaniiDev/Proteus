@@ -9,6 +9,7 @@ import { Composer } from "../components/Composer";
 import { Icon } from "../components/Icon";
 import type { OrbHandle } from "../components/Orb";
 import { OrbPresence } from "../components/OrbPresence";
+import { exitMs } from "../components/ds/motion";
 import { useFocusingMoment } from "../ds-app/focusing";
 import { reducedMotion } from "../ds-app/lens";
 import { ensureSurgeLayer } from "../ds-app/surge";
@@ -90,6 +91,17 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
   const lastItem = conversationItems.at(-1);
   const latestAnswer = lastItem?.type === "assistant" ? lastItem.parts.filter((part): part is ChatAnswerPart => part.type === "answer").at(-1) : undefined;
   const liveAnswer = latestAnswer && (latestAnswer.streaming || !dismissedAnswers.has(latestAnswer.answerId)) ? latestAnswer : null;
+  // Done: the card waits for the Island body's exit (--dur-exit), then mounts and rises in.
+  const liveAnswerId = liveAnswer?.answerId ?? null;
+  const [heldAnswerId, setHeldAnswerId] = useState<string | null>(liveAnswerId);
+  useEffect(() => {
+    if (liveAnswerId) {
+      setHeldAnswerId(liveAnswerId);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setHeldAnswerId(null), exitMs());
+    return () => window.clearTimeout(timer);
+  }, [liveAnswerId]);
   const settleAnswer = useCallback(() => {
     if (!liveAnswer) return;
     setDismissedAnswers((current) => new Set(current).add(liveAnswer.answerId));
@@ -163,7 +175,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
                     <div className="bubble">{item.message.text}</div>
                   </div>
                 ) : (
-                  <AssistantTurn key={`turn:${item.id}`} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} openAnswerId={liveAnswer?.answerId ?? null} onIntent={handleIntent} onFollowUp={handleFollowUp} />
+                  <AssistantTurn key={`turn:${item.id}`} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} openAnswerId={liveAnswerId ?? heldAnswerId} onIntent={handleIntent} onFollowUp={handleFollowUp} />
                 ),
               )}
               {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} />)}
