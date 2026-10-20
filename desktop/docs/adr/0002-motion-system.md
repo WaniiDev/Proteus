@@ -6,6 +6,8 @@ status: accepted
 
 The orb’s look and motion do not change with the Island redesign (ADR 0001). It stays the WebGL sphere in `orb3d.ts`, its fifteen states and rhythms in `orb-spec.ts`, its exponential state blend, and the frame-driven placement follower in `orb-motion.ts` (`1 − e^(−9t)`, no overshoot).
 
+One addition, made deliberately and on request: a sixteenth state, `focusing` ("Max thinking. I'll take the time this needs."), a moment played when the person moves thinking to the model's top level. It uses the same shader with its own row of values (amp .24, speed .35, freq 2.10, scale .94: a slow, dense churn) and colours (`orb-focusing-a/b`, lavender into peach). Two lavender rings close in on the orb, it presses to .9, then releases with a `pulse()` and one peach ring at 1.1s, and it returns to the state it was showing at 2.2s. It is a moment, not a steady state, so `deriveOrbSteadyState` is unchanged; the app adds it to `ORB_STATES` and `OrbState` when the thinking control ships.
+
 Everything around the orb follows one rule: **no surface appears, disappears or moves without a transition, and nothing the eye is tracking jumps.** Concretely:
 
 - **The Island keeps its width.** An ask grows it upward (body rows 0fr → 1fr over 520ms on a small-overshoot curve); its row of orb, words and button never moves.
