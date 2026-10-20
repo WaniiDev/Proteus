@@ -4,6 +4,8 @@ import { DEFAULT_MODEL_ID } from "../shared/constants";
 import type { ChatMessage, MemoryScope, OrbState, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { rpc } from "./lib/bridge";
 import { useScrollbars } from "./ds-app/useScrollbars";
+import { useViewSwap } from "./ds-app/useViewSwap";
+import { Lens } from "./components/Lens";
 import { createRuntimeSnapshotTransport } from "./lib/runtime-snapshot-transport";
 import { reconcileQueuedDrafts, type QueuedDraft } from "./lib/composer-ui";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -61,6 +63,7 @@ function ignoreRpc(promise: Promise<unknown>): void {
 export default function App() {
   useScrollbars();
   const [view, setView] = useState<View>("companion");
+  const { shown: shownView, leaving: viewLeaving } = useViewSwap(view);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -250,16 +253,13 @@ export default function App() {
   }, [localMessages, snapshot]);
   return (
     <>
-      <div className="ambient" aria-hidden="true">
-        <div className="ambient-orb amb-mint" />
-        <div className="ambient-orb amb-lavender" />
-        <div className="ambient-orb amb-sky" />
-      </div>
       <div className="app-shell">
+        <div className="ambient" aria-hidden="true"><i /><i /><i /></div>
         <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onDeleteRequest={setDeleteTarget} />
         {sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
-        <main>
-          {view === "companion" && (
+        <main className="app-stage">
+          <div className={viewLeaving ? "view is-leaving" : "view"}>
+          {shownView === "companion" && (
             <Companion
               snapshot={renderedSnapshot}
               activeTitle={activeTitle}
@@ -286,10 +286,12 @@ export default function App() {
               }
             />
           )}
-          {view === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
-          {view === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          {shownView === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
+          {shownView === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          </div>
         </main>
       </div>
+      <Lens />
       {newChatError && <div className="app-shell-notice" role="alert"><span>{newChatError}</span><button type="button" onClick={() => setNewChatError(null)} aria-label="Dismiss new chat error"><X size={14} /></button></div>}
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}
     </>

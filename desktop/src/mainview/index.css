@@ -13,9 +13,10 @@ body,
 }
 
 body { overflow: hidden; }
-.app-shell { display: flex; height: 100%; min-height: 0; }
+.app-shell { position: relative; display: flex; height: 100%; min-height: 0; overflow: hidden; }
 .app-nav { height: 100%; }
-main { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.app-stage { position: relative; flex: 1; min-width: 0; height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.app-stage > .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .view.active { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto; }
 .chat-titlebar { flex: 0 0 auto; }
 .stage { height: 100%; min-height: 0; overflow: hidden; }

@@ -3,8 +3,19 @@ import { describe, expect, test } from "bun:test";
 describe("supporting page layout", () => {
   test("uses one main-page scroll owner", async () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
-    expect(css).toContain("main { height: 100%; min-height: 0; overflow: hidden;");
+    expect(css).toContain(".app-stage { position: relative; flex: 1; min-width: 0; height: 100%; min-height: 0; overflow: hidden;");
+    expect(css).toContain(".app-stage > .view { flex: 1 1 auto; min-height: 0;");
     expect(css).toContain(".view.active { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto;");
+  });
+
+  test("the shell uses the system ambient field and drops the legacy orbs and view animation", async () => {
+    const base = await Bun.file(new URL("./proteus.css", import.meta.url)).text();
+    const app = await Bun.file(new URL("./App.tsx", import.meta.url)).text();
+    expect(base).not.toContain(".ambient");
+    expect(base).not.toContain("viewIn");
+    expect(base).not.toMatch(/^\.view \{ display: none/m);
+    expect(app).toContain('<div className="ambient" aria-hidden="true"><i /><i /><i /></div>');
+    expect(app).toContain("<Lens />");
   });
 
   test("does not retain the legacy sidebar, memory, or project layout rules", async () => {
