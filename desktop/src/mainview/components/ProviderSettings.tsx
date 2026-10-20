@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { CheckCircle2, ExternalLink, KeyRound, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
 import type { ProviderId, ProviderStatus, RuntimeSnapshot } from "../../shared/contracts";
-import { PROVIDER_LOGOS } from "../lib/provider-assets";
+import { BrandTile } from "./ProviderMark";
 
 type ProviderSettingsProps = {
   snapshot: RuntimeSnapshot;
@@ -68,7 +68,7 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
             <article className={`provider-connection ${isCurrent ? "current" : ""}`} key={provider.id}>
               <header className="provider-connection__header">
                 <div className="provider-connection__identity">
-                  <span className="provider-connection__logo"><img src={PROVIDER_LOGOS[provider.id]} alt="" aria-hidden="true" /></span>
+                  <BrandTile provider={provider.id} />
                   <div><span>{copy.eyebrow}</span><h3>{provider.name}</h3></div>
                 </div>
                 <div className="provider-connection__badges">

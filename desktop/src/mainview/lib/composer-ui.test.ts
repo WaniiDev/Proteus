@@ -99,7 +99,7 @@ describe("composer UI policy", () => {
     expect(composer).toContain("composer-project-popover");
     expect(composer).toContain("composer-model-popover");
     expect(composer).toContain('aria-label={provider.name}');
-    expect(composer).toContain('src={PROVIDER_LOGOS[provider.id]}');
+    expect(composer).toContain('<ProviderMark provider={provider.id}');
     expect(composer).toContain("<span>{provider.name}</span>");
     expect(composer).not.toContain("model.description ?? model.rawId");
     expect(composer).not.toContain('<i className={provider.availability}');
@@ -108,7 +108,6 @@ describe("composer UI policy", () => {
     expect(css).toContain(".composer-controls { position: absolute; top: calc(100% + 8px); left: 4px");
     expect(css).toContain(".composer-popover { position: absolute; bottom: calc(100% + 8px)");
     expect(css).toContain(".composer-model-popover { width: 560px; max-width: calc(100vw - 48px)");
-    expect(css).toContain(".composer-provider-tabs img { width: 22px; height: 22px");
     expect(css).not.toContain(".composer-provider-tabs i.ready");
   });
 

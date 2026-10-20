@@ -16,8 +16,8 @@ describe("Settings provider and model UI", () => {
     expect(appSource).toContain("Models & thinking");
     expect(appSource).toContain("<ProviderSettings");
     expect(appSource).toContain('className="model-card-list"');
-    expect(appSource).toContain('src={PROVIDER_LOGOS[provider.id]}');
-    expect(cssSource).toContain(".provider-switch img { width: 20px; height: 20px");
+    expect(appSource).toContain('<ProviderMark provider={provider.id}');
+    expect(cssSource).not.toContain(".provider-switch img");
     expect(providerSource).toContain('className="provider-settings__list"');
     expect(providerSource).toContain('className={`provider-connection ${isCurrent ? "current" : ""}`}');
     expect(providerSource).toContain("Credentials stay in Windows Credential Manager");

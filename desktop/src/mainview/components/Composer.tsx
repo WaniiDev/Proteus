@@ -16,7 +16,7 @@ import {
   shouldSubmitComposerKey,
 } from "../lib/composer-ui";
 import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "../lib/model-sorting";
-import { PROVIDER_LOGOS } from "../lib/provider-assets";
+import { ProviderMark } from "./ProviderMark";
 
 type ComposerProps = {
   snapshot: RuntimeSnapshot;
@@ -270,7 +270,7 @@ export function Composer({
                 <div className="composer-provider-tabs" role="tablist" aria-label="Providers" onKeyDown={(event) => moveMenuFocus(event, '[role="tab"]', true)}>
                   {snapshot.providers.map((provider) => (
                     <button type="button" role="tab" aria-label={provider.name} title={provider.name} aria-selected={browseProviderId === provider.id} className={browseProviderId === provider.id ? "active" : ""} key={provider.id} onClick={() => { setBrowseProviderId(provider.id); setModelSearch(""); setSelectionError(null); }}>
-                      <img src={PROVIDER_LOGOS[provider.id]} alt="" aria-hidden="true" />
+                      <ProviderMark provider={provider.id} size={15} />
                       <span>{provider.name}</span>
                     </button>
                   ))}
