@@ -18,12 +18,21 @@ describe("supporting page layout", () => {
     expect(current.match(/^\.page-narrow \{/gm)).toHaveLength(1);
   });
 
+  test("projects and the delete/forget modals rely on the design system, not app CSS", async () => {
+    const current = await Bun.file(new URL("./index.css", import.meta.url)).text();
+    for (const old of [".project-library", ".project-detail", ".projects-library", ".project-conversations", ".project-memory-card", ".project-about-card", ".project-warning", ".empty-page", ".confirm-modal", ".modal-icon", ".project-back"]) expect(current).not.toContain(old);
+    expect(current).not.toMatch(/^\.btn-danger\s*\{/m);
+    expect(current).not.toMatch(/^\.modal-actions\s*\{/m);
+    const view = await Bun.file(new URL("./views/ProjectsView.tsx", import.meta.url)).text();
+    expect(view).not.toContain("PageHeader");
+    expect(view).toContain("page-back");
+  });
+
   test("keeps explicit desktop, tablet, and compact layouts for new surfaces", async () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
     expect(css).toMatch(/\.memory-group__items\s*\{[^}]*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)[\s\S]*?\.memory-group__items\s*\{[^}]*grid-template-columns:\s*1fr/);
     expect(css).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*?\.memory-control__header\s*\{[^}]*flex-direction:\s*column/);
-    expect(css).toContain(".project-detail-grid { display: grid; grid-template-columns:");
     expect(css).toContain("@media (max-width: 860px)");
     expect(css).toContain("@media (max-width: 620px)");
   });
