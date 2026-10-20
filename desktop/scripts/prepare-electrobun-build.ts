@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 
 export function isProteusWindowsDevBuildDirectory(projectRoot: string, candidate: string): boolean {
@@ -67,6 +67,7 @@ export function prepareElectrobunBuild(): void {
   if (process.env.ELECTROBUN_BUILD_ENV !== "dev") return;
 
   const projectRoot = findProjectRoot(process.cwd());
+  console.log("[proteus] preBuild: preparing the dev build");
   if (process.platform === "win32" && process.env.ELECTROBUN_OS === "win") {
     const buildDirectory = process.env.ELECTROBUN_BUILD_DIR;
     if (!buildDirectory || !isProteusWindowsDevBuildDirectory(projectRoot, buildDirectory)) {
@@ -77,8 +78,7 @@ export function prepareElectrobunBuild(): void {
       env: { ...process.env, PROTEUS_DEV_BUILD_DIR: buildDirectory },
     });
     if (cleanup !== 0) throw new Error("Could not stop the stale Proteus dev process tree.");
-
-    if (existsSync(buildDirectory)) rmSync(buildDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // Hutch owns the build directory and cleans it itself; deleting it from a hook fails with UnsafeOutputPath.
   }
 
   console.log("[proteus] Rebuilding the renderer (vite build)…");

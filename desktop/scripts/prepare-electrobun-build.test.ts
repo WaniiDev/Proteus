@@ -29,6 +29,8 @@ describe("Electrobun Windows watch cleanup", () => {
     const code = hook.replace(/\/\/.*$/gm, "");
     for (const bunOnly of ["import.meta.main", "import.meta.dir", "Bun.spawnSync", "process.execPath"]) expect(code).not.toContain(bunOnly);
     expect(code).toContain("if (process.env.ELECTROBUN_BUILD_ENV) prepareElectrobunBuild();");
+    // Hutch owns the build output; the hook must never remove it.
+    expect(code).not.toMatch(/\brmSync\b|\brm\(/);
   });
 
   test("finds the desktop project from the desktop folder or the repo root", () => {
