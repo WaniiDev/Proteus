@@ -82,10 +82,7 @@ export function answerPart(options: { id: string; toolCallId: string; projection
   };
 }
 
-/** True when a finished `show_answer` result says the composition was rejected (the person never sees it). */
-export function answerRejected(result: unknown): string | undefined {
-  if (!result || typeof result !== "object") return undefined;
-  const record = result as { ok?: unknown; error?: unknown };
-  if (record.ok !== false) return undefined;
-  return typeof record.error === "string" ? record.error.slice(0, 2_000) : "The answer was rejected.";
+/** True when a finished `show_answer` result says the answer was not shown (the person never sees it, nor a tool step for it). */
+export function answerRejected(result: unknown): boolean {
+  return !!result && typeof result === "object" && (result as { ok?: unknown }).ok === false;
 }

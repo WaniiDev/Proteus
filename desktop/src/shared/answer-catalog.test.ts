@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { validateAnswer, validateBlock, containsMarkup } from "./answer-catalog";
+import { checkAnswer, containsMarkup, validateAnswer, validateBlock } from "./answer-catalog";
 
 const headline = { type: "headline", text: "Two things need you today." };
 const row = (i = 1) => ({ id: `r${i}`, title: `Row ${i}` });
@@ -176,18 +176,53 @@ describe("composition", () => {
 });
 
 describe("plain text content", () => {
-  const rejectedStrings = ["<b>bold</b>", "<script>x</script>", "[plan](docs/plan.md)", "![img](a.png)", "see https://example.com", "www.example.com", "**bold**", "`code`", "# Heading", "&amp;", "javascript:alert(1)"];
+  const rejectedStrings = ["<b>bold</b>", "<script>x</script>", "[plan](docs/plan.md)", "![img](a.png)", "see https://example.com", "www.example.com", "**bold**", "`code`", "# Heading", "&amp;", "javascript:alert(1)", "mailto:a@b.co", "data:text/html,x", "ftp://host/file", "__bold__ text", "~~gone~~"];
   for (const value of rejectedStrings) {
     it(`rejects ${value}`, () => {
       expect(containsMarkup(value)).toBe(true);
       bad({ type: "headline", text: value });
       bad({ type: "list", label: "L", rows: [{ id: "r", title: "T", sub: value }] });
       bad({ type: "sources", items: [value] });
-      bad({ type: "diff", id: "d", label: "E", file: "a.md", lines: [{ text: value }], act: { label: "A", done: "d", skipDone: "s" } });
     });
   }
+  it("treats diff file and line text as literal text", () => {
+    const diff = (file: string, text: string) => ({ type: "diff", id: "d", label: "E", file, lines: [{ text }], act: { label: "A", done: "d", skipDone: "s" } });
+    ok(diff("a.md", "<b>bold</b> [x](y) `code` https://a.b"));
+    ok(diff("src/<Tag/>.tsx", "x"));
+    bad(diff("", "x"));
+  });
+  const ordinary: Array<[string, unknown]> = [
+    ["Data: 1,284 rows", { type: "text", text: "Data: 1,284 rows" }],
+    ["File: notes.md", { type: "text", text: "File: notes.md" }],
+    ["src/__init__.py", { type: "text", text: "src/__init__.py" }],
+    ["**kwargs", { type: "text", text: "Pass **kwargs through" }],
+    ["> Keep Friday light.", { type: "quote", text: "> Keep Friday light.", cite: "Sam" }],
+    ["## Beta in a diff line", { type: "diff", id: "d", label: "E", file: "README.md", lines: [{ text: "## Beta", ins: true }], act: { label: "A", done: "d", skipDone: "s" } }],
+    ["<Tag/> in a diff line", { type: "diff", id: "d", label: "E", file: "App.tsx", lines: [{ text: "<Tag/>", ins: true }], act: { label: "A", done: "d", skipDone: "s" } }],
+  ];
+  for (const [name, block] of ordinary) it(`accepts ${name}`, () => ok(block));
+  it("trims before the minimum length", () => bad({ type: "headline", text: "   " }));
   it("accepts ordinary text", () => {
     for (const value of ["Tue 20 Oct · 3h 30m", "−0.3 pts", "docs/plan.md", "Is 3 < 5 and 7 > 2?", "Mai & Tom"]) expect(containsMarkup(value)).toBe(false);
     ok({ type: "diff", id: "d", label: "E", file: "a.md", lines: [{ text: "" }], act: { label: "A", done: "d", skipDone: "s" } });
+  });
+});
+
+describe("checkAnswer", () => {
+  const good = { v: 2, title: "Today", blocks: [headline] };
+  it("passes a valid answer", () => expect(checkAnswer(good).issues).toEqual([]));
+  it("replaces a broken block with a fallback instead of rejecting", () => {
+    const result = checkAnswer({ ...good, blocks: [headline, { type: "text", text: "<b>x</b>" }, { type: "mystery" }] });
+    expect(result.issues).toEqual([]);
+    expect(result.blocks.map((b) => b.type)).toEqual(["headline", "fallback", "fallback"]);
+  });
+  it("reports composition failures, including more than 10 blocks", () => {
+    expect(checkAnswer({ ...good, blocks: [{ type: "text", text: "x" }] }).issues.join(" ")).toContain("headline");
+    expect(checkAnswer({ ...good, blocks: [headline, ...n(10, () => ({ type: "text", text: "x" }))] }).issues.join(" ")).toContain("at most 10");
+    expect(checkAnswer({ ...good, blocks: [{ type: "text", text: "<b>" }] }).issues.join(" ")).toContain("headline");
+  });
+  it("reports envelope problems", () => {
+    expect(checkAnswer({ v: 1, title: " ", blocks: [] }).issues.length).toBe(3);
+    expect(checkAnswer(undefined).issues.length).toBeGreaterThan(0);
   });
 });

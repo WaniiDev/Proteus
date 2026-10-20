@@ -17,11 +17,15 @@ const MARKUP_PATTERNS: RegExp[] = [
   /<\/?[A-Za-z!?][^>]*>/, // HTML tags, comments, doctype
   /!?\[[^\]]*\]\([^)]*\)/, // Markdown links and images
   /\[[^\]]+\]\s*\[[^\]]*\]/, // Markdown reference links
-  /\b(?:https?|ftp|file|javascript|data|mailto):/i, // links and URL schemes
+  /\b[a-z][a-z0-9+.-]*:\/\//i, // any scheme:// URL
+  /\bjavascript:/i,
+  /\b(?:mailto|data):\S/i, // "Data: 1,284 rows" is ordinary text, "data:text/html" is not
   /\bwww\./i,
   /`/, // code spans and fences
-  /\*\*|__|~~/, // bold, strike
-  /^\s{0,3}(?:#{1,6}\s|>\s)/m, // headings, block quotes
+  /(?<![\w*])\*\*[^*\s][^*]*\*\*(?![\w*])/, // bold pair (a lone "**kwargs" is text)
+  /(?<![\w/.])__[^_\s][^_]*__(?![\w.])/, // bold pair (src/__init__.py is text)
+  /~~[^~\s][^~]*~~/, // strike pair
+  /^\s{0,3}#{1,6}\s/m, // headings
   /&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i, // HTML entities
 ];
 
@@ -30,13 +34,14 @@ export function containsMarkup(text: string): boolean {
   return MARKUP_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-/** A plain-text string: non-empty, no markup, no links. */
+const PLAIN_MESSAGE = "Plain text only: no markup, HTML, Markdown or links.";
+/** A plain-text string: trimmed, non-empty, no markup, no links. */
 const plain = (max?: number) => {
-  const base = max ? z.string().min(1).max(max) : z.string().min(1);
-  return base.refine((value) => !containsMarkup(value), { message: "Plain text only: no markup, HTML, Markdown or links." });
+  const trimmed = z.string().trim().min(1);
+  return (max ? trimmed.max(max) : trimmed).refine((value) => !containsMarkup(value), { message: PLAIN_MESSAGE });
 };
-/** A plain-text string that may be empty (diff line text can be a blank line). */
-const plainOrEmpty = z.string().refine((value) => !containsMarkup(value), { message: "Plain text only: no markup, HTML, Markdown or links." });
+/** Literal text (diff file and lines): shown escaped, so it may hold code, markup characters and blank lines. */
+const literal = z.string();
 
 export const tenthsSchema = z.number().int().min(0).max(10);
 
@@ -147,9 +152,9 @@ export const diffBlockSchema = z.object({
   type: z.literal("diff"),
   id: plain(),
   label: plain(),
-  file: plain(),
+  file: literal.min(1),
   where: plain().optional(),
-  lines: z.array(z.object({ n: plain().optional(), text: plainOrEmpty, del: z.boolean().optional(), ins: z.boolean().optional() }).strict()).min(1).max(12),
+  lines: z.array(z.object({ n: plain().optional(), text: literal, del: z.boolean().optional(), ins: z.boolean().optional() }).strict()).min(1).max(12),
   act: z.object({ label: plain(), done: plain(), skipDone: plain() }).strict(),
 }).strict();
 
@@ -186,11 +191,15 @@ export const answerShapeSchema = z.object({
 }).strict();
 
 /** Composition rules, checked once the tool call ends. Returns one message per broken rule. */
-export function compositionIssues(blocks: readonly AnswerBlock[]): string[] {
+export type CheckedBlock = AnswerBlock | { type: "fallback" };
+
+/** Blocks that broke their own limits are `fallback` entries: they count toward the total but not toward order or counts. */
+export function compositionIssues(all: readonly CheckedBlock[]): string[] {
   const issues: string[] = [];
+  const blocks = all.filter((block): block is AnswerBlock => block.type !== "fallback");
   const types = blocks.map((block) => block.type);
   const count = (type: AnswerBlockType) => types.filter((t) => t === type).length;
-  if (blocks.length > ANSWER_MAX_BLOCKS) issues.push(`An answer has at most ${ANSWER_MAX_BLOCKS} blocks.`);
+  if (all.length > ANSWER_MAX_BLOCKS) issues.push(`An answer has at most ${ANSWER_MAX_BLOCKS} blocks.`);
   if (types[0] !== "headline") issues.push("The first block must be the headline.");
   if (count("headline") !== 1) issues.push("There must be exactly one headline.");
   const tail = types.filter((t) => t === "sources" || t === "suggest");
@@ -234,4 +243,32 @@ export function validateBlock(block: unknown): AnswerValidation<AnswerBlock> {
 export function validateAnswer(answer: unknown): AnswerValidation<Answer> {
   const parsed = answerSchema.safeParse(answer);
   return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: describe(parsed.error) };
+}
+
+/**
+ * The structural shape the model's tool call must have. Deliberately loose: block limits and composition are checked in
+ * `checkAnswer`, so a bad block becomes a fallback and a bad composition gets one retry, instead of failing input validation.
+ */
+export const answerInputSchema = z.object({
+  v: z.number().describe(`Catalog version, always ${ANSWER_CATALOG_VERSION}.`),
+  title: z.string().describe("Short plain-text title of the answer."),
+  blocks: z.array(z.object({ type: z.string() }).passthrough()).describe(`1-${ANSWER_MAX_BLOCKS} blocks, each with a type.`),
+}).passthrough();
+
+export type AnswerCheck = { blocks: CheckedBlock[]; issues: string[] };
+
+/** Check a tool input: broken blocks become fallbacks; the issues are composition failures that need a retry. */
+export function checkAnswer(input: unknown): AnswerCheck {
+  const record = input && typeof input === "object" ? (input as { v?: unknown; title?: unknown; blocks?: unknown }) : {};
+  const issues: string[] = [];
+  if (record.v !== ANSWER_CATALOG_VERSION) issues.push(`v must be ${ANSWER_CATALOG_VERSION}.`);
+  const title = plain().safeParse(record.title);
+  if (!title.success) issues.push(`title: ${title.error.issues[0]?.message ?? "invalid"}`);
+  const raw = Array.isArray(record.blocks) ? record.blocks : [];
+  if (raw.length === 0) issues.push("An answer needs at least one block.");
+  const blocks: CheckedBlock[] = raw.map((block) => {
+    const result = validateBlock(block);
+    return result.ok ? result.value : { type: "fallback" };
+  });
+  return { blocks, issues: [...issues, ...(raw.length ? compositionIssues(blocks) : [])] };
 }
