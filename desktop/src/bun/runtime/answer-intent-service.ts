@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ANSWER_INTENTS, validateBlock, type AnswerBlock, type AnswerRow } from "../../shared/answer-catalog";
+import { ANSWER_INTENTS, compositionIssues, isSafeDiffPath, validateBlock, type CheckedBlock, type AnswerBlock, type AnswerRow } from "../../shared/answer-catalog";
 import type { AnswerIntentParams, AnswerIntentResult, ChatAnswerPart } from "../../shared/contracts";
 import type { RuntimeDiagnostics } from "../core/diagnostics";
 import { ANSWER_INTENT_GATES, answerWriteFingerprint } from "../tools/approval-policy";
@@ -115,7 +115,12 @@ export class AnswerIntentService {
 
   /** The row or block the request names, and only when the answer really offers this intent on it. */
   private findTarget(answer: ChatAnswerPart, params: z.infer<typeof paramsSchema>): Target | undefined {
-    const blocks = answer.blocks.flatMap((block) => (block.type === "fallback" ? [] : validateBlock(block).ok ? [block as AnswerBlock] : []));
+    // Only an answer the tool confirmed as shown can act, and only when it still passes its composition rules (the call can be
+    // acted on between its input chunk and a rejecting result, or after a reload of a stored call that never got a result).
+    if (answer.confirmed !== true) return undefined;
+    const checked: CheckedBlock[] = answer.blocks.map((block) => (block.type === "fallback" ? block : validateBlock(block).ok ? (block as AnswerBlock) : { type: "fallback" as const }));
+    if (compositionIssues(checked).length > 0) return undefined;
+    const blocks = checked.filter((block): block is AnswerBlock => block.type !== "fallback");
     if (params.rowId) {
       const rows = blocks.flatMap((block) => (block.type === "list" || block.type === "timeline" ? (block.rows as AnswerRow[]) : [])).filter((row) => row.id === params.rowId);
       const row = rows[0];
@@ -174,6 +179,8 @@ export class AnswerIntentService {
    * unchanged between read and write (expectedVersion). Otherwise nothing is written.
    */
   private async applyDiff(block: Extract<AnswerBlock, { type: "diff" }>): Promise<AnswerIntentResult> {
+    // Defence in depth: the path written is the path shown, exactly (no traversal, no normalisation, no VCS metadata).
+    if (!isSafeDiffPath(block.file)) return refuse("This file cannot be changed from an answer.");
     const root = await this.deps.workspaces.selectedWorkspaceRoot();
     const view = await this.deps.workspaceRegistry.read(root, block.file, 1, Number.MAX_SAFE_INTEGER);
     if (view.kind !== "text" || view.truncated || view.content === undefined) return refuse("Only a text file can be changed from an answer.");

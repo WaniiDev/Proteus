@@ -1,5 +1,5 @@
 import { Check, FileWarning, TrendingUp } from "lucide-react";
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import type { AnswerRow } from "../../../shared/answer-catalog";
 import type { AnswerPartBlock } from "../../../shared/contracts";
 import { useDraftPick, useIntentState } from "./intent-state";
@@ -219,6 +219,11 @@ function Choice({ block, ctx }: BlockProps<"choice">) {
   );
 }
 
+/** The whole path, with a break opportunity after each slash so a long one wraps instead of being cut off. */
+function WrappedPath({ file }: { file: string }) {
+  return <>{file.split("/").map((part, index, all) => <Fragment key={index}>{part}{index < all.length - 1 && <>/<wbr /></>}</Fragment>)}</>;
+}
+
 function Diff({ block, ctx }: BlockProps<"diff">) {
   const outcome = ctx.outcomes[block.id];
   const { pending, note } = useIntentState(ctx.answerId, block.id);
@@ -228,7 +233,8 @@ function Diff({ block, ctx }: BlockProps<"diff">) {
     <div className="gen-block">
       <Head label={block.label} />
       <div className={join("gen-diff", outcome !== undefined && "is-done")} role="group" aria-label={`Proposed edit to ${block.file}${block.where ? `, ${block.where}` : ""}`}>
-        <div className="gen-diff-head"><strong>{block.file}</strong><span>{block.where ?? ""}</span></div>
+        {/* The whole path is the thing being approved: it wraps (a <strong> would be ellipsized by the design system) instead of being cut off, and the full text is also the title and label. */}
+        <div className="gen-diff-head"><span className="gen-diff-file" title={block.file} aria-label={block.file}><WrappedPath file={block.file} /></span><span>{block.where ?? ""}</span></div>
         {block.lines.map((line, index) => (
           <div className={join("gen-diff-line", line.del ? "del" : line.ins ? "ins" : undefined)} key={index}>
             <span className="n" aria-hidden="true">{line.n ?? ""}</span>

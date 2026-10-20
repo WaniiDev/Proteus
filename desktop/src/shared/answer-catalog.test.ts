@@ -226,3 +226,40 @@ describe("checkAnswer", () => {
     expect(checkAnswer(undefined).issues.length).toBeGreaterThan(0);
   });
 });
+
+describe("hardened diff paths and hidden characters (final review)", () => {
+  const diff = (file: string, text = "x") => ({ type: "diff", id: "d", label: "E", file, lines: [{ n: "1", text, ins: true }], act: { label: "A", done: "d", skipDone: "s" } });
+  const accepted = (block: unknown) => expect(validateBlock(block).ok).toBe(true);
+  const refused = (block: unknown) => expect(validateBlock(block).ok).toBe(false);
+
+  it("accepts plain relative workspace paths", () => {
+    for (const file of ["a.md", "docs/plan.md", "src/<Tag/>.tsx", ".github/workflows/ci.yml", "dir/.gitignore", "my file.txt"]) accepted(diff(file));
+  });
+  it("refuses paths that are not what they look like", () => {
+    const traversal = "docs/plan.md/x/../x/../x/../../.git/config";
+    for (const file of [traversal, "../a.md", "a/../b.md", "/etc/passwd", "C:/x", "a\\b.md", "./a.md", "a/./b.md", "a//b.md", "a/", " a.md", "a.md ", "a/b ./c", "e\u0301.md", "a\u202Eb.md", "a\u200Bb.md", "a\nb.md", "a\tb.md"]) refused(diff(file));
+  });
+  it("refuses any VCS metadata segment", () => {
+    for (const file of [".git/config", "a/.git/hooks/pre-commit", ".GIT/config", ".hg/hgrc", "x/.svn/entries"]) refused(diff(file));
+  });
+  it("refuses bidi, zero-width and control characters in lines, tabs allowed", () => {
+    for (const text of ["a\u202Eb", "a\u2066b", "a\u2069b", "a\u200Bb", "a\u200Db", "a\uFEFFb", "a\u0001b", "a\rb", "a\nb", "a\u007Fb"]) refused(diff("a.md", text));
+    accepted(diff("a.md", "\tindented"));
+  });
+  it("refuses bidi and zero-width characters in every plain string", () => {
+    refused({ type: "headline", text: "Pay \u202Ealice" });
+    refused({ type: "text", text: "zero\u200Bwidth" });
+    refused({ type: "sources", items: ["ok", "a\uFEFFb"] });
+    refused({ type: "diff", id: "d", label: "E\u2067", file: "a.md", lines: [{ text: "x" }], act: { label: "A", done: "d", skipDone: "s" } });
+    expect(checkAnswer({ v: 2, title: "T\u200B", blocks: [{ type: "headline", text: "H" }] }).issues.length).toBeGreaterThan(0);
+  });
+});
+
+describe("plain-text false positives (final review)", () => {
+  it("lets ordinary prose through", () => {
+    for (const text of ["if x<y and y>z then", "AT&T; Verizon", "# 1 priority is hiring", "a < b > c", "R&D; and Q&A;", "5 < 6"]) expect(containsMarkup(text)).toBe(false);
+  });
+  it("still refuses tags, entities and headings", () => {
+    for (const text of ["<b>bold</b>", "</div>", "<img src=x onerror=1>", "<br/>", "<!-- c -->", "<a href=\"x\">y</a>", "fish &amp; chips", "&#60;script", "&#x3c;", "&nbsp;", "# Title", "## Beta", "intro\n# Title", "###### Deep"]) expect(containsMarkup(text)).toBe(true);
+  });
+});

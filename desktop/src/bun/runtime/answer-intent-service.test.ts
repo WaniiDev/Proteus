@@ -28,7 +28,7 @@ const blocks = [
 ];
 
 function answerMessage(over: Partial<ChatAnswerPart> = {}): ChatMessage {
-  const part: ChatAnswerPart = { type: "answer", id: "m1:answer:ans1", toolCallId: "ans1", answerId: "ans1", title: "Week", question: "", blocks: blocks as never, streaming: false, outcomes: {}, ...over };
+  const part: ChatAnswerPart = { type: "answer", id: "m1:answer:ans1", toolCallId: "ans1", answerId: "ans1", title: "Week", question: "", blocks: blocks as never, streaming: false, outcomes: {}, confirmed: true, ...over };
   return { id: "m1", role: "assistant", text: "", turnId: "u1", parts: [part], status: "complete", createdAt: new Date(0).toISOString() };
 }
 
@@ -160,6 +160,32 @@ describe("answer intents (WAN-530)", () => {
     ctx.publish({ messages: [escaping] });
     expect(await service.run({ ...base, blockId: "esc", intent: "approve" })).toMatchObject({ accepted: false });
     expect(await readFile(join(dir, "outside.md"), "utf8")).toBe("secret");
+  });
+
+  test("a diff whose file only looks contained (traversal, dot segments, .git) writes nothing and records nothing", async () => {
+    const service = build();
+    await mkdir(join(root, "docs/plan.md"), { recursive: true });
+    await mkdir(join(root, ".git"), { recursive: true });
+    await writeFile(join(root, ".git/config"), "[core]\n");
+    const insert = (file: string) => answerMessage({ blocks: [{ type: "diff", id: "esc", label: "x", file, lines: [{ n: "2", text: "[evil]", ins: true }], act: { label: "Apply", done: "Applied", skipDone: "Skipped" } }] as never });
+    for (const file of ["docs/plan.md/x/../x/../x/../../../.git/config", ".git/config", "src/../.git/config", "src/./a.txt", "src//a.txt", "src\\a.txt", "/etc/hosts", "sub/.git/config"]) {
+      ctx.publish({ messages: [insert(file)] });
+      expect(await service.run({ ...base, blockId: "esc", intent: "approve" })).toMatchObject({ accepted: false, code: "refused" });
+    }
+    expect(await readFile(join(root, ".git/config"), "utf8")).toBe("[core]\n");
+    expect(outcomes()).toEqual({});
+  });
+
+  test("an answer is not actionable without a confirmed (shown) result, or when its composition is broken", async () => {
+    const service = build();
+    ctx.publish({ messages: [answerMessage({ confirmed: undefined })] });
+    expect(await service.run({ ...base, blockId: "pick", intent: "choose", optionId: "a" })).toMatchObject({ accepted: false, code: "refused" });
+    const twoChoices = [...blocks, blocks[2]!] as never;
+    ctx.publish({ messages: [answerMessage({ blocks: twoChoices })] });
+    expect(await service.run({ ...base, blockId: "fix", intent: "approve" })).toMatchObject({ accepted: false, code: "refused" });
+    expect(sent).toEqual([]);
+    expect(await file()).toBe(ORIGINAL);
+    expect(outcomes()).toEqual({});
   });
 
   test("anything not on the allowlist is refused and records nothing", async () => {
