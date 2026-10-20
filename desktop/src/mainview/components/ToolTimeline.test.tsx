@@ -26,7 +26,7 @@ describe("ToolTimeline as a StepList", () => {
   it("renders .steps > .step with a mark and verb, target and note", () => {
     const html = render([tool("one", "mastra_workspace_grep", "completed", { path: "desktop/src", pattern: "ToolTimeline" }, "4 matches across 2 files")], true);
     expect(html).toContain('class="steps"');
-    expect(html).toContain('aria-live="polite"');
+    expect(html).not.toContain("aria-live");
     expect(html).toContain("step-mark done");
     expect(html).toContain('class="step-target"');
     expect(html).toContain("desktop/src for ToolTimeline");

@@ -2,7 +2,7 @@ import type { PendingInteraction } from "../../shared/contracts";
 
 export type InteractionSubmissionAction = "approve" | "reject" | "answer" | null;
 
-export function interactionSubmissionUi(kind: PendingInteraction["kind"], status: PendingInteraction["status"], action: InteractionSubmissionAction) {
+export function interactionSubmissionUi(kind: PendingInteraction["kind"], status: PendingInteraction["status"], action: InteractionSubmissionAction, approveLabel?: string) {
   const activeAction = status === "pending" ? action : null;
   const resolving = status === "resolving" || activeAction !== null;
   const isPlan = kind === "submit_plan";
@@ -19,7 +19,7 @@ export function interactionSubmissionUi(kind: PendingInteraction["kind"], status
             : status === "resolving"
               ? isApproval ? "Applying tool decision…" : "Sending response…"
               : null,
-    approveLabel: activeAction === "approve" ? "Approving…" : isPlan ? "Approve plan" : isApproval ? "Approve tool" : "Send answer",
+    approveLabel: activeAction === "approve" ? "Approving…" : isPlan ? "Approve plan" : isApproval ? (approveLabel ?? "Approve") : "Send answer",
     rejectLabel: activeAction === "reject" ? (isPlan ? "Sending changes…" : "Declining…") : isPlan ? "Request changes" : isApproval ? "Decline" : "Cancel",
   };
 }

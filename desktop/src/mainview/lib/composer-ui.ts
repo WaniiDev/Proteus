@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatToolPart, OrbState, PendingInteraction, ReasoningEffort, RuntimeSnapshot } from "../../shared/contracts";
 import { ORB_STATES } from "../orb/orb-spec";
+import { askQueue, askWhat } from "./ask-copy";
 import { effortName, levelIndex, meterStep, nearestLevel, orderedLevels } from "./effort";
 import { describeToolActivity } from "./tool-activity";
 
@@ -62,7 +63,7 @@ export function reconcileQueuedDrafts(drafts: QueuedDraft[], messages: ChatMessa
   return remaining.map((draft, index) => ({ ...draft, state: index < sendingCount ? "sending" : "queued" }));
 }
 
-export type IslandMode = "input" | "status" | "ask";
+export type IslandMode = "input" | "status" | "ask" | "answer";
 export type IslandEnd = "send" | "stop";
 export type IslandStatus = { label: string; line: string };
 
@@ -75,16 +76,18 @@ export type IslandView = {
   inputDisabled: boolean;
   status: IslandStatus;
   askKind: string;
-};
-
-const ASK_KIND_LABEL: Record<PendingInteraction["kind"], string> = {
-  tool_approval: "Approval",
-  ask_user: "Question",
-  submit_plan: "Plan",
+  answerLabel: string;
+  answerLine: string;
 };
 
 export function openAsks(snapshot: RuntimeSnapshot): PendingInteraction[] {
-  return snapshot.interactions.filter((item) => item.status === "pending" || item.status === "resolving");
+  return askQueue(snapshot.interactions, snapshot.activeThreadId);
+}
+
+/** The kicker's subject, with the place in the queue once there is more than one: "Edit file · 1 of 3". */
+export function askKickerSubject(asks: PendingInteraction[]): string {
+  if (!asks[0]) return "";
+  return asks.length > 1 ? `${askWhat(asks[0])} · 1 of ${asks.length}` : askWhat(asks[0]);
 }
 
 const NEUTRAL_ORB_STATES = new Set<OrbState>(["idle", "away", "done", "interrupted", "error", "recovery"]);
@@ -108,12 +111,12 @@ export function islandPlaceholder(snapshot: RuntimeSnapshot, canChat: boolean, r
 }
 
 /** Which Island variants are on. Every variant stays mounted; this only says which one is visible. */
-export function deriveIsland(args: { snapshot: RuntimeSnapshot; orbState: OrbState; input: string; canChat: boolean; runningForSelected: boolean; runningElsewhere: boolean; providerName: string; queuedDraftCount: number }): IslandView {
-  const { snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount } = args;
+export function deriveIsland(args: { snapshot: RuntimeSnapshot; orbState: OrbState; input: string; canChat: boolean; runningForSelected: boolean; runningElsewhere: boolean; providerName: string; queuedDraftCount: number; answer?: { streaming: boolean; question: string } | null }): IslandView {
+  const { snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount, answer = null } = args;
   const hasDraft = input.trim().length > 0;
   const action = composerAction(runningForSelected, hasDraft);
-  const asks = openAsks(snapshot).filter((item) => !item.threadId || item.threadId === snapshot.activeThreadId);
-  const mode: IslandMode = asks.length > 0 ? "ask" : action === "stop" ? "status" : "input";
+  const asks = openAsks(snapshot);
+  const mode: IslandMode = asks.length > 0 ? "ask" : answer ? "answer" : action === "stop" ? "status" : "input";
   return {
     mode,
     end: action === "stop" ? "stop" : "send",
@@ -122,7 +125,9 @@ export function deriveIsland(args: { snapshot: RuntimeSnapshot; orbState: OrbSta
     placeholder: islandPlaceholder(snapshot, canChat, runningElsewhere, providerName),
     inputDisabled: !canChat,
     status: islandStatus(snapshot, orbState, queuedDraftCount),
-    askKind: asks[0] ? ASK_KIND_LABEL[asks[0].kind] : "",
+    askKind: askKickerSubject(asks),
+    answerLabel: answer?.streaming ? "Speaking" : "Answer",
+    answerLine: answer?.question ?? "",
   };
 }
 

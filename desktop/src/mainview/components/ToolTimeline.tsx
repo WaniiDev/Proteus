@@ -115,7 +115,7 @@ export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: C
   ].join(" · ");
 
   return (
-    <section className="steps" aria-label="Steps" aria-live={live ? "polite" : "off"} aria-relevant="additions text">
+    <section className="steps" aria-label="Steps">
       {collapsible && (
         <button type="button" className="step-group" aria-expanded={expanded} onClick={() => setOpen((value) => !value)}>
           <ChevronRight className="step-group-chevron" size={14} aria-hidden="true" />

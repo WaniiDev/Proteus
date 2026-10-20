@@ -1,10 +1,11 @@
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary } from "../../shared/contracts";
+import type { ChatAnswerPart, ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary } from "../../shared/contracts";
 
 type ChatTextPart = Extract<ChatMessagePart, { type: "text" }>;
 
 export type AssistantPartRun =
   | { type: "text"; part: ChatTextPart }
-  | { type: "tools"; tools: ChatToolPart[] };
+  | { type: "tools"; tools: ChatToolPart[] }
+  | { type: "answer"; part: ChatAnswerPart };
 
 export type ConversationItem =
   | { type: "user"; message: ChatMessage }
@@ -22,7 +23,11 @@ export function groupAssistantPartRuns(parts: ChatMessagePart[]): AssistantPartR
       runs.push({ type: "text", part });
       continue;
     }
-    if (part.type === "source-url" || part.type === "answer") continue; // answers get their own renderer (WAN-529)
+    if (part.type === "source-url") continue;
+    if (part.type === "answer") {
+      runs.push({ type: "answer", part });
+      continue;
+    }
     const previous = runs.at(-1);
     if (previous?.type === "tools") previous.tools.push(part);
     else runs.push({ type: "tools", tools: [part] });
@@ -56,6 +61,12 @@ export function groupConversationItems(messages: ChatMessage[]): ConversationIte
       }
       if (part.type === "source-url") {
         const index = group.parts.findIndex((item) => item.type === "source-url" && item.url === part.url);
+        if (index >= 0) group.parts[index] = part;
+        else group.parts.push(part);
+        continue;
+      }
+      if (part.type === "answer") {
+        const index = group.parts.findIndex((item) => item.type === "answer" && item.answerId === part.answerId);
         if (index >= 0) group.parts[index] = part;
         else group.parts.push(part);
         continue;

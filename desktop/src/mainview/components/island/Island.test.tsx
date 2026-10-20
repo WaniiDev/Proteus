@@ -31,11 +31,11 @@ describe("Island variants", () => {
   test("every variant stays mounted as the visible one changes, and the elements are never replaced", async () => {
     const t = await mount();
     const nodes = [t.q(".island-input"), ...t.qa(".island-status"), t.q(".island-send"), t.q(".island-end .btn")];
-    expect(t.qa(".island-status")).toHaveLength(3);
+    expect(t.qa(".island-status")).toHaveLength(4);
     for (const props of [{ mode: "status", end: "stop" }, { mode: "ask", end: "send" }, { mode: "input", end: "send" }] as const) {
       await t.render({ ...props, status: { label: "Working", line: "Reading notes/plan.md" } });
       expect([t.q(".island-input"), ...t.qa(".island-status"), t.q(".island-send"), t.q(".island-end .btn")]).toEqual(nodes);
-      expect(t.qa("[data-on]").length).toBe(6);
+      expect(t.qa("[data-on]").length).toBe(8);
     }
     await t.done();
   });
@@ -115,8 +115,47 @@ describe("Island variants", () => {
     expect(t.q(".island").getAttribute("aria-live")).toBe("polite");
     expect(t.qa('[role="status"], [role="alert"], [aria-live]:not(.island)')).toHaveLength(0);
     await t.render({ mode: "ask", end: "stop", askKind: "Approval" });
-    expect(t.qa(".island-end > [data-on='true']")).toHaveLength(0);
+    // Send hides while an ask is open, but the run can still be stopped.
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
     expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Needs you · ApprovalYour call. Nothing moves without you."]);
+    await t.done();
+  });
+
+  test("during a run, clicking or focusing the status brings the input back to queue a follow-up, with Stop still there", async () => {
+    const t = await mount({ mode: "status", end: "stop", status: { label: "Working", line: "Reading notes/plan.md" } });
+    const input = () => t.q<HTMLTextAreaElement>(".island-input");
+    expect(input().disabled).toBe(true);
+    await act(async () => { t.visibleStatus()[0]!.click(); });
+    expect(input().getAttribute("data-on")).toBe("true");
+    expect(input().disabled).toBe(false);
+    expect(document.activeElement).toBe(input());
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
+    await t.render({ mode: "input", end: "send", sendLabel: "Queue message", sendDisabled: false, input: "next" });
+    expect(t.q<HTMLButtonElement>(".island-send").getAttribute("aria-label")).toBe("Queue message");
+    expect(t.q<HTMLButtonElement>(".island-send").disabled).toBe(false);
+    await t.done();
+  });
+
+  test("the status is a tab stop during a run, and focusing it engages the input", async () => {
+    const t = await mount({ mode: "status", end: "stop", status: { label: "Working", line: "Thinking…" } });
+    expect(t.visibleStatus()[0]!.getAttribute("tabindex")).toBe("0");
+    await act(async () => { t.visibleStatus()[0]!.focus(); });
+    expect(document.activeElement).toBe(t.q(".island-input"));
+    await t.done();
+  });
+
+  test("answer mode shows the label and question, ends with Done, and announces through the one live region", async () => {
+    let done = 0;
+    const t = await mount({ mode: "answer", answerLabel: "Speaking", answerLine: "What needs my attention?", announcement: "Answering", onDone: () => { done += 1; } });
+    expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Speaking What needs my attention?"]);
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Done"]);
+    expect((t.q(".island-input") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(t.q(".island > .sr-only").textContent).toBe("Answering");
+    expect(t.qa("[aria-live]")).toHaveLength(1);
+    await act(async () => { t.qa(".island-end .btn").find((el) => el.textContent === "Done")!.click(); });
+    expect(done).toBe(1);
+    await t.render({ mode: "answer", answerLabel: "Answer", answerLine: "What needs my attention?" });
+    expect(t.visibleStatus()[0]!.textContent).toContain("Answer What");
     await t.done();
   });
 

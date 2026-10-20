@@ -21,3 +21,6 @@
 .reply table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
 .reply th, .reply td { padding: 7px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .reply th { color: var(--ink); font-weight: 600; white-space: nowrap; }
+
+/* Markdown inside the Island (a plan under review): the same .reply rules, read on the dark glass by remapping the tokens they use. */
+.island .reply { --ink: var(--on-island); --body: var(--on-island-soft); --muted: var(--on-island-muted); --line: var(--island-line); --line-strong: var(--island-line); --surface-sunk: var(--island-raised); font-size: 14px; line-height: 1.55; }

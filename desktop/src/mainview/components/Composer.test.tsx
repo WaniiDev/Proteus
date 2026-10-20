@@ -91,7 +91,12 @@ describe("Claude-style composer", () => {
     ));
     const visible = [...host.querySelectorAll(".island-status")].filter((el) => el.getAttribute("data-on") === "true");
     expect(visible.map((el) => el.querySelector("strong")?.textContent)).toEqual(["Working"]);
-    expect((host.querySelector(".island-input") as HTMLTextAreaElement).disabled).toBe(true);
+    const field = host.querySelector(".island-input") as HTMLTextAreaElement;
+    expect(field.disabled).toBe(true);
+    // The person can still reach the input during a run to queue a follow-up.
+    await act(async () => { (host.querySelector(".island-status[data-on='true']") as HTMLElement).click(); });
+    expect(field.disabled).toBe(false);
+    expect(document.activeElement).toBe(field);
     await act(async () => { (host.querySelector(".island-end .btn") as HTMLButtonElement).click(); });
     expect(aborts).toBe(1);
     await act(async () => { root.unmount(); host.remove(); });

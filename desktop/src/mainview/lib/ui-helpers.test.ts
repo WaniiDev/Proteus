@@ -133,6 +133,25 @@ describe("conversation helpers", () => {
   });
 });
 
+describe("answer parts", () => {
+  const answer = (streaming: boolean, blocks: number) => ({ type: "answer" as const, id: "a1:a", toolCallId: "a1", answerId: "a1", title: "Week", question: "", blocks: Array.from({ length: blocks }, () => ({ type: "text" as const, text: "x" })), streaming, outcomes: {} });
+  const turn = (id: string, parts: ReturnType<typeof answer>[]) => ({ id, role: "assistant" as const, text: "", status: "complete" as const, createdAt: now.toISOString(), turnId: "turn", parts });
+
+  it("keeps an answer in its place between text and tool runs", () => {
+    const tool = { type: "tool" as const, id: "t", toolCallId: "t", name: "read", label: "Read", status: "completed" as const };
+    const runs = groupAssistantPartRuns([tool, answer(false, 1), { type: "text", id: "x", text: "After" }]);
+    expect(runs.map((run) => run.type)).toEqual(["tools", "answer", "text"]);
+  });
+
+  it("replaces an answer by its id as it streams in, across messages of one turn", () => {
+    const items = groupConversationItems([turn("m1", [answer(true, 1)]), turn("m2", [answer(false, 3)])]);
+    const parts = (items[0] as { parts: Array<{ type: string; streaming?: boolean; blocks?: unknown[] }> }).parts;
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({ type: "answer", streaming: false });
+    expect(parts[0]!.blocks).toHaveLength(3);
+  });
+});
+
 describe("sidebar groups", () => {
   it("puts pinned first, then Today and Earlier", () => {
     const pinned = { ...thread("p", "Pinned", "2026-06-01T12:00:00.000Z"), pinned: true, pinnedAt: "2026-08-01T00:00:00.000Z" };

@@ -145,7 +145,7 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
     }
     case "ask": {
       const interactions: RuntimeSnapshot["interactions"] = [
-        { id: "i1", toolCallId: "t3", threadId: "th1", runId: "run1", kind: "tool_approval", title: "Allow editing a file?", toolName: "workspace_write", argsSummary: "src/index.test.ts (12 lines changed)", fingerprint: "fp-1", policyVersion: 1, options: [], status: "pending", createdAt: iso(1) },
+        { id: "i1", toolCallId: "t3", threadId: "th1", runId: "run1", kind: "tool_approval", title: "Allow mastra_workspace_edit_file?", toolName: "mastra_workspace_edit_file", args: { path: "src/index.test.ts", old_string: "expect(total).toBe(41);", new_string: "expect(total).toBe(42);" }, argsSummary: "src/index.test.ts (1 line changed)", fingerprint: "fp-1", policyVersion: 1, options: [], status: "pending", createdAt: iso(1) },
         { id: "i2", toolCallId: "t4", threadId: "th1", runId: "run1", kind: "ask_user", title: "A question from Proteus", question: "Which environment should the tests run against?", options: [{ label: "Local", description: "Use the in-memory database" }, { label: "Staging", description: "Use the shared staging server" }], selectionMode: "single_select", status: "pending", createdAt: iso(1) },
       ];
       return parse({
