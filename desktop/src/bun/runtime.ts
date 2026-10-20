@@ -308,6 +308,10 @@ export class TextRuntime {
     return this.threads.renameThread(threadId, title);
   }
 
+  async pinThread(threadId: string, pinned: boolean): Promise<void> {
+    return this.threads.pinThread(threadId, pinned);
+  }
+
   async deleteThread(threadId: string): Promise<void> {
     try {
       await this.threads.deleteThread(threadId);

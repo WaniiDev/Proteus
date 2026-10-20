@@ -1,6 +1,7 @@
 import type { MastraDBMessage } from "@mastra/core/agent";
 import type { StorageThreadType } from "@mastra/core/memory";
 import type { Memory } from "@mastra/memory";
+import { THREAD_PIN_METADATA_KEY } from "../runtime/constants";
 
 export class NativeThreadRepository {
   constructor(
@@ -34,6 +35,18 @@ export class NativeThreadRepository {
     const thread = await this.get(threadId);
     if (!thread) throw new Error("Conversation not found");
     return this.memory.updateThread({ id: threadId, title, metadata: thread.metadata ?? {} });
+  }
+
+  /** Pin metadata lives beside the title and the UI state, under its own key, so UI-state saves keep it. */
+  async setPinned(threadId: string, pinnedAt: string | null): Promise<StorageThreadType> {
+    const thread = await this.get(threadId);
+    if (!thread) throw new Error("Conversation not found");
+    // updateThread merges metadata, so unpinning writes an explicit null rather than omitting the key.
+    return this.memory.updateThread({
+      id: threadId,
+      title: thread.title ?? "New chat",
+      metadata: { ...(thread.metadata ?? {}), [THREAD_PIN_METADATA_KEY]: pinnedAt ? { pinnedAt } : null },
+    });
   }
 
   delete(threadId: string): Promise<void> {

@@ -117,6 +117,7 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       "threads.switch": async ({ threadId }) => accepted(() => runtime.switchThread(threadId)),
       "threads.select": async ({ threadId }) => accepted(() => runtime.selectThread(threadId)),
       "threads.rename": async ({ threadId, title }) => accepted(() => runtime.renameThread(threadId, title)),
+      "threads.pin": async ({ threadId, pinned }: { threadId: string; pinned: boolean }) => accepted(() => runtime.pinThread(threadId, pinned)),
       "threads.delete": async ({ threadId }) => accepted(() => runtime.deleteThread(threadId)),
       "chat.send": async ({ text, clientMessageId }) => {
         try {

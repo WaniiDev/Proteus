@@ -1,7 +1,7 @@
 import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
 import { isDeclinedToolResult } from "../tools/tool-decision";
 import { toolResultError } from "../tools/tool-result-error";
-import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY } from "./constants";
+import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY, THREAD_PIN_METADATA_KEY } from "./constants";
 import type { MastraMessage, PersistedThreadState } from "./types";
 
 export function isoDate(value: Date | string | number | undefined): string {
@@ -177,6 +177,10 @@ export function mapThread(thread: { id: string; title?: string | null; createdAt
   const binding = rawState && typeof rawState === "object" && !Array.isArray(rawState) && "workspaceBinding" in rawState
     ? (rawState as PersistedThreadState).workspaceBinding ?? { kind: "app" as const }
     : { kind: "app" as const };
+  const rawPin = thread.metadata?.[THREAD_PIN_METADATA_KEY];
+  const pinnedAt = rawPin && typeof rawPin === "object" && typeof (rawPin as { pinnedAt?: unknown }).pinnedAt === "string"
+    ? (rawPin as { pinnedAt: string }).pinnedAt
+    : null;
   return {
     id: thread.id,
     title: thread.title?.trim() || "New chat",
@@ -185,7 +189,16 @@ export function mapThread(thread: { id: string; title?: string | null; createdAt
     activity: "idle",
     attention: 0,
     workspace: { binding, label: binding.kind === "app" ? "Proteus workspace" : "Project", availability: "ready" },
+    pinned: pinnedAt !== null,
+    pinnedAt,
   };
+}
+
+/** Pinned threads first by pinnedAt descending, then the rest by updatedAt descending. */
+export function compareThreads(left: ThreadSummary, right: ThreadSummary): number {
+  if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+  if (left.pinned) return (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
+  return right.updatedAt.localeCompare(left.updatedAt);
 }
 
 export function emptyTokenUsage(): TokenUsage {

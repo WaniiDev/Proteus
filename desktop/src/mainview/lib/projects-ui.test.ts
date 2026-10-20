@@ -9,6 +9,8 @@ const projects: ProjectSummary[] = [
 
 const thread = (id: string, projectId: string, updatedAt: string): ThreadSummary => ({
   id,
+  pinned: false,
+  pinnedAt: null,
   title: id,
   createdAt: updatedAt,
   updatedAt,
