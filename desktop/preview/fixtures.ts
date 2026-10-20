@@ -1,6 +1,6 @@
 import { runtimeSnapshotSchema, type RuntimeSnapshot } from "../src/shared/contracts";
 
-export const scenarios = ["empty", "thread", "running", "ask", "settings", "projects", "long"] as const;
+export const scenarios = ["empty", "thread", "running", "ask", "settings", "projects", "long", "answer"] as const;
 export type Scenario = (typeof scenarios)[number];
 
 const NOW = Date.now();
@@ -90,6 +90,33 @@ const threadMessages = (): RuntimeSnapshot["messages"] => [
   ], 11),
 ];
 
+const answerPart = (id: string, blocks: unknown[], streaming: boolean): RuntimeSnapshot["messages"][number]["parts"][number] => ({
+  type: "answer", id: `${id}:a`, toolCallId: id, answerId: id, title: "Your week", question: "What needs my attention this week?",
+  blocks: blocks as never, streaming, outcomes: {},
+});
+
+const finishedAnswerBlocks = [
+  { type: "headline", text: "Three things need you before Friday" },
+  { type: "text", text: "The renewal is the only one with a hard deadline." },
+  { type: "stats", items: [{ value: "3", label: "Open items", delta: "1 more than last week", dir: "up", spark: [2, 3, 3, 5, 6] }, { value: "2 h", label: "Focus time left", dir: "flat" }] },
+  { type: "list", label: "To do", count: "2 of 3", rows: [
+    { id: "r1", title: "Reply to the vendor about the renewal", sub: "Due Thursday", dot: "warn", act: { label: "Draft reply", intent: "reply", primary: true, done: "Drafted" } },
+    { id: "r2", title: "Book the design review room", sub: "Tuesday afternoon", act: { label: "Open calendar", intent: "open", done: "Opened" } },
+  ] },
+  { type: "timeline", label: "Today", rows: [
+    { id: "t1", title: "Stand-up", time: "9:30", past: true },
+    { id: "t2", title: "Design review", time: "11:00", now: true },
+    { id: "t3", title: "Deep work", time: "14:00" },
+  ] },
+  { type: "progress", label: "Quarter goals", items: [{ label: "Launch", now: 7, max: 10, value: "7 of 10" }, { label: "Budget", now: 9, max: 10, value: "90%", warn: true }] },
+  { type: "table", label: "Options", cols: ["Plan", "Cost"], rows: [{ cells: ["Annual", "$480"], pick: true }, { cells: ["Monthly", "$55"] }] },
+  { type: "bars", label: "Focus hours", aria: "Focus hours by day, Wednesday highest", bars: [["Mon", 4], ["Tue", 6], ["Wed", 9, true], ["Thu", 5]] },
+  { type: "choice", id: "c1", label: "Which plan?", options: [{ id: "o1", title: "Annual", sub: "Saves $180", tag: "Best value" }, { id: "o2", title: "Monthly" }], confirm: { label: "Choose", done: "Chosen" } },
+  { type: "quote", text: "Keep Friday light.", cite: "Your notes" },
+  { type: "sources", items: ["notes/week.md", "Vendor email"] },
+  { type: "suggest", items: ["Draft the reply", "Show next week"] },
+];
+
 export function buildFixture(scenario: Scenario): RuntimeSnapshot {
   switch (scenario) {
     case "empty":
@@ -142,6 +169,17 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
         activeThreadId: "th3", messages: threadMessages(),
       });
     }
+    case "answer":
+      return parse({
+        threads: [thread("th1", "Your week", 2), thread("th2", "Weekly plan", 200)], activeThreadId: "th1",
+        messages: [
+          user("m1", "What needs my attention this week?", 6),
+          assistant("m2", "m1", [tool("t1", "workspace_read", "Read file", "completed", "notes/week.md", "42 lines"), answerPart("a1", finishedAnswerBlocks, false)], 5),
+          user("m3", "And what is left today?", 2),
+          assistant("m4", "m3", [answerPart("a2", finishedAnswerBlocks.slice(0, 4).map((block, index) => (index === 3 ? { ...(block as object), rows: [(block as { rows: unknown[] }).rows[0]] } : block)), true)], 1, "streaming"),
+        ],
+        status: "running", activeRun: { runId: "run1", threadId: "th1", status: "running" },
+      });
     case "long": {
       const longTitle = "Investigate the intermittent failure in the nightly synchronisation job that only appears when the network is slow";
       const titles = [longTitle, "Q3 planning", "Pinned: reading list", "Refactor the settings screen", "Holiday itinerary for Lisbon and Porto", "Budget spreadsheet cleanup", "Draft reply to landlord", "Explain the borrow checker", "Meal prep ideas", "Review pull request 482", "Quarterly goals", "Gift ideas", "Learning Spanish plan", "Home network audit"];

@@ -1,4 +1,5 @@
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
+import type { ChatAnswerPart, ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
+import { answerPart, answerRejected, projectAnswerInput, SHOW_ANSWER_NAME } from "../native/answer-stream";
 import { isDeclinedToolResult } from "../tools/tool-decision";
 import { toolResultError } from "../tools/tool-result-error";
 import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY, THREAD_PIN_METADATA_KEY } from "./constants";
@@ -85,7 +86,7 @@ export function detailSummary(value: unknown): string | undefined {
   return undefined;
 }
 
-export function toolPart(part: unknown, messageId: string, index: number): ChatToolPart | null {
+export function toolPart(part: unknown, messageId: string, index: number): ChatToolPart | ChatAnswerPart | null {
   if (!part || typeof part !== "object") return null;
   const record = part as Record<string, unknown>;
   let name: unknown;
@@ -119,6 +120,11 @@ export function toolPart(part: unknown, messageId: string, index: number): ChatT
   const declined = isDeclinedToolResult({ state: rawStatus, approval, output });
   const status: ChatToolPart["status"] = declined ? "declined" : isError ? "error" : /result|output-available|complete|success/.test(statusText) ? "completed" : /approval|suspend|waiting/.test(statusText) ? "waiting" : /cancel/.test(statusText) ? "cancelled" : /partial|input-stream/.test(statusText) ? "streaming_input" : "running";
   const toolCallId = typeof callId === "string" && callId ? callId : `${messageId}:tool:${index}`;
+  const rejection = name === SHOW_ANSWER_NAME ? answerRejected(output) : undefined;
+  if (name === SHOW_ANSWER_NAME && !rejection && !isError && !declined && status !== "cancelled") {
+    // Stored answers keep their full input (sanitizing would truncate nested rows) and rebuild the same blocks as the stream.
+    return answerPart({ id: `${messageId}:answer:${toolCallId}`, toolCallId, projection: projectAnswerInput(input), streaming: status === "streaming_input" });
+  }
   const safeInput = input === undefined ? undefined : sanitizeToolDetail(input);
   const safeOutput = output === undefined ? undefined : sanitizeToolDetail(output);
   return {
@@ -127,12 +133,12 @@ export function toolPart(part: unknown, messageId: string, index: number): ChatT
     toolCallId,
     name,
     label: toolLabel(name),
-    status,
+    status: rejection ? "error" : status,
     inputSummary: detailSummary(safeInput),
     outputSummary: detailSummary(safeOutput),
     input: safeInput,
     output: safeOutput,
-    error: error === undefined ? structuredError : String(error).slice(0, 2_000),
+    error: error === undefined ? rejection ?? structuredError : String(error).slice(0, 2_000),
   };
 }
 

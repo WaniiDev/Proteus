@@ -27,6 +27,7 @@ export class MessageProjector {
     const sourceById = new Map(rawMessages.map((message) => [message.id, message]));
     const converted = toAISdkV5Messages(rawMessages as Parameters<typeof toAISdkV5Messages>[0]);
     let currentTurnId = "conversation-start";
+    let lastQuestion = "";
     const projected = converted
       .map((message) => {
         const role = message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : null;
@@ -55,6 +56,8 @@ export class MessageProjector {
           .filter((part): part is Extract<ChatMessagePart, { type: "text" }> => part.type === "text")
           .map((part) => part.text)
           .join("\n\n");
+        if (role === "user") lastQuestion = text;
+        else parts = parts.map((part) => (part.type === "answer" ? { ...part, question: lastQuestion } : part));
         return {
           id: projectedId,
           role,
