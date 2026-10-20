@@ -8,7 +8,7 @@ export type ProviderSettingsProps = {
   snapshot: RuntimeSnapshot;
   apiKey: string;
   setApiKey: (value: string) => void;
-  onConnect: (event: FormEvent<HTMLFormElement>) => void;
+  onConnect: (event: FormEvent<HTMLFormElement>, providerId: ProviderId) => void;
   onDisconnect: (providerId: ProviderId) => void;
   onStartCodexAuth: (mode: "browser" | "device") => void;
   onSubmitCodexAuth: (value: string) => void;
@@ -26,29 +26,40 @@ export type ProviderSettingsProps = {
 /** How a provider connects, shown under its name. */
 export const PROVIDER_HOW: Record<ProviderId, string> = {
   openrouter: "API key",
+  anthropic: "API key",
   codex: "ChatGPT account",
 };
 
 /** What the field says when Connect is pressed with nothing in it: the reason, in words. */
 const EMPTY_KEY_MESSAGE: Partial<Record<ProviderId, string>> = {
   openrouter: "Paste your OpenRouter key to connect. It starts with sk-or-v1-.",
+  anthropic: "Paste your Anthropic key to connect. It starts with sk-ant-.",
 };
 const KEY_PLACEHOLDER: Partial<Record<ProviderId, string>> = {
   openrouter: "Paste your key · sk-or-v1-…",
+  anthropic: "Paste your key · sk-ant-…",
 };
 
 const CODEX_CODE_LINE = "Approve the sign-in in your browser. If it asks for a code, enter:";
 
-const KEY_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(["openrouter"]);
+const KEY_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(["openrouter", "anthropic"]);
 /** Runtime errors that come from checking a key; they belong under the key field. */
 const KEY_ERROR_CODES: ReadonlySet<RuntimeError["code"]> = new Set(["invalid-credential", "forbidden", "offline", "timeout", "rate-limited", "secure-store-unavailable"]);
 
 export type ProviderViewState = "connected" | "checking" | "connecting" | "waiting" | "failed" | "unavailable" | "idle";
 export type ProviderView = { state: ProviderViewState; label: string; dot: SelectStatus["dot"] };
 
+/** The runtime reports an Anthropic key check through the provider's own detail line; these two are the non-error ones. */
+const ANTHROPIC_QUIET_DETAILS: ReadonlySet<string> = new Set(["Add an Anthropic API key to use Claude models.", "Connected with an Anthropic API key."]);
+function anthropicKeyError(provider: ProviderStatus): RuntimeError | null {
+  if (!provider.detail || ANTHROPIC_QUIET_DETAILS.has(provider.detail) || provider.availability === "checking") return null;
+  return { code: "invalid-credential", message: provider.detail, retryable: true } as RuntimeError;
+}
+
 /** The error from checking a key for this provider, or null. */
 export function keyErrorFor(snapshot: RuntimeSnapshot, provider: ProviderStatus): RuntimeError | null {
-  return KEY_PROVIDERS.has(provider.id) && snapshot.error && KEY_ERROR_CODES.has(snapshot.error.code) ? snapshot.error : null;
+  if (provider.id === "anthropic") return anthropicKeyError(provider);
+  return provider.id === "openrouter" && snapshot.error && KEY_ERROR_CODES.has(snapshot.error.code) ? snapshot.error : null;
 }
 
 /** The one state a provider is in, from the snapshot alone. */
@@ -57,8 +68,9 @@ export function providerView(snapshot: RuntimeSnapshot, provider: ProviderStatus
   if (auth?.status === "failed") return { state: "failed", label: "Not connected", dot: "err" };
   if (auth?.status === "waiting") return { state: "waiting", label: "Waiting for you", dot: "warn" };
   if (auth) return { state: "connecting", label: "Connecting…", dot: "run" };
-  if (KEY_PROVIDERS.has(provider.id) && snapshot.status === "validating-key") return { state: "checking", label: "Checking…", dot: "run" };
+  if (provider.id === "openrouter" && snapshot.status === "validating-key") return { state: "checking", label: "Checking…", dot: "run" };
   if (provider.availability === "checking") return { state: "checking", label: "Checking…", dot: "run" };
+  if (provider.id === "anthropic" && !provider.verified && keyErrorFor(snapshot, provider)) return { state: "idle", label: "Not connected", dot: "err" };
   if (provider.availability === "unavailable") return { state: "unavailable", label: "Unavailable", dot: "err" };
   if (provider.verified) return { state: "connected", label: "Connected", dot: "ok" };
   return { state: "idle", label: "Not connected", dot: keyErrorFor(snapshot, provider) ? "err" : undefined };
@@ -95,7 +107,7 @@ function subLine(snapshot: RuntimeSnapshot, provider: ProviderStatus, view: Prov
   const how = PROVIDER_HOW[provider.id];
   const auth = snapshot.providerAuth?.providerId === provider.id ? snapshot.providerAuth : null;
   switch (view.state) {
-    case "connected": return provider.detail ?? (KEY_PROVIDERS.has(provider.id) ? `${how} saved · ${modelCount(snapshot, provider.id)}` : "Signed in with ChatGPT");
+    case "connected": return (provider.id === "anthropic" ? undefined : provider.detail) ?? (KEY_PROVIDERS.has(provider.id) ? `${how} saved · ${modelCount(snapshot, provider.id)}` : "Signed in with ChatGPT");
     case "checking": return KEY_PROVIDERS.has(provider.id) ? "Checking the key with the provider…" : provider.detail ?? "Checking the connection…";
     case "connecting": return auth?.status === "completing" ? "Finishing the sign-in…" : "Opening your browser…";
     case "waiting": return "Waiting for you in the browser";
@@ -103,7 +115,7 @@ function subLine(snapshot: RuntimeSnapshot, provider: ProviderStatus, view: Prov
     case "unavailable": return provider.detail ?? "This provider can’t be reached right now.";
     default:
       if (rejected) return "That key wasn’t accepted.";
-      if (KEY_PROVIDERS.has(provider.id)) return provider.detail ?? `Add an ${provider.name} API key to use its models.`;
+      if (KEY_PROVIDERS.has(provider.id)) return (provider.id === "anthropic" ? undefined : provider.detail) ?? `Add an ${provider.name} API key to use its models.`;
       return "Sign in with ChatGPT to load the Codex models.";
   }
 }
@@ -139,6 +151,7 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
     setReplacing(false);
     setEmptyKey(false);
     setAuthorizationCode("");
+    setApiKey("");
     if (onViewChange) onViewChange(next);
     else setOwnView(next);
   };
@@ -164,7 +177,7 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
       setEmptyKey(true);
       return;
     }
-    onConnect(event);
+    onConnect(event, provider.id);
   };
 
   return (

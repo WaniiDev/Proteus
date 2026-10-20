@@ -14,7 +14,7 @@ export const credentialStatusSchema = z.object({
 });
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 
-export const providerIds = ["openrouter", "codex"] as const;
+export const providerIds = ["openrouter", "codex", "anthropic"] as const;
 export const providerIdSchema = z.enum(providerIds);
 export type ProviderId = z.infer<typeof providerIdSchema>;
 
@@ -56,8 +56,9 @@ export type RuntimeError = z.infer<typeof runtimeErrorSchema>;
 export type OpenRouterModelId = `openrouter/${string}`;
 export const openRouterModelIdSchema = z.string().regex(/^openrouter\/.+$/, "Model must be routed through OpenRouter") as z.ZodType<OpenRouterModelId>;
 export type CodexModelId = `codex/${string}`;
+export type AnthropicModelId = `anthropic/${string}`;
 export type ProviderModelId = `${ProviderId}/${string}`;
-export const providerModelIdSchema = z.string().regex(/^(?:openrouter|codex)\/.+$/, "Model must belong to a supported provider") as z.ZodType<ProviderModelId>;
+export const providerModelIdSchema = z.string().regex(/^(?:openrouter|codex|anthropic)\/.+$/, "Model must belong to a supported provider") as z.ZodType<ProviderModelId>;
 
 export const providerModelSchema = z.object({
   id: providerModelIdSchema,

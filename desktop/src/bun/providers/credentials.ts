@@ -8,6 +8,7 @@ const SERVICE = "com.proteus.companion";
 const OPENROUTER_ACCOUNT = "openrouter.api-key";
 // Legacy pre-v2 data migration (kept 2026-10-19): remove once no install can still hold pre-v2 data.
 const LEGACY_OPENROUTER_ACCOUNT = "openrouter";
+const ANTHROPIC_ACCOUNT = "anthropic.api-key";
 const CODEX_ACCOUNT = "openai-codex.oauth";
 const CODEX_CHUNK_PREFIX = `${CODEX_ACCOUNT}.chunk`;
 const CODEX_PROVIDER = "openai-codex";
@@ -124,6 +125,21 @@ export function createCredentialVault(secretStore: NamedSecretStore = createNati
     async delete() {
       secretStore.delete(OPENROUTER_ACCOUNT);
       secretStore.delete(LEGACY_OPENROUTER_ACCOUNT);
+    },
+  };
+}
+
+export function createAnthropicCredentialVault(secretStore: NamedSecretStore = createNativeSecretStore()): CredentialVault {
+  return {
+    async get() {
+      return secretStore.get(ANTHROPIC_ACCOUNT);
+    },
+    async set(apiKey) {
+      if (!apiKey.trim()) throw new Error("Anthropic API key cannot be empty");
+      secretStore.set(ANTHROPIC_ACCOUNT, apiKey);
+    },
+    async delete() {
+      secretStore.delete(ANTHROPIC_ACCOUNT);
     },
   };
 }

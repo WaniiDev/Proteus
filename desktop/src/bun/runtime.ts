@@ -5,7 +5,7 @@ import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { Utils } from "electrobun/bun";
 import type { AnswerIntentParams, AnswerIntentResult, DiagnosticsSnapshot, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot, WorkspaceBinding, WorkspaceBindingUpdateResult } from "../shared/contracts";
-import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, type CodexCredentialStore, type CredentialVault } from "./providers/credentials";
+import { createAnthropicCredentialVault, createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, type CodexCredentialStore, type CredentialVault } from "./providers/credentials";
 import { openRouterGateway } from "./providers/openrouter";
 import { TaskToolPolicy } from "./tools/task-tool-policy";
 import { cutOverLegacyRuntimeData } from "./core/runtime-cutover";
@@ -53,7 +53,7 @@ export class TextRuntime {
   private initializePromise: Promise<RuntimeSnapshot> | undefined;
   private shutdownPromise: Promise<void> | null = null;
 
-  constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore()) {
+  constructor(vault: CredentialVault = createCredentialVault(), codexCredentialStore: CodexCredentialStore = createCodexCredentialStore(), anthropicVault: CredentialVault = createAnthropicCredentialVault()) {
     this.diagnostics = new RuntimeDiagnostics(Utils.paths.userData);
     const codexGateway = new MastraCodeGateway({
       mastraGatewayBaseUrl: "https://gateway-api.mastra.ai",
@@ -95,7 +95,7 @@ export class TextRuntime {
     });
     const threadRepo = new NativeThreadRepository(memory, RESOURCE_ID);
     const taskToolPolicy = new TaskToolPolicy();
-    const agent = createProteusAgent({ ctx: this.ctx, vault, codexCredentialStore, workspaceRegistry: this.workspaceRegistry, memory, scopedMemory, workspace, taskToolPolicy, diagnostics: this.diagnostics });
+    const agent = createProteusAgent({ ctx: this.ctx, vault, anthropicVault, codexCredentialStore, workspaceRegistry: this.workspaceRegistry, memory, scopedMemory, workspace, taskToolPolicy, diagnostics: this.diagnostics });
     const nativeDriver = new NativeAgentDriver(agent as unknown as NativeQueueAgent, RESOURCE_ID, {
       onProjection: (projection, chunk) => this.runs.handleNativeProjection(projection, chunk),
       onQueueChanged: (threadId) => {
@@ -111,7 +111,7 @@ export class TextRuntime {
     this.continuation = new ContinuationService(ctx, { nativeDriver, diagnostics: this.diagnostics, threads: this.threads });
     this.workspaces = new WorkspaceService(ctx, { projects, scopedMemory, workspaceRegistry: this.workspaceRegistry, appWorkspaceRoot: proteusAppWorkspaceRoot(Utils.paths.userData), nativeDriver, threadRepo, threads: this.threads });
     this.interactions = new InteractionService(ctx, { nativeDriver, diagnostics: this.diagnostics, planFilesystem, threads: this.threads, workspaces: this.workspaces, continuation: this.continuation, projector: this.projector });
-    this.providers = new ProviderService(ctx, { vault, codexCredentialStore, codexCatalogProvider, modelPreferences, threads: this.threads, abortRun: () => this.runs.abort() });
+    this.providers = new ProviderService(ctx, { vault, anthropicVault, codexCredentialStore, codexCatalogProvider, modelPreferences, threads: this.threads, abortRun: () => this.runs.abort() });
     this.memories = new MemoryService(ctx, { projects, scopedMemory });
     this.runs = new RunCoordinator(ctx, { nativeDriver, diagnostics: this.diagnostics, memory, threadRepo, threads: this.threads, workspaces: this.workspaces, interactions: this.interactions, continuation: this.continuation, projector: this.projector });
     this.answerIntents = new AnswerIntentService(ctx, { threads: this.threads, workspaceRegistry: this.workspaceRegistry, workspaces: this.workspaces, runs: this.runs, diagnostics: this.diagnostics });
@@ -184,6 +184,7 @@ export class TextRuntime {
         await this.threads.subscribeToSelectedThread();
         if (this.ctx.threadState.continuation) await this.continuation.reconcileContinuation("startup");
         await this.providers.refreshCodexModels();
+        await this.providers.refreshAnthropicModels();
         await this.providers.validateStoredCredential();
         return this.ctx.getSnapshot();
       } catch (error) {

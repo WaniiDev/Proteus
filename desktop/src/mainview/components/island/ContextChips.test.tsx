@@ -14,12 +14,14 @@ const snapshot = (over: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot => ({
   providers: [
     { id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" },
     { id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" },
+    { id: "anthropic", name: "Anthropic", configured: true, verified: true, availability: "ready" },
   ],
   models: [
     { id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] },
     { id: "openrouter/plain", providerId: "openrouter", rawId: "plain", name: "Plain", inputModalities: ["text"], outputModalities: ["text"] },
     { id: "codex/sol", providerId: "codex", rawId: "sol", name: "GPT-5.6 Sol", reasoningOptions: ["low", "medium", "high"], inputModalities: ["text"], outputModalities: ["text"] },
     { id: "codex/luna", providerId: "codex", rawId: "luna", name: "GPT-5.6 Luna", reasoningOptions: ["low", "medium", "high"], inputModalities: ["text"], outputModalities: ["text"] },
+    { id: "anthropic/claude-opus-5-5", providerId: "anthropic", rawId: "claude-opus-5-5", name: "Claude Opus 5.5", inputModalities: ["text"], outputModalities: ["text"] },
   ],
   selectedProviderId: "codex", selectedModelId: "codex/sol", selectedReasoningEffort: "medium",
   projects: [{ id: "p1", name: "Proteus", rootPath: "C:\\Code\\Proteus", availability: "ready", createdAt: now, updatedAt: now, lastOpenedAt: now }],
@@ -123,8 +125,8 @@ describe("context chips", () => {
     expect(picker.querySelector(".kicker")!.textContent).toBe("Model · Codex");
     expect(picker.querySelector(".segmented.sm.icons")).not.toBeNull();
     const tabs = [...picker.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual(["OpenRouter", "Codex"]);
-    expect(tabs.map((tab) => tab.getAttribute("title"))).toEqual(["OpenRouter", "Codex"]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual(["OpenRouter", "Codex", "Anthropic"]);
+    expect(tabs.map((tab) => tab.getAttribute("title"))).toEqual(["OpenRouter", "Codex", "Anthropic"]);
     expect([...picker.querySelectorAll('[role="radio"]')].map((r) => r.querySelector("strong")!.textContent).sort()).toEqual(["GPT-5.6 Luna", "GPT-5.6 Sol"]);
     expect(picker.querySelector(".picker-section input[type=range]")).not.toBeNull();
     expect(picker.querySelector(".picker-foot")!.textContent).toContain("Manage models in Settings");
@@ -142,6 +144,25 @@ describe("context chips", () => {
     expect(t.qa('.picker [role="radio"]').map((r) => r.querySelector("strong")!.textContent).sort()).toEqual(["Auto Router", "Plain"]);
     expect(t.q(".picker input[type=range]")).toBeNull();
     expect(t.qa('.picker [role="tab"]')[0]!.getAttribute("aria-selected")).toBe("true");
+    await t.done();
+  });
+
+  test("Anthropic has its own provider tab listing its models", async () => {
+    const t = await mount(snapshot());
+    await t.click(t.q(MODEL));
+    const tabs = t.qa('.picker [role="tab"]');
+    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toContain("Anthropic");
+    await t.click(tabs.find((tab) => tab.getAttribute("aria-label") === "Anthropic")!);
+    expect(t.q(".picker .kicker")!.textContent).toBe("Model · Anthropic");
+    expect(t.qa('.picker [role="radio"]').map((r) => r.querySelector("strong")!.textContent)).toEqual(["Claude Opus 5.5"]);
+    await t.done();
+  });
+
+  test("the warn chip says Connect Anthropic when it is the provider in use and not connected", async () => {
+    const value = snapshot({ selectedProviderId: "anthropic", selectedModelId: "anthropic/claude-opus-5-5" });
+    value.providers[2] = { ...value.providers[2]!, verified: false, configured: false, availability: "needs-configuration" };
+    const t = await mount(value);
+    expect(t.q<HTMLButtonElement>(".island-chip.is-warn")!.textContent).toBe("Connect Anthropic");
     await t.done();
   });
 
