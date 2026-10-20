@@ -23,9 +23,6 @@ type SidebarProps = {
   onRename?: (threadId: string, title: string) => void;
   onPin?: (threadId: string, pinned: boolean) => void;
   onDeleteRequest?: (thread: ThreadSummary) => void;
-  /** Kept so callers written for the collapsible rail still compile; the pane no longer collapses. */
-  open?: boolean;
-  onToggle?: () => void;
 };
 
 const STATUS: Partial<Record<ThreadSummary["activity"], { word: string; cls: string; dot: string }>> = {

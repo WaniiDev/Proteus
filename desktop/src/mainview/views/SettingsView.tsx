@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Check, ChevronRight } from "lucide-react";
 import type { MemoryScope, ProviderId, ProviderModel, RuntimeSnapshot } from "../../shared/contracts";
 import { DiagnosticsPanel } from "../components/DiagnosticsPanel";
@@ -95,6 +95,19 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
     onSelectModel((preferred ?? model).id);
   };
   const isChosen = (model: ProviderModel) => selected?.providerId === model.providerId && (model.providerId === "openrouter" ? selected.id === model.id : selected.baseModelId === model.baseModelId);
+  // Roving tabindex: the radiogroup is one tab stop, the chosen model (or the first one when none is chosen in this list).
+  const tabStopId = (displayedModels.find(isChosen) ?? displayedModels[0])?.id;
+  const onRadioKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const keys: Record<string, number> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+    if (!(event.key in keys) && event.key !== "Home" && event.key !== "End") return;
+    const radios = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)'));
+    if (radios.length === 0) return;
+    event.preventDefault();
+    const at = radios.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? radios.length - 1 : (Math.max(at, 0) + keys[event.key]! + radios.length) % radios.length;
+    radios[next]!.focus();
+    radios[next]!.click();
+  };
   const levels = orderedLevels(selected?.reasoningOptions);
   const level = nearestLevel(levels, snapshot.selectedReasoningEffort);
   const showEffort = browseConnected && selected?.providerId === browseId;
@@ -123,11 +136,11 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
                     </div>
                   </div>
                 )}
-                <div className="list" role="radiogroup" aria-label="Models">
+                <div className="list" role="radiogroup" aria-label="Models" onKeyDown={onRadioKeyDown}>
                   {displayedModels.map((model) => {
                     const chosen = isChosen(model);
                     return (
-                      <button type="button" role="radio" aria-checked={chosen} className="list-row" key={model.id} disabled={runActive} onClick={() => chooseModel(model)}>
+                      <button type="button" role="radio" aria-checked={chosen} tabIndex={model.id === tabStopId ? 0 : -1} className="list-row" key={model.id} disabled={runActive} onClick={() => chooseModel(model)}>
                         <span className="row-copy">
                           <span className="row-title">{model.providerId === "codex" ? model.baseModelId ?? model.name : model.name}</span>
                           <span className="row-sub">{model.description ?? model.rawId}</span>

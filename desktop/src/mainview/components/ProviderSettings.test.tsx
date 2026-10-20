@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProviderId, RuntimeSnapshot } from "../../shared/contracts";
 import { useDom } from "../test/dom";
-import { ProviderSettings } from "./ProviderSettings";
+import { ProviderSettings, keyErrorFor, providerView } from "./ProviderSettings";
 
 useDom();
 
@@ -125,9 +125,40 @@ describe("provider settings", () => {
     expect(html).toContain("That key wasn’t accepted.");
   });
 
-  test("never renders a credential value", () => {
-    const html = render(snapshot(), "openrouter", "");
-    expect(html).not.toMatch(/sk-or-v1-[A-Za-z0-9]/);
+  test("never renders a credential value beyond the controlled password input", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const secret = "sk-or-v1-SECRETSECRET1234567890";
+    const value = disconnected(snapshot(), "openrouter");
+    const host = document.createElement("div");
+    document.body.append(host);
+    function Harness() {
+      const [apiKey, setApiKey] = useState("");
+      return <ProviderSettings snapshot={value} viewId="openrouter" onViewChange={noop} onBrowseModels={noop} apiKey={apiKey} setApiKey={setApiKey}
+        onConnect={noop} onDisconnect={noop} onStartCodexAuth={noop} onSubmitCodexAuth={noop} onCancelCodexAuth={noop} onSelectProvider={noop} />;
+    }
+    const root = createRoot(host);
+    await act(async () => root.render(<Harness />));
+    const input = host.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => { setter.call(input, secret); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(input.value).toBe(secret);
+
+    // Everywhere except that one input's value, the secret is absent from text and from every attribute.
+    expect(host.textContent).not.toContain(secret);
+    for (const element of Array.from(host.querySelectorAll("*"))) {
+      for (const attribute of Array.from(element.attributes)) {
+        if (element === input && attribute.name === "value") continue;
+        expect(attribute.value).not.toContain(secret);
+      }
+    }
+    expect(Array.from(host.querySelectorAll("input")).filter((el) => el.value.includes(secret))).toEqual([input]);
+
+    // The snapshot-derived rows never carry it either.
+    const rows = value.providers.map((provider) => ({ view: providerView(value, provider), error: keyErrorFor(value, provider) }));
+    expect(JSON.stringify(rows)).not.toContain(secret);
+    expect(JSON.stringify(value)).not.toContain(secret);
+    await act(async () => root.unmount());
+    host.remove();
   });
 
   test("codex not connected offers Sign in and a device code, with the expand closed", () => {

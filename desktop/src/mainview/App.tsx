@@ -66,18 +66,10 @@ export default function App() {
   const { shown: shownView, leaving: viewLeaving } = useViewSwap(view);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    const remembered = localStorage.getItem("proteus.ui.nav-collapsed");
-    if (remembered !== null) return remembered !== "true";
-    return window.innerWidth >= 1100;
-  });
   const [input, setInput] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [, setOrbState] = useState<OrbState>("idle");
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(DEFAULT_SNAPSHOT);
-  useEffect(() => {
-    localStorage.setItem("proteus.ui.nav-collapsed", String(!sidebarOpen));
-  }, [sidebarOpen]);
   const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
   const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
@@ -256,7 +248,6 @@ export default function App() {
       <div className="app-shell">
         <div className="ambient" aria-hidden="true"><i /><i /><i /></div>
         <Sidebar view={view} settingsSection={settingsSection} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onMemory={() => { setSettingsMemoryScope(undefined); setSettingsSection("memory"); setView("settings"); }} onSettings={() => { if (settingsSection === "memory") { setSettingsMemoryScope(undefined); setSettingsSection("providers"); } setView("settings"); }} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} messages={snapshot.messages} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onPin={(threadId, pinned) => ignoreRpc(rpc.request["threads.pin"]({ threadId, pinned }))} onDeleteRequest={setDeleteTarget} />
-        {sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
         <main className="app-stage">
           <div className={viewLeaving ? "view is-leaving" : "view"}>
           {shownView === "companion" && (

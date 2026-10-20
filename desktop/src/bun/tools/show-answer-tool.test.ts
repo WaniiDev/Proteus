@@ -46,6 +46,17 @@ describe("show_answer tool", () => {
     expect(await run(3)).toMatchObject({ retry: true });
   });
 
+  it("keys the retry by run id, so a long chat whose window plateaus still gets one retry per turn", async () => {
+    const tool = createShowAnswerTool();
+    // 20 remembered messages in every turn: the user-message count no longer changes between turns.
+    const turn = (runId: string) => ({ agent: { threadId: "t", messages: Array.from({ length: 20 }, () => ({ role: "user" })) }, requestContext: new Map([["proteus-run-id", runId]]) }) as never;
+    const run = (runId: string) => tool.execute!(noHeadline as never, turn(runId)) as Promise<{ retry?: boolean }>;
+    expect(await run("run-1")).toMatchObject({ retry: true });
+    expect(await run("run-1")).toMatchObject({ retry: false });
+    expect(await run("run-2")).toMatchObject({ retry: true });
+    expect(await run("run-3")).toMatchObject({ retry: true });
+  });
+
   it("returns the retry as a normal result, not an error", async () => {
     const tool = createShowAnswerTool();
     const result = await tool.execute!(noHeadline as never, {} as never) as Record<string, unknown>;

@@ -50,6 +50,8 @@ Tests that read CSS text and will need rewriting: `components/Sidebar.test.tsx`,
 | `PersistentOrbSurface.tsx`, `OrbPresence.tsx` | Hero orb on an empty conversation; 44px orb in the Island afterwards (`fly` budget `dur-fly`) |
 | `orb/orb-spec.ts`, `shared/contracts.ts` | Add `focusing` to `ORB_STATES` and `OrbState`, played as a moment when thinking moves to the model's top level, with the surge (ADR 0002) |
 
+Note: the Settings Models tab shows an `EffortSlider` without `onTopLevel`. No orb is on screen in Settings (the orb lives in the Companion view and its `useFocusingMoment`), so there is no handle to play the focusing moment on; the chips picker in the Island wires it.
+
 Data:
 - **Asks:** from `snapshot.interactions`, answered through `chat.interaction.respond`, `chat.interaction.dismiss` and `chat.tool-approval.respond` (with its fingerprint).
 - **Models:** from `snapshot.models`.
