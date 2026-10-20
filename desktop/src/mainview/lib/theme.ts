@@ -4,7 +4,14 @@ export type ResolvedTheme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "proteus.ui.theme";
 export const THEME_CANVAS: Record<ResolvedTheme, string> = { light: "#f2f2f4", dark: "#0e0e10" };
-const MORPH_MS = 520;
+const MORPH_FALLBACK_MS = 520;
+let shiftTimer: number | undefined;
+
+function morphMs(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--dur-morph").trim();
+  const ms = raw.endsWith("ms") ? parseFloat(raw) : raw.endsWith("s") ? parseFloat(raw) * 1000 : NaN;
+  return Number.isFinite(ms) && ms > 0 ? ms : MORPH_FALLBACK_MS;
+}
 
 export function parseThemeChoice(value: unknown): ThemeChoice {
   return value === "light" || value === "dark" ? value : "system";
@@ -61,7 +68,8 @@ function apply(animate: boolean) {
   const changed = root.dataset.theme !== next;
   if (changed && animate && !reducedMotion()) {
     root.classList.add("theme-shift");
-    window.setTimeout(() => root.classList.remove("theme-shift"), MORPH_MS);
+    window.clearTimeout(shiftTimer);
+    shiftTimer = window.setTimeout(() => root.classList.remove("theme-shift"), morphMs());
   }
   root.dataset.theme = next;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_CANVAS[next]);

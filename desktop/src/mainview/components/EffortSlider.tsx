@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ChangeEvent, type ReactElement } from "react";
+import { useEffect, useRef, type ChangeEvent, type KeyboardEvent, type ReactElement } from "react";
 import type { ReasoningEffort } from "../../shared/contracts";
 import { NO_ADJUSTABLE_THINKING, effortHint, effortName, effortValueText, isTopLevel, levelIndex, orderedLevels } from "../lib/effort";
 
@@ -36,6 +36,22 @@ export function EffortSlider({ model, levels, value, onChange, onTopLevel, compa
     if (next && next !== current) onChange(next);
   };
 
+  // Mirrors a native range's keys so the behaviour does not depend on the webview.
+  const keyTarget = (key: string): number | null => {
+    if (key === "ArrowLeft" || key === "ArrowDown") return Math.max(0, index - 1);
+    if (key === "ArrowRight" || key === "ArrowUp") return Math.min(count - 1, index + 1);
+    if (key === "Home") return 0;
+    if (key === "End") return count - 1;
+    return null;
+  };
+  const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    const target = keyTarget(event.key);
+    if (target === null || event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    const next = offered[target];
+    if (next && next !== current) onChange(next);
+  };
+
   return (
     <>
       <div className="effort-field">
@@ -49,6 +65,7 @@ export function EffortSlider({ model, levels, value, onChange, onTopLevel, compa
             aria-label={`Thinking for ${model}`}
             aria-valuetext={effortValueText(current, top)}
             onChange={handle}
+            onKeyDown={handleKey}
           />
           <span className="effort-fill" />
           {offered.map((level, i) => (
