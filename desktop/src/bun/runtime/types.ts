@@ -23,6 +23,8 @@ export type PersistedThreadState = {
   toolOutcomes?: Record<string, ProjectedToolOutcome>;
   modelSelection?: AppModelSelection;
   continuation?: ContinuationState | null;
+  /** What the person did in each generative answer (ADR 0003): answerId to block or row id to outcome text. Once-only guard and reload source. */
+  answerOutcomes?: Record<string, Record<string, string>>;
 };
 
 export type InteractionResolution = {

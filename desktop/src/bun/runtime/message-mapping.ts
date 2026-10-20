@@ -221,3 +221,12 @@ export function emptyWorkbench(): WorkbenchState {
     tokenUsage: emptyTokenUsage(),
   };
 }
+
+/** Merge the recorded answer outcomes (thread metadata, keyed by answerId) into the answer parts; messages without one are untouched. */
+export function applyAnswerOutcomes(messages: ChatMessage[], recorded: Record<string, Record<string, string>> | undefined): ChatMessage[] {
+  if (!recorded || Object.keys(recorded).length === 0) return messages;
+  return messages.map((message) => {
+    if (!message.parts.some((part) => part.type === "answer" && recorded[part.answerId])) return message;
+    return { ...message, parts: message.parts.map((part) => (part.type === "answer" && recorded[part.answerId] ? { ...part, outcomes: { ...part.outcomes, ...recorded[part.answerId] } } : part)) };
+  });
+}

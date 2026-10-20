@@ -75,7 +75,7 @@ The agent answers with interface through one tool, `show_answer` (`src/bun/tools
 
 ### Answer items in the snapshot
 
-`show_answer` is projected as an `answer` message part (`chatAnswerPartSchema` in `src/shared/contracts.ts`): `{ answerId, toolCallId, title, question, blocks, streaming, outcomes }`. `answerId` is the tool call id. `question` is the text of the user message that opened the turn (filled when messages are mapped from storage, empty on the live stream). `outcomes` is a record keyed by block or row id (`"Approved"`, `"Opened"`, `"Chosen · …"`, `"Not now · unchanged"`); it is empty now and is filled when answer actions land (WAN-530).
+`show_answer` is projected as an `answer` message part (`chatAnswerPartSchema` in `src/shared/contracts.ts`): `{ answerId, toolCallId, title, question, blocks, streaming, outcomes }`. `answerId` is the tool call id. `question` is the text of the user message that opened the turn (filled when messages are mapped from storage, empty on the live stream). `outcomes` is a record keyed by block or row id (`"Approved"`, `"Opened"`, `"Chosen · …"`, `"Not now · unchanged"`); it is filled from the thread metadata (see Answer intents below).
 
 While the call streams, `NativeStreamProjector` buffers the `tool-call-delta` input text per tool call and reads it with `parsePartialJson` (`src/bun/native/partial-json.ts`), so only closed nodes are ever read. `projectAnswerText` (`src/bun/native/answer-stream.ts`) then projects:
 
@@ -86,6 +86,25 @@ While the call streams, `NativeStreamProjector` buffers the `tool-call-delta` in
 `tool-call` (complete input) re-projects the whole input and sets `streaming: false`; `finish`, `abort` and `error` also end streaming. `show_answer` is never projected as a tool step: the `answer` part is its only projection. A rejected result (`{ ok: false }`, a tool error or a failed result) removes the answer part and leaves nothing, so the person never sees a rejected answer and the retry streams a new answer item.
 
 History: the stored tool call maps back to an answer item in `toolPart` (`runtime/message-mapping.ts`) with `projectAnswerInput`, which validates each block the same way, from the unsanitized stored input (sanitizing truncates nested rows). A reload therefore yields the same blocks as the finished stream; a stored rejection or failure reloads as nothing (`toolPart` returns null for it).
+
+### Answer intents (`chat.answer.intent`)
+
+Every action in an answer is one of five named intents, never a tool call. The RPC is `chat.answer.intent` `{ threadId, answerId, blockId?, rowId?, intent, optionId? }` (`blockId` names a `choice` or `diff` block; a row action sends `rowId` only, as the renderer does) and answers `AnswerIntentResult`: `{ accepted: true, outcome, draft?, open? }` or `{ accepted: false, code: "refused" | "already-done" | "stale" | "failed", message }`. `AnswerIntentService` (`runtime/answer-intent-service.ts`, reached through `TextRuntime.runAnswerIntent`) owns it. The request only names a row or block: the path, diff lines and option text are read from the stored answer in the snapshot, never from the request. The thread must be the selected one, the answer must have finished streaming, and each block is re-validated with `validateBlock`.
+
+Allowlist: an intent runs only when the answer offers it on that row or block: a row's `act.intent` must equal the request (`open`, `reply`, `approve`, `skip`), a `choice` takes `choose` with one of its option ids, a `diff` takes `approve` or `skip`. Anything else, an unknown field, or an id that matches two rows is refused with a `refused` result and records nothing. The gate each intent has is the `ANSWER_INTENT_GATES` table in `tools/approval-policy.ts`; `approve` is the only one that can reach a write.
+
+| Intent | What runs | Outcome |
+| -- | -- | -- |
+| `open` | The path in the row's sub line (else its title) is read through `WorkspaceRegistry.read` (contained, symlink-safe, one line). The result carries `open: { path }` for the renderer's existing file viewer; nothing is opened by the host. A row that cites no workspace file is refused. | `Opened` |
+| `reply` | Returns `draft` (the row title) for the composer. Nothing is sent. | `Drafted` |
+| `approve` on a `diff` | Applies exactly the shown lines (`applyShownLines`): the old lines (context and deleted) must be found at the shown line number, or exactly once when there are no numbers, and the file is read and written with `WorkspaceRegistry`'s `expectedVersion`. A moved file fails with the runtime's own message ("File changed outside Proteus; refresh before saving", code `stale`) and nothing is written. Non-text, truncated and CRLF/BOM files are refused. A `fingerprint` of the file and lines is recorded in diagnostics like an Island approval. | `Approved` |
+| `approve` on a row | A row proposes an action in words, not a write. The person's approval is sent as their reply (`Approved: <title>`) through the normal send path; any write the agent then makes goes through its own approval gate. | `Approved` |
+| `choose` | The option title is sent as the person's reply through the normal send path. | `Chosen · <title>` |
+| `skip` | Records only. | `Not now · unchanged` |
+
+No path from an answer to a write skips approval: (1) the model has no way to raise an intent, since `chat.answer.intent` is a renderer RPC and `show_answer` only returns the stored data; (2) the one operation that writes from an answer is a `diff` approve, which is the person's click on the exact lines shown, derived from the stored answer and applied only if the file still holds them at that place and is unchanged between read and write; (3) every other intent reads, drafts, records, or sends the person's own reply, and a turn that reply starts can only write through the existing `requireApproval` tools; (4) writes are contained by `WorkspaceRegistry` (no escape by path, `..` or symlink) and nothing here changes the allowlists in `approval-policy`/`tool-decision`. A diff approve is not a Mastra suspension (there is no run to resume), so it does not appear in the Island; its record is the diagnostics entry and the stored outcome.
+
+Once-only: the outcome string is stored in `PersistedThreadState.answerOutcomes` (`{ [answerId]: { [rowId or blockId]: outcome } }`) in the thread metadata with the rest of the UI state, so it survives a reload and a restart. `applyAnswerOutcomes` (`runtime/message-mapping.ts`) merges it into every `answer` part inside `RuntimeContext.publish`, whichever path published the messages. A second run of a row or block (including `skip` after `approve` on a diff) is refused with `already-done`, and an in-flight guard makes two concurrent calls run once. A failed intent (stale file, failed send) records nothing, so the row stays actionable. If the metadata write itself fails after the action ran, the outcome stays in memory and the runtime reports the error.
 
 ## Providers
 
