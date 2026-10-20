@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } f
 import type { OrbState } from "../../shared/contracts";
 import { mountOrb, type OrbFX } from "../orb/orb3d";
 
-export type OrbHandle = { pulse: () => void; nudge: () => void };
+export type OrbHandle = { pulse: () => void; nudge: () => void; playFocusing: () => void };
 
 export const Orb = forwardRef<OrbHandle, { state: OrbState }>(function Orb({ state }, ref) {
   const floatRef = useRef<HTMLDivElement>(null);
@@ -23,6 +23,7 @@ export const Orb = forwardRef<OrbHandle, { state: OrbState }>(function Orb({ sta
     () => ({
       pulse: () => controllerRef.current?.pulse(),
       nudge: () => controllerRef.current?.nudge(),
+      playFocusing: () => controllerRef.current?.playFocusing(),
     }),
     [],
   );

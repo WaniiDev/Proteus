@@ -68,6 +68,17 @@ export const ORB_STATES: Record<OrbState, OrbSpec> = {
     a: "#c8b8e0",
     b: "#a8c8e8",
   },
+  focusing: {
+    label: "Focusing",
+    description: "Max thinking. I’ll take the time this needs.",
+    amp: 0.24,
+    speed: 0.35,
+    freq: 2.10,
+    scale: 0.94,
+    voice: 0,
+    a: "#c8b8e0",
+    b: "#f4c5a8",
+  },
   working: {
     label: "Working",
     description: "Gathering and organizing — watch the panel.",

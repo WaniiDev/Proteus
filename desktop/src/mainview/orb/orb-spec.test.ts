@@ -30,6 +30,12 @@ describe("orb visual contract", () => {
     expect(ORB_STATES.error).toMatchObject({ amp: 0.08, speed: 0.30, freq: 1.90, scale: 0.94, voice: 0, a: "#e8b8c4", b: "#d6d3d1" });
   });
 
+  it("has sixteen states, with focusing as a moment between thinking and working", () => {
+    expect(orbStates).toHaveLength(16);
+    expect(orbStates.indexOf("focusing")).toBe(orbStates.indexOf("thinking") + 1);
+    expect(ORB_STATES.focusing).toMatchObject({ label: "Focusing", amp: 0.24, speed: 0.35, freq: 2.10, scale: 0.94, voice: 0, a: "#c8b8e0", b: "#f4c5a8" });
+  });
+
   it("keeps every state palette pair unique", () => {
     const pairs = orbStates.map((state) => `${ORB_STATES[state].a}:${ORB_STATES[state].b}`);
     expect(new Set(pairs).size).toBe(orbStates.length);
