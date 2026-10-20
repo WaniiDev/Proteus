@@ -5,7 +5,10 @@ describe("supporting page layout", () => {
     const css = await Bun.file(new URL("./index.css", import.meta.url)).text();
     expect(css).toContain(".app-stage { position: relative; flex: 1; min-width: 0; height: 100%; min-height: 0; overflow: hidden;");
     expect(css).toContain(".app-stage > .view { flex: 1 1 auto; min-height: 0;");
-    expect(css).toContain(".view.active { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto;");
+    // App owns the .view wrapper; a page scrolls inside its own block scroller, not a flex .view.active that shrinks .page.
+    expect(css).not.toContain(".view.active");
+    expect(css).toContain(".projects-view");
+    expect(css).toContain(".settings-view");
   });
 
   test("the shell uses the system ambient field and drops the legacy orbs and view animation", async () => {

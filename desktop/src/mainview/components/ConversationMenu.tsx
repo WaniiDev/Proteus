@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Copy, FileSearch, Files, Gauge, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import type { RuntimeSnapshot, ThreadSummary } from "../../shared/contracts";
 import { Menu, MenuItem, MenuRule } from "./ds/Menu";
+import { useToast } from "./ds/Toast";
 import { transcriptText } from "./Sidebar";
 import { RenameDialog } from "./conversation/RenameDialog";
 import { DetailsDialog } from "./conversation/DetailsDialog";
@@ -16,7 +17,8 @@ export function ConversationMenu({ snapshot, onRename, onPin, onDeleteRequest }:
   const [dialog, setDialog] = useState<Dialog>(null);
   const hasThread = !!snapshot.activeThreadId;
   const thread = snapshot.threads?.find((item) => item.id === snapshot.activeThreadId);
-  const copyTranscript = () => { void navigator.clipboard?.writeText(transcriptText(snapshot.messages ?? [])).catch(() => undefined); };
+  const toast = useToast();
+  const copyTranscript = () => { void navigator.clipboard?.writeText(transcriptText(snapshot.messages ?? [])).then(() => toast("Transcript copied")).catch(() => undefined); };
   const needsFolder = snapshot.activeWorkspace.availability !== "ready";
   return <>
     <button type="button" className="icon-btn electrobun-webkit-app-region-no-drag" aria-label="Conversation actions" title="Conversation actions" aria-haspopup="menu" aria-expanded={anchor !== null} disabled={!hasThread} onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}><MoreHorizontal className="i" aria-hidden="true" /></button>

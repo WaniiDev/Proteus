@@ -65,10 +65,14 @@ export function Menu({ label, anchor, placement = "beside", className = "", onCl
     }
   }, [anchor, placement]);
 
-  // Focus the first item once per opening: this effect has no dependencies that change while the menu is open.
+  // Focus the first item once per opening. The menu stays visibility:hidden until it is positioned, and a hidden element
+  // ignores focus(), so this waits for the commit that clears the hidden style.
+  const focused = useRef(false);
   useEffect(() => {
+    if (focused.current || style.visibility === "hidden") return;
+    focused.current = true;
     ref.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus({ preventScroll: true });
-  }, []);
+  }, [style]);
 
   useEffect(() => {
     const outside = (event: PointerEvent) => {
@@ -127,8 +131,8 @@ type MenuItemProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "
 // Choosing an item lets the menu leave, returns focus to its trigger, then runs the action.
 export function MenuItem({ onSelect, danger = false, icon, reason, disabled, className = "", children, ...rest }: MenuItemProps) {
   const menu = useContext(MenuContext);
-  return <button {...rest} type="button" role="menuitem" className={`${danger ? "danger " : ""}${className}`.trim() || undefined} disabled={disabled} title={disabled ? reason : rest.title} onClick={() => (menu ? menu.choose(onSelect) : onSelect())}>
-    {icon}{children}{disabled && reason && <small className="menu-reason">{reason}</small>}
+  return <button {...rest} type="button" role="menuitem" className={`${danger ? "danger " : ""}${disabled ? "is-disabled " : ""}${className}`.trim() || undefined} disabled={disabled} title={disabled ? reason : rest.title} onClick={() => (menu ? menu.choose(onSelect) : onSelect())}>
+    {icon}<span className="menu-label">{children}</span>{disabled && reason && <small className="menu-reason">{reason}</small>}
   </button>;
 }
 

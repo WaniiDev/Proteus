@@ -77,13 +77,6 @@ input { font-family: var(--font-body); }
 .title-md { font-size: 20px; font-weight: 500; line-height: 1.35; letter-spacing: 0; }
 .title-sm { font-size: 18px; font-weight: 500; line-height: 1.44; letter-spacing: 0.18px; }
 
-/* ---------- Views ---------- */
-
-.page-head { margin-bottom: var(--s-xxl); max-width: 640px; }
-.page-head .caption-uppercase { display: block; margin-bottom: var(--s-sm); }
-.page-head .display-lg { margin-bottom: var(--s-base); }
-.page-sub { color: var(--muted); font-size: 16px; line-height: 1.55; }
-
 /* ---------- Buttons ---------- */
 .btn-primary {
   background: var(--primary); color: var(--on-primary);

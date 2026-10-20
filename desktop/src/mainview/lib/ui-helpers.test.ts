@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ThreadSummary } from "../../shared/contracts";
-import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupSessions, groupThreads, relativeTime } from "./ui-helpers";
+import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupSessions, groupThreads, relativeTime, shortDate } from "./ui-helpers";
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 const thread = (id: string, title: string, updatedAt: string): ThreadSummary => ({
@@ -29,6 +29,23 @@ describe("conversation helpers", () => {
 
   it("formats relative timestamps and derives a local goal", () => {
     expect(relativeTime("2026-08-03T11:59:00.000Z", now)).toBe("1m");
+    expect(relativeTime("2026-08-03T11:59:50.000Z", now)).toBe("now");
+    expect(relativeTime("2026-08-03T08:30:00.000Z", now)).toBe("3h");
+    expect(relativeTime("2026-07-31T12:00:00.000Z", now)).toBe("3d");
+    expect(relativeTime("2026-07-25T12:00:00.000Z", now)).toBe("1w");
+    expect(relativeTime("2026-06-01T12:00:00.000Z", now)).toBe("2mo");
+    expect(relativeTime("2025-06-01T12:00:00.000Z", now)).toBe("1y");
+    expect(relativeTime("nope", now)).toBe("");
+  });
+
+  it("writes project dates as today or a short date", () => {
+    expect(shortDate("2026-08-03T01:00:00.000Z", now)).toBe("today");
+    expect(shortDate("2026-06-02T12:00:00.000Z", now)).toBe("Jun 2");
+    expect(shortDate("2025-09-02T12:00:00.000Z", now)).toBe("Sep 2, 2025");
+    expect(shortDate("nope", now)).toBe("");
+  });
+
+  it("derives a local goal", () => {
     expect(
       goalFromMessages([
         {

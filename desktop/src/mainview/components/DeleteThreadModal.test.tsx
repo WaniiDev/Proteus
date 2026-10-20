@@ -10,7 +10,8 @@ describe("DeleteThreadModal", () => {
     const html = renderToStaticMarkup(<DeleteThreadModal thread={thread} onCancel={() => {}} onConfirm={() => {}} />);
     expect(html).toContain('class="scrim"');
     expect(html).toContain("Delete conversation?");
-    expect(html).toContain("Quarterly plan</strong> will be removed from this device.");
+    expect(html).toContain("“Quarterly plan”</span> will be removed from this device.");
+    expect(html).not.toContain("<strong");
     expect(html).toContain("btn btn-danger sm");
     expect(html).not.toContain("confirm-modal");
   });

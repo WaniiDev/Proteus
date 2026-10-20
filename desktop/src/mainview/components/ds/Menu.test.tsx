@@ -44,6 +44,35 @@ describe("Menu", () => {
     await close();
   });
 
+  test("focuses the first item even though the menu is hidden until it is positioned", async () => {
+    // A real browser ignores focus() on an element inside visibility:hidden; happy-dom does not, so simulate it.
+    const focus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function (this: HTMLElement, ...args: Parameters<HTMLElement["focus"]>) {
+      if (this.closest('[style*="visibility: hidden"]')) return;
+      focus.apply(this, args);
+    };
+    try {
+      const { close } = await open([]);
+      expect(document.querySelector<HTMLElement>(".menu")!.style.visibility).not.toBe("hidden");
+      expect(document.activeElement?.textContent).toBe("A");
+      await key("ArrowDown");
+      expect(document.activeElement?.textContent).toBe("C");
+      await key("Home");
+      expect(document.activeElement?.textContent).toBe("A");
+      await key("ArrowUp");
+      expect(document.activeElement?.textContent).toBe("C");
+      await close();
+    } finally { HTMLElement.prototype.focus = focus; }
+  });
+
+  test("a disabled item carries is-disabled and its one-line reason", async () => {
+    const { close } = await open([]);
+    const item = document.querySelector(".menu button:disabled")!;
+    expect(item.classList.contains("is-disabled")).toBe(true);
+    expect(item.querySelector(".menu-reason")?.textContent).toBe("Not now");
+    await close();
+  });
+
   test("arrow keys skip disabled items and wrap", async () => {
     const { close } = await open([]);
     await key("ArrowDown");
