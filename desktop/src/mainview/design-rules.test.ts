@@ -159,3 +159,28 @@ describe("design-system guardrails", () => {
     expect(total).toBeLessThanOrEqual(baseTotal);
   });
 });
+
+describe("scanner self-test", () => {
+  it("flags colour literals, numeric z-index and scrollbar properties in CSS", () => {
+    expect(scanCss("a{color:#fff}").colour).toBe(1);
+    expect(scanCss("a{color: rgba(0,0,0,.5)}").colour).toBe(1);
+    expect(scanCss("a{color: red}").colour).toBe(1);
+    expect(scanCss("a{ z-index: 3 }")["z-index"]).toBe(1);
+    expect(scanCss("a{ scrollbar-width: thin }").scrollbar).toBe(1);
+    expect(scanCss("a:focus-visible{ outline: none }").outline).toBe(1);
+  });
+
+  it("flags an inline style with a non-allowlisted key in TSX", () => {
+    expect(scanTsx('const a = <p style={{ color: "red" }} />;').style).toBe(1);
+    expect(scanTsx('const a = <p style={{ "--pos": 1 }} />;').style).toBe(0);
+  });
+
+  it("passes tokens and allowed keywords", () => {
+    expect(scanCss("a{ z-index: var(--z-menu); color: currentColor; background: transparent; border-color: var(--line) }")).toEqual({
+      colour: 0,
+      "z-index": 0,
+      scrollbar: 0,
+      outline: 0,
+    });
+  });
+});
