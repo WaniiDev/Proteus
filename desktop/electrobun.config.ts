@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
 import type { ElectrobunConfig } from "electrobun";
 
 // @mastra/code-sdk's Kimi provider reads its version from ../../package.json relative to the bundle at load time,
 // which does not exist inside the packaged app. It checks the MASTRACODE_VERSION build constant first, so define it.
-const codeSdkVersion: string = JSON.parse(
-  readFileSync(new URL("./node_modules/@mastra/code-sdk/package.json", import.meta.url), "utf8"),
-).version;
+// Kept as a literal: Hutch serializes this config and it must not do file I/O. electrobun-config.test.ts keeps it
+// equal to the installed @mastra/code-sdk version.
+const codeSdkVersion = "1.14.0";
 
 export default {
   app: {
