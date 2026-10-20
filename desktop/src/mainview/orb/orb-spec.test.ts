@@ -57,12 +57,13 @@ describe("orb visual contract", () => {
     expect(css).toContain(".orb-float { transition: none !important; }");
   });
 
-  it("keeps one prototype-sized surface across hero and header anchors", async () => {
+  it("keeps one prototype-sized surface across the hero and the Island's orb slot", async () => {
     const css = await Bun.file(new URL("../index.css", import.meta.url)).text();
 
     expect(css).toContain(".persistent-orb-surface");
     expect(css).toContain("width: 220px");
-    expect(css).toContain(".orb-presence-docked .orb-anchor { width: 76px; height: 76px; }");
+    expect(css).toMatch(/\.island-orb-slot\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
+    expect(css).not.toContain("orb-presence-docked");
   });
 
   it("matches the prototype fallback geometry", async () => {

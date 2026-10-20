@@ -1,4 +1,8 @@
 export const ORB_SURFACE_SIZE = 220;
+/** --dur-fly: the budget for the hero-to-Island flight. */
+export const ORB_FLY_MS = 640;
+/** The follower snaps onto its anchor once every edge is within this many px (scale counted against the 220px surface). */
+export const ORB_SETTLE_PX = 2;
 
 export type OrbPlacement = {
   x: number;
@@ -24,12 +28,23 @@ export function advanceOrbPlacement(current: OrbPlacement, target: OrbPlacement,
   if (reducedMotion) return target;
   const elapsedSeconds = Math.min(Math.max(elapsedMs, 0) / 1_000, 0.05);
   const blend = 1 - Math.exp(-9 * elapsedSeconds);
-  return {
+  const next = {
     x: current.x + (target.x - current.x) * blend,
     y: current.y + (target.y - current.y) * blend,
     scaleX: current.scaleX + (target.scaleX - current.scaleX) * blend,
     scaleY: current.scaleY + (target.scaleY - current.scaleY) * blend,
   };
+  return orbPlacementGap(next, target) <= ORB_SETTLE_PX ? target : next;
+}
+
+/** The largest remaining edge in px between a placement and its target. */
+export function orbPlacementGap(placement: OrbPlacement, target: OrbPlacement): number {
+  return Math.max(
+    Math.abs(target.x - placement.x),
+    Math.abs(target.y - placement.y),
+    Math.abs(target.scaleX - placement.scaleX) * ORB_SURFACE_SIZE,
+    Math.abs(target.scaleY - placement.scaleY) * ORB_SURFACE_SIZE,
+  );
 }
 
 export function orbPlacementTransform(placement: OrbPlacement): string {

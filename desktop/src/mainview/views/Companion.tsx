@@ -72,7 +72,6 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
     <section className="view active companion-view">
       <div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag">
         <div className="chat-title-copy">
-          {docked && <OrbPresence state={state} docked anchorRef={dockOrbAnchorRef} />}
           <div className="chat-title-text">
             <h1 className="chat-title">{activeTitle}</h1>
             <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
@@ -85,7 +84,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
         <div className={`companion-grid ${contextOpen ? "context-present" : "context-absent"}`}>
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
-            {!docked && <OrbPresence state={state} docked={false} anchorRef={heroOrbAnchorRef} />}
+            {!docked && <OrbPresence state={state} anchorRef={heroOrbAnchorRef} />}
             {!docked && <section className="command-home-copy" aria-label="Start with Proteus">
               <span className="caption-uppercase">Your thinking companion</span>
               <h2>What can we work on?</h2>
@@ -162,6 +161,9 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               runningForSelected={runningForSelected}
               runningElsewhere={runningElsewhere}
               providerName={selectedProvider?.name ?? "a provider"}
+              orbState={state}
+              docked={docked}
+              orbAnchorRef={dockOrbAnchorRef}
               onInput={setInput}
               onSubmit={onSend}
               onAbort={onAbort}

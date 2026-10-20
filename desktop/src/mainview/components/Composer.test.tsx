@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { useDom } from "../test/dom";
 import type { RuntimeSnapshot } from "../../shared/contracts";
 import { Composer } from "./Composer";
+
+useDom();
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const snapshot = (): RuntimeSnapshot => ({
   revision: 1,
@@ -37,6 +43,9 @@ const render = (value: RuntimeSnapshot) => renderToStaticMarkup(
     runningForSelected={false}
     runningElsewhere={false}
     providerName="Codex"
+    orbState="idle"
+    docked={false}
+    orbAnchorRef={() => undefined}
     onInput={() => undefined}
     onSubmit={() => undefined}
     onAbort={() => undefined}
@@ -54,7 +63,8 @@ describe("Claude-style composer", () => {
     expect(html).toContain("Proteus workspace");
     expect(html).toContain("<span>GPT-5.6 Sol</span>");
     expect(html).toContain("Codex · GPT-5.6 Sol · high");
-    expect(html).toContain("Enter to send · Shift+Enter for new line");
+    expect(html).toContain('placeholder="Ask Proteus anything"');
+    expect(html).toContain('class="island-meta"');
   });
 
   test("hides the workspace control once conversation history exists", () => {
@@ -72,5 +82,25 @@ describe("Claude-style composer", () => {
     expect(source).toContain('horizontal ? "ArrowRight" : "ArrowDown"');
     expect(source).toContain("Configure in Settings");
     expect(source).toContain("Provider default");
+  });
+
+  test("a running conversation shows the live status and Stop, which aborts the run", async () => {
+    const value = snapshot();
+    value.activeRun = { runId: "run-1", threadId: "thread-1", status: "running" };
+    let aborts = 0;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(
+      <Composer snapshot={value} input="" queuedDraftCount={0} canChat runningForSelected runningElsewhere={false} providerName="Codex" orbState="working" docked orbAnchorRef={() => undefined}
+        onInput={() => undefined} onSubmit={() => undefined} onAbort={() => { aborts += 1; }} onSettings={() => undefined} onNudge={() => undefined}
+        onWorkspaceSelect={async () => ({ accepted: true })} onModelSelect={async () => true} onReasoningSelect={async () => true} />,
+    ));
+    const visible = [...host.querySelectorAll(".island-status")].filter((el) => el.getAttribute("data-on") === "true");
+    expect(visible.map((el) => el.querySelector("strong")?.textContent)).toEqual(["Working"]);
+    expect((host.querySelector(".island-input") as HTMLTextAreaElement).disabled).toBe(true);
+    await act(async () => { (host.querySelector(".island-end .btn") as HTMLButtonElement).click(); });
+    expect(aborts).toBe(1);
+    await act(async () => { root.unmount(); host.remove(); });
   });
 });

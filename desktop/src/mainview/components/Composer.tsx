@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Brain, Check, ChevronDown, FolderOpen, Search, Send, Settings2, Square } from "lucide-react";
-import { MAX_INPUT_LENGTH } from "../../shared/constants";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref } from "react";
+import { Brain, Check, ChevronDown, FolderOpen, Search, Settings2 } from "lucide-react";
 import type {
+  OrbState,
   ProviderModelId,
   ReasoningEffort,
   RuntimeSnapshot,
@@ -10,12 +10,11 @@ import type {
 } from "../../shared/contracts";
 import {
   canChooseComposerWorkspace,
-  composerAction,
-  composerLineCount,
   composerModelLabel,
-  shouldSubmitComposerKey,
+  deriveIsland,
 } from "../lib/composer-ui";
 import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "../lib/model-sorting";
+import { Island, type IslandHandle } from "./island/Island";
 import { ProviderMark } from "./ProviderMark";
 
 type ComposerProps = {
@@ -26,6 +25,14 @@ type ComposerProps = {
   runningForSelected: boolean;
   runningElsewhere: boolean;
   providerName: string;
+  orbState: OrbState;
+  /** The conversation has started: the Island's orb slot is open and the orb docks there. */
+  docked: boolean;
+  orbAnchorRef: (element: HTMLDivElement | null) => void;
+  /** The Island grows upward while open; `body` fills it (ask and answer bodies). */
+  open?: boolean;
+  body?: ReactNode;
+  islandRef?: Ref<IslandHandle>;
   onInput: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onAbort: () => void;
@@ -69,6 +76,12 @@ export function Composer({
   runningForSelected,
   runningElsewhere,
   providerName,
+  orbState,
+  docked,
+  orbAnchorRef,
+  open,
+  body,
+  islandRef,
   onInput,
   onSubmit,
   onAbort,
@@ -78,7 +91,7 @@ export function Composer({
   onModelSelect,
   onReasoningSelect,
 }: ComposerProps) {
-  const rootRef = useRef<HTMLFormElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const projectTriggerRef = useRef<HTMLButtonElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
@@ -89,8 +102,7 @@ export function Composer({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const showProjectControl = canChooseComposerWorkspace(snapshot, queuedDraftCount);
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
-  const primaryAction = composerAction(runningForSelected, input.trim().length > 0);
-  const inputLineCount = composerLineCount(input);
+  const island = deriveIsland({ snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount });
   const controlsDisabled = selectionBusy || snapshot.activeRun !== null || runningElsewhere;
 
   useEffect(() => {
@@ -177,29 +189,9 @@ export function Composer({
   const browsedProvider = snapshot.providers.find((provider) => provider.id === browseProviderId);
   const reasoningOptions = selectedModel?.providerId === browseProviderId ? selectedModel.reasoningOptions ?? [] : [];
 
-  return (
-    <form ref={rootRef} className="composer composer-claude" onSubmit={onSubmit} autoComplete="off">
-      <textarea
-        className="composer-input"
-        value={input}
-        onChange={(event) => {
-          onInput(event.target.value);
-          onNudge();
-        }}
-        placeholder={runningElsewhere ? "Another conversation is running…" : canChat ? "Message Proteus…" : `Configure ${providerName} in Settings to chat`}
-        aria-label="Message Proteus"
-        disabled={!canChat}
-        maxLength={MAX_INPUT_LENGTH}
-        rows={inputLineCount}
-        onKeyDown={(event) => {
-          if (!shouldSubmitComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return;
-          event.preventDefault();
-          event.currentTarget.form?.requestSubmit();
-        }}
-      />
-
-      <div className="composer-footer">
-        <div className="composer-controls">
+  const chips = (
+    <div ref={rootRef} className="island-meta" aria-label="Conversation context">
+      <div className="composer-controls">
           {showProjectControl && (
             <div className="composer-control-wrap">
               <button
@@ -316,14 +308,31 @@ export function Composer({
             )}
           </div>
         </div>
+    </div>
+  );
 
-        <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
-        {primaryAction === "stop" ? (
-          <button className="composer-primary composer-primary-stop" type="button" aria-label="Stop response" onClick={onAbort}><Square size={17} /></button>
-        ) : (
-          <button className="composer-primary" type="submit" aria-label={primaryAction === "queue" ? "Queue message" : "Send"} disabled={!canChat || !input.trim()}><Send size={18} /></button>
-        )}
-      </div>
-    </form>
+  return (
+    <Island
+      ref={islandRef}
+      orbState={orbState}
+      docked={docked}
+      orbAnchorRef={orbAnchorRef}
+      mode={island.mode}
+      end={island.end}
+      status={island.status}
+      askKind={island.askKind}
+      input={input}
+      placeholder={island.placeholder}
+      inputDisabled={island.inputDisabled}
+      sendLabel={island.sendLabel}
+      sendDisabled={island.sendDisabled}
+      onInput={onInput}
+      onSubmit={onSubmit}
+      onStop={onAbort}
+      onNudge={onNudge}
+      open={open}
+      body={body}
+      meta={chips}
+    />
   );
 }
