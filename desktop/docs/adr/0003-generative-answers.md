@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Any answer can arrive as UI, in the Island

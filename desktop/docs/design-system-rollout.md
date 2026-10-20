@@ -1,6 +1,6 @@
 # Design system rollout
 
-How the renderer (`src/mainview`) moves to the Proteus design system: https://claude.ai/artifact/LzFK4X4p6i68rg66ANb1yE. The system's **Implementing Proteus** section is the contract (what to vendor, what to port, the rules and the "done means" checklist). This file is the plan for this app: which files change in which order, where each new component gets its data, and which tests will move. The decisions behind it are ADR 0001 (Island interface), ADR 0002 (motion) and ADR 0003 (generative answers, still proposed). The playable reference is https://claude.ai/artifact/74AkzzkwVeB3CE3765QBfF.
+How the renderer (`src/mainview`) moves to the Proteus design system: https://claude.ai/artifact/LzFK4X4p6i68rg66ANb1yE. The system's **Implementing Proteus** section is the contract (what to vendor, what to port, the rules and the "done means" checklist). This file is the plan for this app: which files change in which order, where each new component gets its data, and which tests will move. The decisions behind it are ADR 0001 (Island interface), ADR 0002 (motion) and ADR 0003 (generative answers). The playable reference is https://claude.ai/artifact/74AkzzkwVeB3CE3765QBfF.
 
 ## Where the app starts from
 
@@ -36,7 +36,7 @@ Data:
 - **Sessions** come from `snapshot.threads`.
   - Rename and Delete keep `threads.rename` and `threads.delete`.
   - Copy transcript is client-side, from `snapshot.messages`.
-  - **Pin to top has no runtime support yet.** It needs a `pinned` field on the thread summary and a `threads.pin` request, so Phase 1 either adds them or ships the menu without Pin.
+  - **Pin to top needs runtime support, and gets it:** a `pinned` field (with `pinnedAt`) on the thread summary and a `threads.pin` request, added in Phase 1 before the sidebar's Pinned group.
 - **Providers** come from `snapshot.providers`, using the existing `providers.select` and connect mutations.
 
 Tests that read CSS text and will need rewriting: `components/Sidebar.test.tsx`, `settings-ui.test.ts`, `memory-settings-ui.test.ts`, `supporting-layout.test.ts`.
@@ -71,7 +71,7 @@ Tests that move: `Composer.test.tsx`, `lib/composer-ui.test.ts`, `InteractionPri
 
 ## Phase 4: generative answers
 
-This needs ADR 0003 accepted first. Then:
+ADR 0003 is accepted. The work is:
 - the `show_answer` tool and its zod schema (catalog v2);
 - the projection of partial blocks in `native-stream-projection`;
 - a block renderer registry;
