@@ -450,7 +450,7 @@ body { overflow: hidden; }
 .conversation-dialog-body { min-height: 0; display: grid; gap: 12px; overflow-y: auto; }
 .workspace-search-form { display: grid; gap: 12px; }
 .workspace-search-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.menu.session-menu.conversation-menu { width: 248px; }
+.menu.session-menu.conversation-menu { width: 300px; }
 .conversation-file-text { height: 280px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
 .conversation-back { justify-self: start; }
 .conversation-file-media { width: 100%; height: 280px; border: 0; border-radius: var(--r-md); object-fit: contain; }

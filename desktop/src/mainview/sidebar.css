@@ -13,3 +13,5 @@
 
 /* A deleted conversation fades and folds its row away (motion.md, Rows); the DS folds .list-row, not .session (upstream to DS). */
 .session.is-leaving { overflow: hidden; pointer-events: none; animation: p-fold var(--dur-enter) var(--ease-in) both; }
+/* Wide enough for "Copy transcript" with its reason on one line. */
+.menu.session-menu:not(.conversation-menu) { width: 236px; }
