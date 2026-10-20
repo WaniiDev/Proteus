@@ -12,6 +12,7 @@ const parse = (input: Input): RuntimeSnapshot => runtimeSnapshotSchema.parse({ .
 const providers: RuntimeSnapshot["providers"] = [
   { id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" },
   { id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" },
+  { id: "anthropic", name: "Anthropic", configured: false, verified: false, availability: "needs-configuration" },
 ];
 
 const models: RuntimeSnapshot["models"] = [
@@ -19,6 +20,9 @@ const models: RuntimeSnapshot["models"] = [
   { id: "openrouter/anthropic/claude-opus-5-5", providerId: "openrouter", rawId: "anthropic/claude-opus-5-5", name: "Opus 5.5", reasoningOptions: ["low", "medium", "high", "xhigh", "max"], reasoningEffort: "medium", contextLength: 200_000, promptPrice: 0.000015, completionPrice: 0.000075, popularityRank: 2, inputModalities: ["text", "image"], outputModalities: ["text"], description: "Deepest reasoning for long, careful work" },
   { id: "openrouter/anthropic/claude-haiku-5-5", providerId: "openrouter", rawId: "anthropic/claude-haiku-5-5", name: "Haiku 5.5", reasoningOptions: ["none", "low", "medium"], contextLength: 200_000, promptPrice: 0.0000008, completionPrice: 0.000004, popularityRank: 3, inputModalities: ["text"], outputModalities: ["text"], description: "Quick replies for light tasks" },
   { id: "codex/gpt-5-codex", providerId: "codex", rawId: "gpt-5-codex", name: "GPT-5 Codex", reasoningOptions: ["minimal", "low", "medium", "high", "xhigh"], reasoningEffort: "high", contextLength: 400_000, inputModalities: ["text"], outputModalities: ["text"], description: "Through your ChatGPT account" },
+  { id: "anthropic/claude-opus-5-5", providerId: "anthropic", rawId: "claude-opus-5-5", name: "Claude Opus 5.5", contextLength: 200_000, inputModalities: ["text"], outputModalities: ["text"], description: "Most capable, for long and careful work" },
+  { id: "anthropic/claude-sonnet-5-5", providerId: "anthropic", rawId: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", contextLength: 200_000, inputModalities: ["text"], outputModalities: ["text"], description: "Fast and capable for everyday work" },
+  { id: "anthropic/claude-haiku-5-5", providerId: "anthropic", rawId: "claude-haiku-5-5", name: "Claude Haiku 5.5", contextLength: 200_000, inputModalities: ["text"], outputModalities: ["text"], description: "Quickest, for light tasks" },
 ];
 
 const base = {
@@ -172,7 +176,7 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
     case "unconnected":
       return parse({
         status: "needs-key", credential: { configured: false, verified: false },
-        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!],
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!, providers[2]!],
         threads: [newChat, ...protoThreads("tidy")], activeThreadId: "new", projects: protoProjects, activeWorkspace: protoWorkspace,
       });
     case "pinned":
@@ -211,25 +215,25 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
     }
     case "settings":
       return parse({
-        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Sign in with your ChatGPT account" }],
+        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Sign in with your ChatGPT account" }, providers[2]!],
         threads: protoThreads("tidy"), activeThreadId: "tidy", messages: tidyMessages(),
       });
     case "settings-rejected":
       return parse({
         status: "needs-key", credential: { configured: true, verified: false },
-        providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: false, availability: "needs-configuration" }, providers[1]!],
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: false, availability: "needs-configuration" }, providers[1]!, providers[2]!],
         error: { code: "invalid-credential", message: "OpenRouter rejected that key. Check it and try again.", retryable: false },
         threads: protoThreads("tidy"), activeThreadId: "tidy", messages: tidyMessages(),
       });
     case "settings-checking":
       return parse({
         status: "validating-key", credential: { configured: false, verified: false },
-        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!],
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!, providers[2]!],
         threads: protoThreads("tidy"), activeThreadId: "tidy", messages: tidyMessages(),
       });
     case "settings-device":
       return parse({
-        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "checking" }],
+        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "checking" }, providers[2]!],
         providerAuth: { providerId: "codex", mode: "device", status: "waiting", url: "https://auth.example.com/device", instructions: "Open the page and enter this code.", code: "QX7K-4MPD" },
         selectedProviderId: "codex", selectedModelId: "codex/gpt-5-codex",
         threads: protoThreads("tidy"), activeThreadId: "tidy", messages: tidyMessages(),

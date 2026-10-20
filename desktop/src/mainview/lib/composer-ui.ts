@@ -19,7 +19,7 @@ export function selectedProviderCanChat(snapshot: RuntimeSnapshot): boolean {
   const providerId = model?.providerId ?? snapshot.selectedProviderId;
   const provider = snapshot.providers.find((candidate) => candidate.id === providerId);
   if (!provider?.verified || provider.availability !== "ready") return false;
-  return providerId === "codex" || snapshot.credential.verified;
+  return providerId !== "openrouter" || snapshot.credential.verified;
 }
 
 export function composerAction(running: boolean, hasDraft: boolean): ComposerAction {

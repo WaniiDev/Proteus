@@ -68,7 +68,7 @@ export function projectAnswerInput(input: unknown): AnswerProjection {
   };
 }
 
-export function answerPart(options: { id: string; toolCallId: string; projection: AnswerProjection; streaming: boolean; question?: string; outcomes?: Record<string, string> }): ChatAnswerPart {
+export function answerPart(options: { id: string; toolCallId: string; projection: AnswerProjection; streaming: boolean; question?: string; outcomes?: Record<string, string>; confirmed?: boolean }): ChatAnswerPart {
   return {
     type: "answer",
     id: options.id,
@@ -79,7 +79,13 @@ export function answerPart(options: { id: string; toolCallId: string; projection
     blocks: options.projection.blocks,
     streaming: options.streaming,
     outcomes: options.outcomes ?? {},
+    ...(options.confirmed ? { confirmed: true } : {}),
   };
+}
+
+/** True when a finished `show_answer` result says the answer was shown: only then can the person act on it. */
+export function answerConfirmed(result: unknown): boolean {
+  return !!result && typeof result === "object" && (result as { ok?: unknown }).ok === true && (result as { shown?: unknown }).shown === true;
 }
 
 /** True when a finished `show_answer` result says the answer was not shown (the person never sees it, nor a tool step for it). */

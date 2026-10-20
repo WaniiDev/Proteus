@@ -39,7 +39,7 @@ Scripts (from `desktop/package.json`):
 - `runtime/`: the services behind the facade (context, thread, provider, workspace, memory, interaction, continuation, run coordinator, message projection, agent factory).
 - `core/`: projection, error mapping, diagnostics, Mastra foundation, agent instructions, legacy data cutover.
 - `native/`: thin drivers over Mastra's `Agent` (queue, subscribe, suspended runs), stream projection, thread repository, tool-call guard.
-- `providers/`: OpenRouter and Codex, auth and readiness, model preferences, credential vault.
+- `providers/`: OpenRouter, Codex and Anthropic, auth and readiness, model preferences, credential vault.
 - `workspace/`: app workspace, project registry, workspace registry and policy (containment, tool allowlist).
 - `memory/`: memory settings, memory tools, scoped durable memory.
 - `tools/`: approval and task/plan policies, tool decisions, `ask_user`, working tools.

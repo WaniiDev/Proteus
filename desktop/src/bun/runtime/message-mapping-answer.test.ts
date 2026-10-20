@@ -29,6 +29,16 @@ describe("show_answer history", () => {
     expect((reloaded as { blocks: Array<{ type: string }> }).blocks.map((block) => block.type)).toEqual(["headline", "list", "text", "fallback"]);
   });
 
+  test("only a call with an ok result is confirmed, live and after a reload", () => {
+    const projector = new NativeStreamProjector();
+    const call = projector.apply("t", { type: "tool-call", runId: "r", payload: { toolCallId: "c1", toolName: "show_answer", args: answer } })!.message.parts[0];
+    expect((call as { confirmed?: boolean }).confirmed).toBeUndefined();
+    const done = projector.apply("t", { type: "tool-result", runId: "r", payload: { toolCallId: "c1", toolName: "show_answer", result: { ok: true, shown: true } } })!.message.parts[0];
+    expect((done as { confirmed?: boolean }).confirmed).toBe(true);
+    expect(projectMessageParts(stored({ ok: true, shown: true }))[0]).toMatchObject({ confirmed: true });
+    expect((projectMessageParts(stored(undefined, "input-available"))[0] as { confirmed?: boolean }).confirmed).toBeUndefined();
+  });
+
   test("nested rows survive history without truncation", () => {
     const [part] = projectMessageParts(stored({ ok: true, shown: true }));
     expect((part as { blocks: Array<{ rows?: Array<{ act?: unknown }> }> }).blocks[1]?.rows?.[0]?.act).toEqual({ label: "Reply", intent: "reply", done: "Drafted" });

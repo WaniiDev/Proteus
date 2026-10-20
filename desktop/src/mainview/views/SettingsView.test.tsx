@@ -26,7 +26,7 @@ describe("SettingsView", () => {
     for (const label of ["Providers", "Models", "Appearance", "Developer"]) expect(html).toContain(`>${label}</button>`);
     expect(html).not.toContain(">Memory</button>");
     expect(html).toContain('role="tabpanel"');
-    expect(html).toContain("Provider · 1 of 2 connected");
+    expect(html).toContain("Provider · 1 of 3 connected");
   });
 
   test("Models: a select, a radio list with the chosen model checked, and the thinking row", () => {

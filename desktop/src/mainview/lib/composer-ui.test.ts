@@ -36,6 +36,14 @@ describe("composer UI policy", () => {
 
     expect(selectedProviderCanChat(snapshot)).toBe(true);
     expect(selectedProviderCanChat({ ...snapshot, selectedProviderId: "openrouter", selectedModelId: "openrouter/auto", models: [{ id: "openrouter/auto", providerId: "openrouter", rawId: "auto", name: "Auto Router", inputModalities: ["text"], outputModalities: ["text"] }] })).toBe(false);
+    const anthropic = {
+      ...snapshot,
+      providers: [...snapshot.providers, { id: "anthropic" as const, name: "Anthropic", configured: true, verified: true, availability: "ready" as const }],
+      selectedProviderId: "anthropic" as const,
+      selectedModelId: "anthropic/claude-opus-5-5" as const,
+      models: [{ id: "anthropic/claude-opus-5-5" as const, providerId: "anthropic" as const, rawId: "claude-opus-5-5", name: "Claude Opus 5.5", inputModalities: ["text"], outputModalities: ["text"] }],
+    };
+    expect(selectedProviderCanChat(anthropic)).toBe(true);
   });
 
   it("submits Enter but preserves Shift+Enter and IME composition", () => {

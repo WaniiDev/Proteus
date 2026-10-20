@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { OAuthCredentials } from "@mastra/code-sdk/auth/types";
-import { createCodexCredentialStore, createCredentialVault, type NamedSecretStore } from "./credentials";
+import { createAnthropicCredentialVault, createCodexCredentialStore, createCredentialVault, type NamedSecretStore } from "./credentials";
 
 function memorySecrets(initial: Record<string, string> = {}, maxValueLength = Number.POSITIVE_INFINITY) {
   const values = new Map(Object.entries(initial));
@@ -23,6 +23,20 @@ describe("secure provider credentials", () => {
     expect(await vault.get()).toBe("sk-or-legacy");
     expect(secrets.values.get("openrouter.api-key")).toBe("sk-or-legacy");
     expect(secrets.values.has("openrouter")).toBe(false);
+  });
+
+  it("keeps the Anthropic API key in its own secure-store account", async () => {
+    const secrets = memorySecrets({ "openrouter.api-key": "sk-or-current" });
+    const vault = createAnthropicCredentialVault(secrets.store);
+
+    expect(await vault.get()).toBeNull();
+    await expect(vault.set("  ")).rejects.toThrow("Anthropic API key cannot be empty");
+    await vault.set("sk-ant-test");
+    expect(await vault.get()).toBe("sk-ant-test");
+    expect(secrets.values.get("anthropic.api-key")).toBe("sk-ant-test");
+    await vault.delete();
+    expect(await vault.get()).toBeNull();
+    expect(secrets.values.get("openrouter.api-key")).toBe("sk-or-current");
   });
 
   it("stores ChatGPT OAuth as an atomic chunk manifest with environment fallback disabled", () => {
