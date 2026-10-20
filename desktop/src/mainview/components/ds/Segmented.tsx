@@ -1,6 +1,12 @@
-import { useId, useRef, type KeyboardEvent, type ReactElement } from "react";
+import { useId, useRef, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 
-export type SegmentedOption<T extends string> = { value: T; label: string; disabled?: boolean };
+export type SegmentedOption<T extends string> = {
+  value: T;
+  label: string;
+  disabled?: boolean;
+  /** Icon-only option (`segmented.icons`): the label becomes its aria-label and tooltip. */
+  icon?: ReactNode;
+};
 
 export type SegmentedProps<T extends string> = {
   options: readonly SegmentedOption<T>[];
@@ -63,10 +69,12 @@ export function Segmented<T extends string>({ options, value, onChange, label, i
           aria-selected={i === index}
           tabIndex={i === index ? 0 : -1}
           disabled={option.disabled}
+          aria-label={option.icon ? option.label : undefined}
+          title={option.icon ? option.label : undefined}
           onClick={() => { if (option.value !== value) onChange(option.value); }}
           onKeyDown={move}
         >
-          {option.label}
+          {option.icon ?? option.label}
         </button>
       ))}
     </div>

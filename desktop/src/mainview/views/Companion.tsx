@@ -9,6 +9,8 @@ import { Composer } from "../components/Composer";
 import { Icon } from "../components/Icon";
 import type { OrbHandle } from "../components/Orb";
 import { OrbPresence } from "../components/OrbPresence";
+import { useFocusingMoment } from "../ds-app/focusing";
+import { ensureSurgeLayer } from "../ds-app/surge";
 import { PersistentOrbSurface } from "../components/PersistentOrbSurface";
 import { useConversationOrbState } from "../hooks/useConversationOrbState";
 import { useSmartScroll } from "../hooks/useSmartScroll";
@@ -18,7 +20,7 @@ import { InteractionCard } from "../components/InteractionCard";
 import { StoppedNote } from "../components/ResolvedLine";
 import { QueuedMessageBubble } from "../components/QueuedMessageBubble";
 
-export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
+export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onProviders, onModels, onProjects, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onProviders?: () => void; onModels?: () => void; onProjects?: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -34,6 +36,15 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
+  const stageRef = useRef<HTMLDivElement>(null);
+  // Max thinking is a moment on the orb and the stage: it never plays during a run or under reduced motion (see ds-app/focusing.ts).
+  const { onTopLevel } = useFocusingMoment({
+    orb: () => orbRef.current,
+    surgeLayer: () => (stageRef.current ? ensureSurgeLayer(stageRef.current) : null),
+    origin: () => (docked ? dockOrbAnchor : heroOrbAnchor),
+    stage: () => stageRef.current?.querySelector<HTMLElement>(":scope > .thread") ?? null,
+    runActive: snapshot.activeRun !== null,
+  });
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
@@ -61,7 +72,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
       <PersistentOrbSurface state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} heroAnchor={heroOrbAnchor} dockAnchor={dockOrbAnchor} />
       <div className="text-chat-layout">
         <div className="companion-grid">
-          <div className="stage">
+          <div className="stage" ref={stageRef}>
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             {!docked && <OrbPresence state={state} anchorRef={heroOrbAnchorRef} />}
             {!docked && <section className="command-home-copy" aria-label="Start with Proteus">
@@ -147,6 +158,10 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               onSubmit={onSend}
               onAbort={onAbort}
               onSettings={onSettings}
+              onProviders={onProviders}
+              onModels={onModels}
+              onProjects={onProjects}
+              onTopLevel={onTopLevel}
               onNudge={() => orbRef.current?.nudge()}
               onWorkspaceSelect={(workspaceBinding) => rpc.request["threads.workspace.select"]({ workspaceBinding })}
               onModelSelect={(modelId) => rpc.request["models.select"]({ modelId }).then((result) => result.accepted)}
