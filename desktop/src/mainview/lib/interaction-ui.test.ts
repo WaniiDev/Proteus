@@ -12,7 +12,8 @@ describe("approval interaction UI state", () => {
   });
 
   it("uses tool-decision copy for native workspace approvals", () => {
-    expect(interactionSubmissionUi("tool_approval", "pending", null)).toMatchObject({ resolving: false, approveLabel: "Approve tool", rejectLabel: "Decline" });
+    expect(interactionSubmissionUi("tool_approval", "pending", null)).toMatchObject({ resolving: false, approveLabel: "Approve", rejectLabel: "Decline" });
+    expect(interactionSubmissionUi("tool_approval", "pending", null, "Approve edit").approveLabel).toBe("Approve edit");
     expect(interactionSubmissionUi("tool_approval", "pending", "approve")).toMatchObject({ kicker: "Approving tool…", approveLabel: "Approving…" });
     expect(interactionSubmissionUi("tool_approval", "pending", "reject")).toMatchObject({ kicker: "Declining tool…", rejectLabel: "Declining…" });
   });

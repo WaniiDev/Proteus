@@ -32,7 +32,12 @@ type ComposerProps = {
   /** The Island grows upward while open; `body` fills it (ask and answer bodies). */
   open?: boolean;
   body?: ReactNode;
+  bodyScroll?: boolean;
   islandRef?: Ref<IslandHandle>;
+  /** An answer is open in the Island: the words beside the orb and the question. Done settles it. */
+  answer?: { streaming: boolean; question: string } | null;
+  announcement?: string;
+  onDone?: () => void;
   onInput: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onAbort: () => void;
@@ -81,7 +86,11 @@ export function Composer({
   orbAnchorRef,
   open,
   body,
+  bodyScroll,
   islandRef,
+  answer,
+  announcement,
+  onDone,
   onInput,
   onSubmit,
   onAbort,
@@ -102,7 +111,7 @@ export function Composer({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const showProjectControl = canChooseComposerWorkspace(snapshot, queuedDraftCount);
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
-  const island = deriveIsland({ snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount });
+  const island = deriveIsland({ snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount, answer });
   const controlsDisabled = selectionBusy || snapshot.activeRun !== null || runningElsewhere;
 
   useEffect(() => {
@@ -321,6 +330,10 @@ export function Composer({
       end={island.end}
       status={island.status}
       askKind={island.askKind}
+      answerLabel={island.answerLabel}
+      answerLine={island.answerLine}
+      announcement={announcement}
+      onDone={onDone}
       input={input}
       placeholder={island.placeholder}
       inputDisabled={island.inputDisabled}
@@ -332,6 +345,7 @@ export function Composer({
       onNudge={onNudge}
       open={open}
       body={body}
+      bodyScroll={bodyScroll}
       meta={chips}
     />
   );

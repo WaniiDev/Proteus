@@ -26,6 +26,13 @@ export type IslandProps = {
   end: IslandEnd;
   status: IslandStatus;
   askKind: string;
+  /** Answer mode: the words next to the orb ("Speaking" then "Answer") and the question being answered. */
+  answerLabel?: string;
+  answerLine?: string;
+  /** Done settles the answer into the thread. */
+  onDone?: () => void;
+  /** One short message for the Island's live region ("Answering", "Answer ready"). */
+  announcement?: string;
   input: string;
   placeholder: string;
   inputDisabled: boolean;
@@ -58,8 +65,9 @@ const emptyStatus: IslandStatus = { label: "", line: "" };
  * alternating status lines, the ask kicker) and of the end slot (send, Stop) stays mounted and is switched with `data-on`;
  * hidden ones are inert. It is also the app's one live region.
  */
-export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askKind, input, placeholder, inputDisabled, sendLabel, sendDisabled, onInput, onSubmit, onStop, onNudge, open = false, body, bodyScroll = false, meta, stoppedMs = STOPPED_MS, ref }: IslandProps) {
+export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askKind, answerLabel = "Answer", answerLine = "", onDone, announcement = "", input, placeholder, inputDisabled, sendLabel, sendDisabled, onInput, onSubmit, onStop, onNudge, open = false, body, bodyScroll = false, meta, stoppedMs = STOPPED_MS, ref }: IslandProps) {
   const waveRef = useRef<HTMLSpanElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stopRequestedRef = useRef(false);
   const [stopped, setStopped] = useState(false);
@@ -85,8 +93,8 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
     return () => window.clearTimeout(timer);
   }, [running, stoppedMs]);
 
-  const visibleMode: IslandMode = mode === "ask" ? "ask" : stopped ? "status" : mode;
-  const shownStatus = stopped && mode !== "ask" ? STOPPED_STATUS : status;
+  const visibleMode: IslandMode = mode === "ask" || mode === "answer" ? mode : stopped ? "status" : mode;
+  const shownStatus = stopped && mode !== "ask" && mode !== "answer" ? STOPPED_STATUS : status;
   const statusOn = visibleMode === "status";
 
   // Two status slots alternate, so the old words fade while the new ones arrive. Only update while the status is the visible variant.
@@ -115,14 +123,16 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
     previousModeRef.current = visibleMode;
     if (visibleMode !== "input" || previous === "input") return;
     const active = document.activeElement;
-    if (!active || active === document.body) inputRef.current?.focus({ preventScroll: true });
+    // Focus left with the closing body (an ask or an answer): bring it back to the input.
+    if (!active || active === document.body || bodyRef.current?.contains(active)) inputRef.current?.focus({ preventScroll: true });
   }, [visibleMode]);
 
   const inputOn = visibleMode === "input";
   const askOn = visibleMode === "ask";
-  // An ask answers from its body (Decline / Approve), so neither end button shows while it is open.
-  const sendOn = end === "send" && !askOn;
-  const stopOn = end === "stop" && !askOn;
+  const answerOn = visibleMode === "answer";
+  // An ask answers from its body (Decline / Approve), so neither end button shows while it is open; an answer ends with Done.
+  const sendOn = end === "send" && !askOn && !answerOn;
+  const stopOn = end === "stop" && !askOn && !answerOn;
   const flag = (on: boolean) => (on ? "true" : "false");
   const slotProps = (on: boolean) => ({ "data-on": flag(on), "aria-hidden": !on, inert: !on });
 
@@ -168,6 +178,7 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
             <div className="island-status" {...slotProps(statusOn && slots.on === "a")}><strong>{slots.a.label}</strong>{" "}<span>{slots.a.line}</span></div>
             <div className="island-status" {...slotProps(statusOn && slots.on === "b")}><strong>{slots.b.label}</strong>{" "}<span>{slots.b.line}</span></div>
             <div className="island-status" {...slotProps(askOn)}><span className="island-kicker">Needs you{askKind ? ` · ${askKind}` : ""}</span><span>Your call. Nothing moves without you.</span></div>
+            <div className="island-status" {...slotProps(answerOn)}><strong>{answerLabel}</strong>{" "}<span>{answerLine}</span></div>
           </div>
           <div className="island-end">
             <button type="submit" className="island-send" data-on={flag(sendOn)} aria-label={sendLabel} title={sendLabel} disabled={!sendOn || sendDisabled} tabIndex={sendOn ? undefined : -1}>
@@ -186,9 +197,11 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
             >
               <Square className="i sm" aria-hidden="true" />Stop
             </button>
+            <button type="button" className="btn btn-island-quiet" data-on={flag(answerOn)} disabled={!answerOn} tabIndex={answerOn ? undefined : -1} onClick={onDone}>Done</button>
           </div>
         </form>
-        <div className="island-body" aria-hidden={!open} inert={!open}>
+        <span className="sr-only">{announcement}</span>
+        <div className="island-body" ref={bodyRef} aria-hidden={!open} inert={!open}>
           <div>
             <div className={`island-body-inner${bodyScroll ? " gen-scroll" : ""}`}>{body}</div>
           </div>

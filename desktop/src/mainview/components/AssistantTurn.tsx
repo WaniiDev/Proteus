@@ -1,14 +1,17 @@
+import { Fragment } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, WorkbenchTask } from "../../shared/contracts";
+import { resolvedAsks } from "../lib/ask-copy";
 import { groupAssistantPartRuns } from "../lib/ui-helpers";
+import { AnswerCard, type AnswerIntentEvent } from "./answer";
 import { ToolTimeline } from "./ToolTimeline";
 import { MessageActions } from "./MessageActions";
 import { markdownComponents } from "./MarkdownCode";
 import { WebSearchedSources } from "./WebSearchedSources";
 import { ResolvedLine, StoppedNote } from "./ResolvedLine";
 
-export function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void }) {
+export function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue, openAnswerId = null, onIntent, onFollowUp }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void; /** The answer still open in the Island; it settles into the thread as a card once dismissed. */ openAnswerId?: string | null; onIntent?: (event: AnswerIntentEvent) => void; onFollowUp?: (text: string) => void }) {
   const terminal = messages.at(-1)!;
   const runs = groupAssistantPartRuns(parts);
   const sources = [...new Map(parts.filter((part): part is Extract<ChatMessage["parts"][number], { type: "source-url" }> => part.type === "source-url").map((source) => [source.url, source])).values()];
@@ -24,8 +27,13 @@ export function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onC
             {run.part.text}
           </ReactMarkdown>
         </div>
+      ) : run.type === "answer" ? (
+        run.part.answerId === openAnswerId ? null : <AnswerCard key={run.part.id} answer={run.part} onIntent={onIntent} onFollowUp={onFollowUp} />
       ) : (
-        <ToolTimeline key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`} tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} tasks={tasks} />
+        <Fragment key={`tools:${run.tools.map((tool) => tool.toolCallId).join(":")}`}>
+          <ToolTimeline tools={run.tools} live={terminal.status === "streaming"} pendingIds={pendingIds} tasks={tasks} />
+          {resolvedAsks(run.tools).map((ask) => <ResolvedLine key={ask.id} label={ask.label} title={ask.title} tone={ask.tone} />)}
+        </Fragment>
       ))}
       <WebSearchedSources sources={sources} />
       {terminal.status === "interrupted" && <StoppedNote />}

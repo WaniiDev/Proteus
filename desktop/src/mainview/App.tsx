@@ -276,12 +276,8 @@ export default function App() {
               onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))}
               onInteraction={(toolCallId, response) => rpc.request["chat.interaction.respond"]({ toolCallId, response })}
               onInteractionDismiss={(toolCallId) => rpc.request["chat.interaction.dismiss"]({ toolCallId })}
-              onToolApproval={(toolCallId, approved) =>
-                rpc.request["chat.tool-approval.respond"]({
-                  toolCallId,
-                  approved,
-                  fingerprint: snapshot.interactions.find((item) => item.toolCallId === toolCallId)?.fingerprint ?? "",
-                })
+              onToolApproval={(toolCallId, approved, fingerprint) =>
+                rpc.request["chat.tool-approval.respond"]({ toolCallId, approved, fingerprint })
                   .catch(() => ({ accepted: false, code: "resume-failed", message: "The tool decision could not be sent.", retryable: true }))
               }
             />

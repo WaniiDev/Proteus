@@ -157,8 +157,11 @@ describe("composer UI policy", () => {
 
     it("shows the ask kicker when an interaction needs the person", () => {
       const snapshot = base();
-      snapshot.interactions = [{ id: "i1", toolCallId: "t1", kind: "tool_approval", title: "Edit file", options: [], status: "pending", createdAt: "2026-08-04T00:00:00.000Z" }];
-      expect(deriveIsland(args(snapshot))).toMatchObject({ mode: "ask", askKind: "Approval" });
+      snapshot.interactions = [{ id: "i1", toolCallId: "t1", kind: "tool_approval", toolName: "mastra_workspace_edit_file", args: { path: "docs/plan.md" }, title: "Allow mastra_workspace_edit_file?", options: [], status: "pending", createdAt: "2026-08-04T00:00:00.000Z" }];
+      expect(deriveIsland(args(snapshot))).toMatchObject({ mode: "ask", askKind: "Edit file" });
+      snapshot.interactions.push({ id: "i2", toolCallId: "t2", kind: "ask_user", title: "Who?", options: [], status: "pending", createdAt: "2026-08-04T00:00:01.000Z" });
+      expect(deriveIsland(args(snapshot)).askKind).toBe("Edit file · 1 of 2");
+      snapshot.interactions.pop();
       snapshot.interactions[0]!.status = "approved";
       expect(deriveIsland(args(snapshot)).mode).toBe("input");
     });

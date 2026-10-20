@@ -31,11 +31,11 @@ describe("Island variants", () => {
   test("every variant stays mounted as the visible one changes, and the elements are never replaced", async () => {
     const t = await mount();
     const nodes = [t.q(".island-input"), ...t.qa(".island-status"), t.q(".island-send"), t.q(".island-end .btn")];
-    expect(t.qa(".island-status")).toHaveLength(3);
+    expect(t.qa(".island-status")).toHaveLength(4);
     for (const props of [{ mode: "status", end: "stop" }, { mode: "ask", end: "send" }, { mode: "input", end: "send" }] as const) {
       await t.render({ ...props, status: { label: "Working", line: "Reading notes/plan.md" } });
       expect([t.q(".island-input"), ...t.qa(".island-status"), t.q(".island-send"), t.q(".island-end .btn")]).toEqual(nodes);
-      expect(t.qa("[data-on]").length).toBe(6);
+      expect(t.qa("[data-on]").length).toBe(8);
     }
     await t.done();
   });
@@ -117,6 +117,21 @@ describe("Island variants", () => {
     await t.render({ mode: "ask", end: "stop", askKind: "Approval" });
     expect(t.qa(".island-end > [data-on='true']")).toHaveLength(0);
     expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Needs you · ApprovalYour call. Nothing moves without you."]);
+    await t.done();
+  });
+
+  test("answer mode shows the label and question, ends with Done, and announces through the one live region", async () => {
+    let done = 0;
+    const t = await mount({ mode: "answer", answerLabel: "Speaking", answerLine: "What needs my attention?", announcement: "Answering", onDone: () => { done += 1; } });
+    expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Speaking What needs my attention?"]);
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Done"]);
+    expect((t.q(".island-input") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(t.q(".island > .sr-only").textContent).toBe("Answering");
+    expect(t.qa("[aria-live]")).toHaveLength(1);
+    await act(async () => { t.qa(".island-end .btn").find((el) => el.textContent === "Done")!.click(); });
+    expect(done).toBe(1);
+    await t.render({ mode: "answer", answerLabel: "Answer", answerLine: "What needs my attention?" });
+    expect(t.visibleStatus()[0]!.textContent).toContain("Answer What");
     await t.done();
   });
 
