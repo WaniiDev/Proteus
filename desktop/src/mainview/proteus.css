@@ -255,25 +255,6 @@ input { font-family: var(--font-body); }
 
 /* ---------- Conversation thread ---------- */
 .thread { display: flex; flex-direction: column; gap: var(--s-lg); margin-bottom: var(--s-xl); min-height: 40px; }
-.msg { display: flex; gap: var(--s-sm); max-width: 100%; }
-.msg.user { justify-content: flex-end; }
-.msg.user .bubble {
-  background: var(--primary); color: var(--on-primary);
-  border-radius: var(--app-r-xl) var(--app-r-xl) var(--app-r-xs) var(--app-r-xl);
-  padding: 12px 18px; max-width: 78%;
-  font-size: 15px; line-height: 1.5; letter-spacing: 0.15px;
-  box-shadow: var(--shadow-soft);
-}
-.msg.ai { justify-content: flex-start; }
-.msg-avatar {
-  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
-  background: radial-gradient(circle at 35% 30%, var(--g-mint), var(--g-lavender) 78%);
-  box-shadow: 0 2px 6px rgba(200,184,224,.5);
-}
-.msg-body { max-width: 88%; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.msg-text { font-size: 15.5px; line-height: 1.58; color: var(--body-strong); letter-spacing: 0.15px; }
-.msg-text strong { font-weight: 500; color: var(--ink); }
-.msg-text.thai { font-size: 16px; }
 @keyframes dotPulse { 0%,100% { opacity: .3; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.1); } }
 
 /* generative pop — blocks materialise from the center of the stage */
