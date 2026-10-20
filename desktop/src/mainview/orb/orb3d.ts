@@ -6,6 +6,8 @@ export interface OrbFX {
   setState(state: string): void;
   pulse(): void;
   nudge(): void;
+  /** The focusing moment: two lavender rings close in, the orb presses to .9, a pulse and one peach ring at 1.1s, back to the previous state at 2.2s. No-op under reduced motion. */
+  playFocusing(): void;
   dispose(): void;
 }
 
@@ -21,6 +23,10 @@ export const ORB_CANVAS_BLEED = 2;
 export function orbCameraDistance(base = ORB_CAMERA_DISTANCE, bleed = ORB_CANVAS_BLEED): number {
   return 1 / Math.sin(Math.atan(Math.tan(Math.asin(1 / base)) / bleed));
 }
+export const FOCUSING_PULSE_MS = 1100;
+export const FOCUSING_TOTAL_MS = 2200;
+const FOCUSING_PRESS = 0.9;
+
 export const ORB_INITIAL_FX = {
   amp: 0.14,
   speed: 0.45,
@@ -174,6 +180,9 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
   let uniforms: OrbUniforms | null = null;
   let target = ORB_STATES[currentState];
   let pulseAmp = 0;
+  let press = 1;
+  let pressTarget = 1;
+  let focusing: { returnTo: OrbState; timers: number[]; rings: Animation[]; coloured: HTMLElement[] } | null = null;
   let voicePhase = 0;
   let reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const clock = new THREE.Clock();
@@ -263,7 +272,8 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
     uniforms.uColorB.value.copy(cur.b);
 
     const breathe = Math.sin(time * 1.15) * (0.012 + cur.amp * 0.05);
-    const scale = cur.scale * (1 + breathe) * (1 + pulseAmp * 0.9);
+    press += (pressTarget - press) * (1 - Math.pow(0.004, dt));
+    const scale = cur.scale * press * (1 + breathe) * (1 + pulseAmp * 0.9);
     mesh.scale.setScalar(scale);
     tilt.x += (tilt.tx - tilt.x) * (1 - Math.pow(0.001, dt));
     tilt.y += (tilt.ty - tilt.y) * (1 - Math.pow(0.001, dt));
@@ -282,9 +292,24 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
 
   paintFallback(currentState);
 
+  const endFocusing = (restore: boolean) => {
+    const moment = focusing;
+    if (!moment) return;
+    focusing = null;
+    moment.timers.forEach((id) => window.clearTimeout(id));
+    moment.rings.forEach((animation) => animation.cancel());
+    moment.coloured.forEach((el) => {
+      el.style.borderColor = "";
+    });
+    pressTarget = 1;
+    if (restore) controller.setState(moment.returnTo);
+  };
+
   const controller: OrbFX = {
     setState(state) {
       if (disposed || !(state in ORB_STATES)) return;
+      // A real state change always wins over the moment.
+      if (state !== "focusing" || !focusing) endFocusing(false);
       const nextState = state as OrbState;
       currentState = nextState;
       target = ORB_STATES[nextState];
@@ -301,8 +326,50 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
     nudge() {
       if (!disposed && !reducedMotion) pulseAmp = Math.min(pulseAmp + 0.05, 0.16);
     },
+    playFocusing() {
+      if (disposed || reducedMotion) return;
+      const returnTo = focusing ? focusing.returnTo : currentState;
+      endFocusing(false);
+      const rings = ["r1", "r2", "r3"].map((name) => floatEl.querySelector<HTMLElement>(`.orb-ring.${name}`));
+      const animations: Animation[] = [];
+      const coloured: HTMLElement[] = [];
+      const ring = (el: HTMLElement | null, color: string, keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
+        if (!el?.animate) return;
+        el.style.borderColor = color;
+        animations.push(el.animate(keyframes, { ...options, fill: "both" }));
+        coloured.push(el);
+      };
+      const centre = "translate(-50%, -50%)";
+      const gather = [
+        { transform: `${centre} scale(1.75)`, opacity: 0 },
+        { transform: `${centre} scale(1.4)`, opacity: 0.5, offset: 0.35 },
+        { transform: `${centre} scale(.92)`, opacity: 0 },
+      ];
+      ring(rings[0], "var(--g-lavender)", gather, { duration: 900, easing: "cubic-bezier(.5,0,.75,0)" });
+      ring(rings[1], "var(--g-lavender)", gather, { duration: 900, delay: 280, easing: "cubic-bezier(.5,0,.75,0)" });
+      ring(
+        rings[2],
+        "var(--g-peach)",
+        [
+          { transform: `${centre} scale(1)`, opacity: 0.55 },
+          { transform: `${centre} scale(1.7)`, opacity: 0 },
+        ],
+        { duration: 1100, delay: FOCUSING_PULSE_MS, easing: "cubic-bezier(.16,1,.3,1)" },
+      );
+      focusing = { returnTo, timers: [], rings: animations, coloured };
+      controller.setState("focusing");
+      pressTarget = FOCUSING_PRESS / ORB_STATES.focusing.scale;
+      focusing.timers.push(
+        window.setTimeout(() => {
+          pressTarget = 1;
+          controller.pulse();
+        }, FOCUSING_PULSE_MS),
+        window.setTimeout(() => endFocusing(true), FOCUSING_TOTAL_MS),
+      );
+    },
     dispose() {
       if (disposed) return;
+      endFocusing(false);
       disposed = true;
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
       observer?.disconnect();

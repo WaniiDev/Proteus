@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { answerBlockSchema } from "./answer-catalog";
 
-export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
+export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "focusing", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
 export const orbStateSchema = z.enum(orbStates);
 export type OrbState = z.infer<typeof orbStateSchema>;
 
