@@ -119,18 +119,37 @@ describe("native Mastra stream projection", () => {
       expect(closed?.blocks).toEqual([{ type: "fallback" }]);
     });
 
-    test("a rejected composition drops the answer for a failed tool step and the retry streams a new one", () => {
+    test("a rejected composition drops the answer without any tool step and the retry streams a new one", () => {
       const { feed, answerOf } = run();
       feed("tool-call", { args: answer });
-      const failed = feed("tool-result", { result: { ok: false, shown: false, retry: true, error: "Answer rejected, fix it" } });
+      const failed = feed("tool-result", { result: { ok: false, shown: false, retry: true, message: "The answer was not shown." } });
       expect(answerOf(failed)).toBeUndefined();
-      expect(failed?.message.parts[0]).toMatchObject({ type: "tool", name: "show_answer", status: "error", error: "Answer rejected, fix it" });
-      feed("tool-call-input-streaming-start", { toolCallId: "c2" });
+      expect(failed?.message.parts.filter((part) => part.type === "tool")).toHaveLength(0);
+      expect(failed?.message.parts).toHaveLength(0);
+
       const retry = feed("tool-call", { toolCallId: "c2", args: answer });
       expect(retry?.message.parts.filter((part) => part.type === "answer")).toHaveLength(1);
       const ok = feed("tool-result", { toolCallId: "c2", result: { ok: true, shown: true } });
       expect(ok?.message.parts.filter((part) => part.type === "answer")).toHaveLength(1);
-      expect(ok?.message.parts.some((part) => part.type === "tool")).toBe(true);
+      expect(ok?.message.parts.filter((part) => part.type === "tool")).toHaveLength(0);
+    });
+
+    test("a valid answer is never a tool step, and a tool error drops it", () => {
+      const { feed, answerOf } = run();
+      feed("tool-call-input-streaming-start", {});
+      const called = feed("tool-call", { args: answer });
+      expect(called?.message.parts.map((part) => part.type)).toEqual(["answer"]);
+      const errored = feed("tool-error", { error: "boom" });
+      expect(answerOf(errored)).toBeUndefined();
+      expect(errored?.message.parts.filter((part) => part.type === "tool")).toHaveLength(0);
+    });
+
+    test("loose input: an 11-block answer still projects, with invalid blocks as fallback", () => {
+      const { feed, answerOf } = run();
+      const many = { v: 2, title: "T", blocks: [answer.blocks[0], { type: "text", text: "<b>x</b>" }, ...Array.from({ length: 9 }, () => ({ type: "text", text: "ok" }))] };
+      const part = answerOf(feed("tool-call", { args: many }));
+      expect(part?.blocks).toHaveLength(11);
+      expect(part?.blocks[1]).toEqual({ type: "fallback" });
     });
 
     test("an aborted run stops streaming", () => {

@@ -86,7 +86,7 @@ export class NativeStreamProjector {
         if (answerIndex >= 0) parts[answerIndex] = part;
         else parts.push(part);
       };
-      const rejected = chunk.type === "tool-result" ? answerRejected(payload.result) ?? toolResultError(payload.result) : undefined;
+      const rejected = chunk.type === "tool-result" ? answerRejected(payload.result) || toolResultError(payload.result) !== undefined : false;
       if (chunk.type === "tool-call-input-streaming-start") {
         this.answerInput.set(key, "");
         if (answerIndex < 0) write(answerPart({ id, toolCallId, projection: { title: "", blocks: [] }, streaming: true }));
@@ -100,13 +100,13 @@ export class NativeStreamProjector {
         this.answerInput.delete(key);
         write(answerPart({ id, toolCallId, projection: projectAnswerInput(payload.args), streaming: false }));
         answerHandled = true;
-      } else if (chunk.type === "tool-result" && !rejected && payload.isError !== true) {
-        answerHandled = true;
-      } else if (answerIndex >= 0 && ["tool-result", "tool-error"].includes(chunk.type)) {
-        // Rejected composition or failed call: the person never sees the answer, only a failed tool step.
+      } else if (["tool-result", "tool-error"].includes(chunk.type) && (chunk.type === "tool-error" || rejected || payload.isError === true)) {
+        // Rejected composition or failed call: the person sees neither the answer nor a tool step; the retry streams a new answer.
         this.answerInput.delete(key);
-        parts.splice(answerIndex, 1);
+        if (answerIndex >= 0) parts.splice(answerIndex, 1);
       }
+      // show_answer is never a tool step: the answer part is its only projection.
+      answerHandled = true;
     }
     if (!answerHandled && toolCallId && toolName && ["tool-call-input-streaming-start", "tool-call", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended"].includes(chunk.type)) {
       const index = parts.findIndex((part) => part.type === "tool" && part.toolCallId === toolCallId);

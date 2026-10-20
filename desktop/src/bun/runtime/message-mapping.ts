@@ -120,8 +120,9 @@ export function toolPart(part: unknown, messageId: string, index: number): ChatT
   const declined = isDeclinedToolResult({ state: rawStatus, approval, output });
   const status: ChatToolPart["status"] = declined ? "declined" : isError ? "error" : /result|output-available|complete|success/.test(statusText) ? "completed" : /approval|suspend|waiting/.test(statusText) ? "waiting" : /cancel/.test(statusText) ? "cancelled" : /partial|input-stream/.test(statusText) ? "streaming_input" : "running";
   const toolCallId = typeof callId === "string" && callId ? callId : `${messageId}:tool:${index}`;
-  const rejection = name === SHOW_ANSWER_NAME ? answerRejected(output) : undefined;
-  if (name === SHOW_ANSWER_NAME && !rejection && !isError && !declined && status !== "cancelled") {
+  if (name === SHOW_ANSWER_NAME) {
+    // A rejected, failed or cancelled answer leaves nothing for the person to see (no answer, no tool step).
+    if (answerRejected(output) || isError || declined || status === "cancelled") return null;
     // Stored answers keep their full input (sanitizing would truncate nested rows) and rebuild the same blocks as the stream.
     return answerPart({ id: `${messageId}:answer:${toolCallId}`, toolCallId, projection: projectAnswerInput(input), streaming: status === "streaming_input" });
   }
@@ -133,12 +134,12 @@ export function toolPart(part: unknown, messageId: string, index: number): ChatT
     toolCallId,
     name,
     label: toolLabel(name),
-    status: rejection ? "error" : status,
+    status,
     inputSummary: detailSummary(safeInput),
     outputSummary: detailSummary(safeOutput),
     input: safeInput,
     output: safeOutput,
-    error: error === undefined ? rejection ?? structuredError : String(error).slice(0, 2_000),
+    error: error === undefined ? structuredError : String(error).slice(0, 2_000),
   };
 }
 

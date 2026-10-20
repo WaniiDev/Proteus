@@ -34,8 +34,12 @@ describe("show_answer history", () => {
     expect((part as { blocks: Array<{ rows?: Array<{ act?: unknown }> }> }).blocks[1]?.rows?.[0]?.act).toEqual({ label: "Reply", intent: "reply", done: "Drafted" });
   });
 
-  test("a rejected answer reloads as a failed tool step", () => {
-    const [part] = projectMessageParts(stored({ ok: false, shown: false, retry: true, error: "Answer rejected" }));
-    expect(part).toMatchObject({ type: "tool", name: "show_answer", status: "error", error: "Answer rejected" });
+  test("a rejected or failed answer reloads as nothing, not a tool step", () => {
+    expect(projectMessageParts(stored({ ok: false, shown: false, retry: true, message: "The answer was not shown." }))).toEqual([]);
+    expect(projectMessageParts(stored({ error: true, message: "Tool input validation failed" }))).toEqual([]);
+  });
+
+  test("a valid answer is not also a tool row", () => {
+    expect(projectMessageParts(stored({ ok: true, shown: true })).map((part) => part.type)).toEqual(["answer"]);
   });
 });

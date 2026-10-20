@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_INSTRUCTIONS } from "../core/agent-instructions";
 import { scriptedStreamingModel, waitFor } from "../native/native-mastra-test-harness";
+import { z } from "zod";
 import { createShowAnswerTool } from "./show-answer-tool";
 
 const headline = { type: "headline", text: "Two things need you today." };
@@ -26,12 +27,43 @@ describe("show_answer tool", () => {
 
   it("allows one retry, then tells the model to answer in prose, then resets", async () => {
     const tool = createShowAnswerTool();
-    const run = () => tool.execute!(noHeadline as never, {} as never) as Promise<{ ok: boolean; retry?: boolean; error?: string }>;
+    const run = () => tool.execute!(noHeadline as never, {} as never) as Promise<{ ok: boolean; retry?: boolean; message?: string }>;
     const first = await run();
     expect(first).toMatchObject({ ok: false, retry: true });
-    expect(first.error).toContain("headline");
+    expect(first.message).toContain("headline");
     expect(await run()).toMatchObject({ ok: false, retry: false });
     expect(await run()).toMatchObject({ ok: false, retry: true });
+  });
+
+  it("counts failures per turn: turn 2's first failure gets a retry", async () => {
+    const tool = createShowAnswerTool();
+    const turn = (users: number) => ({ agent: { threadId: "t", messages: Array.from({ length: users }, () => ({ role: "user" })) } }) as never;
+    const run = (users: number) => tool.execute!(noHeadline as never, turn(users)) as Promise<{ retry?: boolean }>;
+    expect(await run(1)).toMatchObject({ retry: true });
+    expect(await run(1)).toMatchObject({ retry: false });
+    expect(await run(2)).toMatchObject({ retry: true });
+    // a failure left unresolved in turn 2 does not leak into turn 3 either
+    expect(await run(3)).toMatchObject({ retry: true });
+  });
+
+  it("returns the retry as a normal result, not an error", async () => {
+    const tool = createShowAnswerTool();
+    const result = await tool.execute!(noHeadline as never, {} as never) as Record<string, unknown>;
+    expect(result.error).toBeUndefined();
+    expect(result.isError).toBeUndefined();
+    expect(typeof result.message).toBe("string");
+  });
+
+  it("a block that breaks its limits is a fallback, not a rejection", async () => {
+    const tool = createShowAnswerTool();
+    const input = { v: 2, title: "Today", blocks: [headline, { type: "text", text: "see [x](http://a.b)" }] };
+    expect(await tool.execute!(input as never, {} as never)).toEqual({ ok: true, shown: true });
+  });
+
+  it("sends a JSON schema with no tuple items arrays", () => {
+    const schema = JSON.stringify(z.toJSONSchema(createShowAnswerTool().inputSchema as never));
+    expect(schema).not.toContain('"prefixItems"');
+    expect(/"items":\s*\[/.test(schema)).toBe(false);
   });
 
   it("a valid answer clears the failure count", async () => {
@@ -82,6 +114,19 @@ describe("show_answer retry then prose (Mastra harness)", () => {
     const chunks = await run([
       { type: "tool", toolName: "show_answer", input: noHeadline },
       { type: "tool", toolName: "show_answer", input: valid },
+      { type: "text", text: "Done." },
+    ]);
+    const r = results(chunks);
+    expect(r[0]).toMatchObject({ ok: false, retry: true });
+    expect(r[1]).toEqual({ ok: true, shown: true });
+  });
+
+  it("counts an 11-block answer and a bad block under the retry rule instead of failing input validation", async () => {
+    const eleven = { v: 2, title: "Today", blocks: [headline, ...Array.from({ length: 10 }, () => ({ type: "text", text: "x" }))] };
+    const withBad = { v: 2, title: "Today", blocks: [headline, { type: "text", text: "<b>x</b>" }] };
+    const chunks = await run([
+      { type: "tool", toolName: "show_answer", input: eleven },
+      { type: "tool", toolName: "show_answer", input: withBad },
       { type: "text", text: "Done." },
     ]);
     const r = results(chunks);
