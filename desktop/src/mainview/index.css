@@ -115,7 +115,7 @@ body { overflow: hidden; }
 .resolved-text { min-width: 0; overflow-wrap: anywhere; }
 /* Settings: the scroll area, the two-beat tab body, and layout for rows the DS leaves to the app. */
 .settings-view, .memory-view, .projects-view { flex: 1 1 0; min-height: 0; overflow-y: auto; }
-.settings-view, .memory-view, .projects-view { padding-top: 12px; }
+.settings-view, .memory-view, .projects-view { padding-top: 14px; }
 .settings-page .segmented { align-self: flex-start; }
 .settings-body { animation: p-view var(--dur-reveal) var(--ease-out) backwards; transition: opacity var(--dur-exit) var(--ease-in), transform var(--dur-exit) var(--ease-in); }
 .projects-body { transition: opacity var(--dur-exit) var(--ease-in), transform var(--dur-exit) var(--ease-in); }

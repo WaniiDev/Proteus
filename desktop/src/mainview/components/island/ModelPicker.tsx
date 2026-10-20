@@ -90,7 +90,7 @@ export function ModelPicker({ open, chipsRef, onDismiss, providers, browseProvid
       )}
       {error && <p className="field-error" role="alert">{error}</p>}
       <div className="picker-foot">
-        <span>{running ? "Applies from your next message." : "Used for your next message."}</span>
+        <span>{!connected ? "Keys stay in Windows Credential Manager." : running ? "Applies from your next message." : "Used for your next message."}</span>
         <button type="button" className="btn btn-ghost sm" onClick={onManage}>Settings<ChevronRight className="i sm" aria-hidden="true" /></button>
       </div>
     </PickerShell>

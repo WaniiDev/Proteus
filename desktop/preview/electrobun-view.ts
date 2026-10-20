@@ -39,6 +39,7 @@ const handlers: Record<string, (params: Params) => unknown> = {
     return { threadId: id };
   },
   "models.select": (p) => { const model = state.models.find((m) => m.id === p?.modelId); if (!model) return { accepted: false }; publish({ ...state, selectedModelId: model.id, selectedProviderId: model.providerId }); return ok; },
+  "projects.remove": (p) => { publish({ ...state, projects: state.projects.filter((project) => project.id !== p?.projectId) }); return ok; },
   "providers.select": (p) => { publish({ ...state, selectedProviderId: p?.providerId }); return ok; },
   "models.reasoning.select": (p) => { publish({ ...state, selectedReasoningEffort: p?.reasoningEffort ?? null }); return ok; },
   "chat.send": () => ({ accepted: false, runId: "preview" }),
