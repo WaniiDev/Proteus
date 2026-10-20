@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./ds/tokens.css";
 import "./ds-app/fonts.css";
 import "./ds/bundle.css";
+import "./ds-app/view-transitions.css";
 import "./ds-app/markdown.css";
 import "./index.css";
 import App from "./App";

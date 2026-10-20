@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 
-export function useSmartScroll(itemKey: string): {
+export function useSmartScroll(itemKey: string, elementKey = ""): {
   threadRef: MutableRefObject<HTMLDivElement | null>;
   showLatest: boolean;
   jumpLatest: () => void;
@@ -18,7 +18,7 @@ export function useSmartScroll(itemKey: string): {
     update();
     element.addEventListener("scroll", update, { passive: true });
     return () => element.removeEventListener("scroll", update);
-  }, []);
+  }, [elementKey]);
   useLayoutEffect(() => {
     const element = threadRef.current;
     if (!element || !nearBottomRef.current) return;

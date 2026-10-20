@@ -107,3 +107,13 @@ describe("lens", () => {
     expect(begun).toBe(1);
   });
 });
+
+describe("useViewSwap immediate moves", () => {
+  test("a move the caller marks immediate skips the exit beat", async () => {
+    const t = await setup({ exitMs: 200, reduced: () => false, viewTransition: null, immediate: (from) => from === "chat" });
+    await t.render("memory");
+    expect(t.views()).toEqual(["memory"]);
+    expect(t.leaving()).toBe(false);
+    await t.done();
+  });
+});

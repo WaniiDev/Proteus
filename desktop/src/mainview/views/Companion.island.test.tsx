@@ -79,7 +79,7 @@ describe("one live region", () => {
     const snapshot = buildFixture("ask");
     const withSteps = { ...snapshot, messages: snapshot.messages.map((message) => (message.role === "assistant" ? { ...message, parts: [{ type: "tool" as const, id: "r", toolCallId: "r", name: "mastra_workspace_read_file", label: "Read", status: "completed" as const, input: { path: "a.md" } }, ...message.parts] } : message)) };
     const t = await mount({ ...withSteps, continuation: { threadId: snapshot.activeThreadId!, toolCallId: "t3", phase: "slow" } as never });
-    expect(t.host.querySelector(".continuation-notice")).toBeTruthy();
+    expect(t.host.querySelector(".notice.warn")).toBeTruthy();
     expect(t.host.querySelector(".steps")).toBeTruthy();
     expect(t.host.querySelectorAll(".island[aria-live]")).toHaveLength(1);
     expect(regions(t.host)).toEqual([]);

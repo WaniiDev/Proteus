@@ -58,7 +58,7 @@ const tool = (id: string, name: string, label: string, status: "running" | "comp
   type: "tool" as const, id: `${id}:p`, toolCallId: id, name, label, status, inputSummary, ...(outputSummary ? { outputSummary } : {}),
 });
 const assistant = (id: string, turnId: string, parts: RuntimeSnapshot["messages"][number]["parts"], minutesAgo: number, status: "complete" | "streaming" = "complete"): RuntimeSnapshot["messages"][number] => ({
-  id, role: "assistant", status, createdAt: iso(minutesAgo), turnId,
+  id, role: "assistant", status, createdAt: iso(minutesAgo), turnId: `turn-${turnId}`,
   text: parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("\n\n"), parts,
 });
 

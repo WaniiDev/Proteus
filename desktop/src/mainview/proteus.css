@@ -188,8 +188,6 @@ input { font-family: var(--font-body); }
 .orb-orbit i:nth-child(3) { background: var(--g-mint); left: 8.5%; top: 74%; }
 
 .orb-meta { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
-.orb-state-label { font-size: 12px; font-weight: 600; letter-spacing: 0.96px; text-transform: uppercase; color: var(--body-strong); }
-.orb-state-desc { font-size: 14px; color: var(--muted); max-width: 380px; }
 
 /* ---- State-driven overlays (both WebGL and fallback) ---- */
 .orb-float[data-state="listening"] .orb-ring { animation: ripple 2.1s ease-out infinite; }
@@ -617,7 +615,5 @@ input { font-family: var(--font-body); }
   .mode-bar { flex-wrap: wrap; gap: var(--s-sm); }
   .brief-foot { flex-direction: column; align-items: flex-start; }
 }
-.workspace-badge { display:inline-flex; align-items:center; max-width:220px; padding:5px 9px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workspace-badge.missing { border-color:#d9a3a3; color:#a33; }
 .tool-approval-warning { padding:10px 12px; border:1px solid #dfb8a8; border-radius:10px; background:rgba(255,235,224,.7); color:#754230; font-size:12px; }
 
