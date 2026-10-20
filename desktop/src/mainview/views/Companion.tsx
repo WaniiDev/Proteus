@@ -22,6 +22,7 @@ import type { IslandHandle } from "../components/island/Island";
 import { AskBody } from "../components/island/asks/AskBody";
 import { StoppedNote } from "../components/ResolvedLine";
 import { QueuedMessageBubble } from "../components/QueuedMessageBubble";
+import { useToastAnnouncement } from "../components/ds/Toast";
 
 const HERO_PROMPTS = ["What needs me this morning?", "Compare the three launch options", "How did sign-ups trend this week?"];
 
@@ -88,6 +89,8 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
   // The latest turn's answer stays in the Island while it streams and until the person settles it (Done or a new send).
   const [dismissedAnswers, setDismissedAnswers] = useState<Set<string>>(() => new Set());
   const [announcement, setAnnouncement] = useState("");
+  // Toasts speak through the Island, the page's one live region (see components/ds/Toast.tsx).
+  const toastAnnouncement = useToastAnnouncement();
   const lastItem = conversationItems.at(-1);
   const latestAnswer = lastItem?.type === "assistant" ? lastItem.parts.filter((part): part is ChatAnswerPart => part.type === "answer").at(-1) : undefined;
   const liveAnswer = latestAnswer && (latestAnswer.streaming || !dismissedAnswers.has(latestAnswer.answerId)) ? latestAnswer : null;
@@ -242,7 +245,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               bodyScroll
               islandRef={islandRef}
               answer={!asks[0] && liveAnswer ? { streaming: liveAnswer.streaming, question: liveAnswer.question || liveAnswer.title } : null}
-              announcement={announcement}
+              announcement={announcement || toastAnnouncement}
               onDone={settleAnswer}
               onSubmit={handleSend}
               onAbort={onAbort}
