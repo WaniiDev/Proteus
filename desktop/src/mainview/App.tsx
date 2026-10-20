@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { DEFAULT_MODEL_ID } from "../shared/constants";
-import type { ChatMessage, MemoryScope, OrbState, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
+import type { AnswerIntentResult, ChatMessage, MemoryScope, OrbState, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { rpc } from "./lib/bridge";
 import { useScrollbars } from "./ds-app/useScrollbars";
 import { useViewSwap } from "./ds-app/useViewSwap";
@@ -10,6 +10,8 @@ import { createRuntimeSnapshotTransport } from "./lib/runtime-snapshot-transport
 import { reconcileQueuedDrafts, type QueuedDraft } from "./lib/composer-ui";
 import { Sidebar, type View } from "./components/Sidebar";
 import { DeleteThreadModal } from "./components/DeleteThreadModal";
+import { FilesDialog } from "./components/conversation/FilesDialog";
+import { AnswerIntentStateContext, answerIntentKey, type AnswerIntentEvent, type AnswerIntentState } from "./components/answer";
 import { Companion } from "./views/Companion";
 import { ProjectsView } from "./views/ProjectsView";
 import { SettingsView, type SettingsSection } from "./views/SettingsView";
@@ -80,6 +82,10 @@ export default function App() {
   }, [sidebarOpen]);
   const [localMessages, setLocalMessages] = useState<Map<string, ChatMessage>>(() => new Map());
   const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>([]);
+  const [intentPending, setIntentPending] = useState<ReadonlySet<string>>(() => new Set());
+  const [intentNotes, setIntentNotes] = useState<Record<string, string>>({});
+  const intentInFlight = useRef<Set<string>>(new Set());
+  const [filesPath, setFilesPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
   const [creatingChat, setCreatingChat] = useState(false);
   const creatingChatRef = useRef(false);
@@ -143,9 +149,8 @@ export default function App() {
   const handleNavigate = (next: View) => {
     setView(next);
   };
-  const handleSend = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const text = input.trim();
+  // `fromInput` clears the Island input on send and puts the text back if the send is refused; a follow-up leaves the input alone.
+  const sendText = (text: string, fromInput: boolean) => {
     if (!text || !snapshot.activeThreadId) return;
     const clientMessageId = crypto.randomUUID();
     const threadId = snapshot.activeThreadId;
@@ -166,28 +171,61 @@ export default function App() {
         }),
       );
     }
-    setInput("");
-    void rpc.request["chat.send"]({ text, clientMessageId })
-      .then((result) => {
-        if (result.accepted) return;
-        if (runningForThread) setQueuedDrafts((current) => current.filter((draft) => draft.id !== clientMessageId));
-        setLocalMessages((current) => {
-          const next = new Map(current);
-          next.delete(clientMessageId);
-          return next;
-        });
-        setInput(text);
-      })
-      .catch(() => {
-        if (runningForThread) setQueuedDrafts((current) => current.filter((draft) => draft.id !== clientMessageId));
-        setLocalMessages((current) => {
-          const next = new Map(current);
-          next.delete(clientMessageId);
-          return next;
-        });
-        setInput(text);
+    if (fromInput) setInput("");
+    const undo = () => {
+      if (runningForThread) setQueuedDrafts((current) => current.filter((draft) => draft.id !== clientMessageId));
+      setLocalMessages((current) => {
+        const next = new Map(current);
+        next.delete(clientMessageId);
+        return next;
       });
+      if (fromInput) setInput(text);
+    };
+    void rpc.request["chat.send"]({ text, clientMessageId })
+      .then((result) => { if (!result.accepted) undo(); })
+      .catch(undo);
   };
+  const handleSend = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    sendText(input.trim(), true);
+  };
+  const handleFollowUp = (text: string) => sendText(text.trim(), false);
+  // Answer actions (ADR 0003): the runtime owns routing, the allowlist and approval; this only calls the RPC and shows the result.
+  // Resolves true when an approve was recorded, so the Island can pulse the orb and send the wave.
+  const handleAnswerIntent = async (event: AnswerIntentEvent): Promise<boolean> => {
+    const threadId = snapshot.activeThreadId;
+    const targetId = event.rowId ?? event.blockId;
+    if (!threadId || !targetId) return false;
+    const key = answerIntentKey(event.answerId, targetId);
+    if (intentInFlight.current.has(key)) return false;
+    intentInFlight.current.add(key);
+    setIntentPending((current) => new Set(current).add(key));
+    setIntentNotes((current) => { if (!(key in current)) return current; const { [key]: _gone, ...rest } = current; return rest; });
+    let result: AnswerIntentResult;
+    try {
+      result = await rpc.request["chat.answer.intent"]({
+        threadId,
+        answerId: event.answerId,
+        ...(event.blockId ? { blockId: event.blockId } : {}),
+        ...(event.rowId ? { rowId: event.rowId } : {}),
+        intent: event.intent,
+        ...(event.value ? { optionId: event.value } : {}),
+      });
+    } catch {
+      result = { accepted: false, code: "failed", message: "That action could not be sent. Try again." };
+    } finally {
+      intentInFlight.current.delete(key);
+      setIntentPending((current) => { const next = new Set(current); next.delete(key); return next; });
+    }
+    if (!result.accepted) {
+      setIntentNotes((current) => ({ ...current, [key]: result.message }));
+      return false;
+    }
+    if (result.open) setFilesPath(result.open.path);
+    if (result.draft !== undefined) setInput(result.draft);
+    return event.intent === "approve";
+  };
+  const intentState = useMemo<AnswerIntentState>(() => ({ pending: intentPending, notes: intentNotes }), [intentPending, intentNotes]);
   const handleConnect = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const candidate = apiKey;
@@ -260,6 +298,7 @@ export default function App() {
         <main className="app-stage">
           <div className={viewLeaving ? "view is-leaving" : "view"}>
           {shownView === "companion" && (
+            <AnswerIntentStateContext.Provider value={intentState}>
             <Companion
               snapshot={renderedSnapshot}
               activeTitle={activeTitle}
@@ -276,11 +315,17 @@ export default function App() {
               onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))}
               onInteraction={(toolCallId, response) => rpc.request["chat.interaction.respond"]({ toolCallId, response })}
               onInteractionDismiss={(toolCallId) => rpc.request["chat.interaction.dismiss"]({ toolCallId })}
+              onIntent={handleAnswerIntent}
+              onFollowUp={handleFollowUp}
+              onRename={handleRename}
+              onPin={(threadId, pinned) => ignoreRpc(rpc.request["threads.pin"]({ threadId, pinned }))}
+              onDeleteRequest={setDeleteTarget}
               onToolApproval={(toolCallId, approved, fingerprint) =>
                 rpc.request["chat.tool-approval.respond"]({ toolCallId, approved, fingerprint })
                   .catch(() => ({ accepted: false, code: "resume-failed", message: "The tool decision could not be sent.", retryable: true }))
               }
             />
+            </AnswerIntentStateContext.Provider>
           )}
           {shownView === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
           {shownView === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
@@ -289,6 +334,7 @@ export default function App() {
       </div>
       <Lens />
       {newChatError && <div className="app-shell-notice" role="alert"><span>{newChatError}</span><button type="button" onClick={() => setNewChatError(null)} aria-label="Dismiss new chat error"><X size={14} /></button></div>}
+      {filesPath !== null && <FilesDialog snapshot={snapshot} initialPath={filesPath} onClose={() => setFilesPath(null)} />}
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}
     </>
   );
