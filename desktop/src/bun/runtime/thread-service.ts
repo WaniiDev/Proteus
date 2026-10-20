@@ -190,13 +190,13 @@ export class ThreadService {
           });
           if (failOnError && (!thread || !memoryStore)) throw new Error("Conversation metadata storage is unavailable");
           if (thread && memoryStore) {
-            const { [LEGACY_THREAD_METADATA_KEY]: _legacy, ...metadata } = thread.metadata ?? {};
+            // Write only the key this path owns: the store merges metadata shallowly, so a concurrent pin is never overwritten.
+            // The legacy key can only be cleared by an explicit null; mapThread and loadThreadState treat null as absent.
             await memoryStore.updateThread({
               id: threadId,
-              title: thread.title ?? "New chat",
               metadata: {
-                ...metadata,
                 [THREAD_METADATA_KEY]: next,
+                ...(thread.metadata && LEGACY_THREAD_METADATA_KEY in thread.metadata ? { [LEGACY_THREAD_METADATA_KEY]: null } : {}),
               },
             });
           }
@@ -506,7 +506,7 @@ export class ThreadService {
     this.forgetThread(threadId);
     this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
-    const remaining = (await this.threadRepo.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const remaining = (await this.threadRepo.list()).map(mapThread).sort(compareThreads);
     if (this.ctx.selectedThreadId === threadId || !this.ctx.selectedThreadId) {
       const next = remaining[0] ?? mapThread(await this.threadRepo.create("New chat", {
         [THREAD_METADATA_KEY]: {

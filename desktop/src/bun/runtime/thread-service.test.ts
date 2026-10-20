@@ -258,4 +258,14 @@ describe("thread pinning (WAN-513)", () => {
     rt.threads.threadRepo.get = async () => null;
     await expect(rt.pinThread("zzz", true)).rejects.toThrow("Conversation not found");
   });
+
+  test("deleting the selected thread selects the first thread in pinned-first order (WAN-513)", async () => {
+    const { rt, rows, select } = pinFixture();
+    select("A", { workspaceBinding: { kind: "app" } });
+    // C is the oldest but pinned, so it comes before the newer unpinned B.
+    await rt.pinThread("C", true);
+    rows.current = [] as never;
+    await rt.deleteThread("A");
+    expect(rt.ctx.selectedThreadId).toBe("C");
+  });
 });
