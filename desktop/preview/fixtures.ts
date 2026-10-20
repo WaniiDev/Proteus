@@ -182,8 +182,8 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
       });
     case "long": {
       const longTitle = "Investigate the intermittent failure in the nightly synchronisation job that only appears when the network is slow";
-      const titles = [longTitle, "Q3 planning", "Pinned: reading list", "Refactor the settings screen", "Holiday itinerary for Lisbon and Porto", "Budget spreadsheet cleanup", "Draft reply to landlord", "Explain the borrow checker", "Meal prep ideas", "Review pull request 482", "Quarterly goals", "Gift ideas", "Learning Spanish plan", "Home network audit"];
-      const threads = titles.map((title, index) => thread(`th${index}`, title, index * 400 + 10, index === 3 ? { activity: "complete" as const } : index === 7 ? { activity: "error" as const, attention: 1 } : {}));
+      const titles = [longTitle, "Q3 planning", "Reading list", "Refactor the settings screen", "Holiday itinerary for Lisbon and Porto", "Budget spreadsheet cleanup", "Draft reply to landlord", "Explain the borrow checker", "Meal prep ideas", "Review pull request 482", "Quarterly goals", "Gift ideas", "Learning Spanish plan", "Home network audit"];
+      const threads = titles.map((title, index) => thread(`th${index}`, title, index * 400 + 10, index === 2 || index === 5 ? { pinned: true, pinnedAt: iso(index) } : index === 3 ? { activity: "complete" as const } : index === 7 ? { activity: "error" as const, attention: 1 } : {}));
       const longText = "This is a deliberately long paragraph to check wrapping. ".repeat(40).trim();
       const unbroken = "https://example.com/" + "a-very-long-unbroken-path-segment".repeat(6);
       return parse({

@@ -255,7 +255,7 @@ export default function App() {
     <>
       <div className="app-shell">
         <div className="ambient" aria-hidden="true"><i /><i /><i /></div>
-        <Sidebar view={view} open={sidebarOpen} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onToggle={() => setSidebarOpen((value) => !value)} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onDeleteRequest={setDeleteTarget} />
+        <Sidebar view={view} settingsSection={settingsSection} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onMemory={() => { setSettingsMemoryScope(undefined); setSettingsSection("memory"); setView("settings"); }} onSettings={() => { if (settingsSection === "memory") { setSettingsMemoryScope(undefined); setSettingsSection("providers"); } setView("settings"); }} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} messages={snapshot.messages} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onPin={(threadId, pinned) => ignoreRpc(rpc.request["threads.pin"]({ threadId, pinned }))} onDeleteRequest={setDeleteTarget} />
         {sidebarOpen && <button type="button" className="app-nav-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
         <main className="app-stage">
           <div className={viewLeaving ? "view is-leaving" : "view"}>
