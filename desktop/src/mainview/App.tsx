@@ -270,7 +270,7 @@ export default function App() {
               onTransportRetry={() => transportRetryRef.current()}
               onSend={handleSend}
               onAbort={() => ignoreRpc(rpc.request["chat.abort"]())}
-              onSettings={() => handleNavigate("settings")}
+              onSettings={() => handleNavigate("settings")} onProviders={() => { setSettingsMemoryScope(undefined); setSettingsSection("providers"); handleNavigate("settings"); }} onModels={() => { setSettingsMemoryScope(undefined); setSettingsSection("models"); handleNavigate("settings"); }} onProjects={() => handleNavigate("projects")}
               onOrbState={setOrbState}
               onRetry={(messageId) => ignoreRpc(rpc.request["chat.retry"]({ messageId }))}
               onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))}

@@ -115,8 +115,32 @@ describe("Island variants", () => {
     expect(t.q(".island").getAttribute("aria-live")).toBe("polite");
     expect(t.qa('[role="status"], [role="alert"], [aria-live]:not(.island)')).toHaveLength(0);
     await t.render({ mode: "ask", end: "stop", askKind: "Approval" });
-    expect(t.qa(".island-end > [data-on='true']")).toHaveLength(0);
+    // Send hides while an ask is open, but the run can still be stopped.
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
     expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Needs you · ApprovalYour call. Nothing moves without you."]);
+    await t.done();
+  });
+
+  test("during a run, clicking or focusing the status brings the input back to queue a follow-up, with Stop still there", async () => {
+    const t = await mount({ mode: "status", end: "stop", status: { label: "Working", line: "Reading notes/plan.md" } });
+    const input = () => t.q<HTMLTextAreaElement>(".island-input");
+    expect(input().disabled).toBe(true);
+    await act(async () => { t.visibleStatus()[0]!.click(); });
+    expect(input().getAttribute("data-on")).toBe("true");
+    expect(input().disabled).toBe(false);
+    expect(document.activeElement).toBe(input());
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
+    await t.render({ mode: "input", end: "send", sendLabel: "Queue message", sendDisabled: false, input: "next" });
+    expect(t.q<HTMLButtonElement>(".island-send").getAttribute("aria-label")).toBe("Queue message");
+    expect(t.q<HTMLButtonElement>(".island-send").disabled).toBe(false);
+    await t.done();
+  });
+
+  test("the status is a tab stop during a run, and focusing it engages the input", async () => {
+    const t = await mount({ mode: "status", end: "stop", status: { label: "Working", line: "Thinking…" } });
+    expect(t.visibleStatus()[0]!.getAttribute("tabindex")).toBe("0");
+    await act(async () => { t.visibleStatus()[0]!.focus(); });
+    expect(document.activeElement).toBe(t.q(".island-input"));
     await t.done();
   });
 

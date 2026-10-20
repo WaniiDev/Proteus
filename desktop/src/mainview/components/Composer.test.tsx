@@ -58,30 +58,23 @@ const render = (value: RuntimeSnapshot) => renderToStaticMarkup(
 );
 
 describe("Claude-style composer", () => {
-  test("shows workspace and conversation model controls for an empty chat", () => {
+  test("shows the project chip and the split model chip for an empty chat", () => {
     const html = render(snapshot());
-    expect(html).toContain("Proteus workspace");
-    expect(html).toContain("<span>GPT-5.6 Sol</span>");
-    expect(html).toContain("Codex · GPT-5.6 Sol · high");
-    expect(html).toContain('placeholder="Ask Proteus anything"');
     expect(html).toContain('class="island-meta"');
+    expect(html).toContain("Proteus workspace");
+    expect(html).toContain("GPT-5.6 Sol");
+    expect(html).toContain('aria-label="Model GPT-5.6 Sol, high thinking. Change model."');
+    expect(html).toContain("island-chip split");
+    expect(html).toContain("chip-part chip-effort");
+    expect(html).toContain('placeholder="Ask Proteus anything"');
   });
 
-  test("hides the workspace control once conversation history exists", () => {
+  test("locks the project chip once conversation history exists", () => {
     const value = snapshot();
     value.messages = [{ id: "user-1", turnId: "turn-1", role: "user", text: "Hello", status: "complete", createdAt: new Date().toISOString(), parts: [{ id: "part-1", type: "text", text: "Hello" }] }];
-    expect(render(value)).not.toContain("Proteus workspace");
-  });
-
-  test("contains accessible provider, model, and dismissal behavior", async () => {
-    const source = await Bun.file(new URL("./Composer.tsx", import.meta.url)).text();
-    expect(source).toContain('role="tablist"');
-    expect(source).toContain('role="listbox"');
-    expect(source).toContain('event.key !== "Escape"');
-    expect(source).toContain('document.addEventListener("pointerdown"');
-    expect(source).toContain('horizontal ? "ArrowRight" : "ArrowDown"');
-    expect(source).toContain("Configure in Settings");
-    expect(source).toContain("Provider default");
+    const html = render(value);
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain("Fixed for this conversation.");
   });
 
   test("a running conversation shows the live status and Stop, which aborts the run", async () => {
@@ -98,7 +91,12 @@ describe("Claude-style composer", () => {
     ));
     const visible = [...host.querySelectorAll(".island-status")].filter((el) => el.getAttribute("data-on") === "true");
     expect(visible.map((el) => el.querySelector("strong")?.textContent)).toEqual(["Working"]);
-    expect((host.querySelector(".island-input") as HTMLTextAreaElement).disabled).toBe(true);
+    const field = host.querySelector(".island-input") as HTMLTextAreaElement;
+    expect(field.disabled).toBe(true);
+    // The person can still reach the input during a run to queue a follow-up.
+    await act(async () => { (host.querySelector(".island-status[data-on='true']") as HTMLElement).click(); });
+    expect(field.disabled).toBe(false);
+    expect(document.activeElement).toBe(field);
     await act(async () => { (host.querySelector(".island-end .btn") as HTMLButtonElement).click(); });
     expect(aborts).toBe(1);
     await act(async () => { root.unmount(); host.remove(); });

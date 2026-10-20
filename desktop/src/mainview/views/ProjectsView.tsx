@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Brain, ChevronRight, Folder, Plus, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Brain, ChevronRight, Folder, Plus, Sparkles, TriangleAlert } from "lucide-react";
 import type { MemorySettingsState, RuntimeSnapshot } from "../../shared/contracts";
 import { EmptyState } from "../components/ds/EmptyState";
 import { Modal } from "../components/ds/Modal";
 import { rpc } from "../lib/bridge";
 import { activityDotClass, chatCountLabel, projectThreadsFor } from "../lib/projects-ui";
 import { relativeTime } from "../lib/ui-helpers";
+
+type WorkspaceSkill = { name: string; description: string; path: string; source: string; conflict: boolean };
 
 type ProjectsViewProps = {
   snapshot: RuntimeSnapshot;
@@ -19,6 +21,8 @@ export function ProjectsView({ snapshot, onCreateChat, onSelectThread, onOpenMem
   const [confirmForget, setConfirmForget] = useState(false);
   const [memory, setMemory] = useState<MemorySettingsState | null>(null);
   const [memoryError, setMemoryError] = useState(false);
+  const [skills, setSkills] = useState<WorkspaceSkill[] | null>(null);
+  const [skillsError, setSkillsError] = useState(false);
   const selected = snapshot.projects.find((project) => project.id === selectedProjectId) ?? null;
 
   useEffect(() => {
@@ -33,6 +37,19 @@ export function ProjectsView({ snapshot, onCreateChat, onSelectThread, onOpenMem
       .catch(() => { if (active) setMemoryError(true); });
     return () => { active = false; };
   }, [selected?.id]);
+
+  // workspace.skills reads the workspace the active conversation is bound to, so a project lists its skills
+  // while a chat in that project is the active one.
+  const skillsProjectId = selected && snapshot.activeWorkspace.binding.kind === "project" && snapshot.activeWorkspace.binding.projectId === selected.id && snapshot.activeWorkspace.availability === "ready" ? selected.id : null;
+  useEffect(() => {
+    setSkills(null); setSkillsError(false);
+    if (!skillsProjectId) return;
+    let active = true;
+    void rpc.request["workspace.skills"]({})
+      .then((list: WorkspaceSkill[]) => { if (active) setSkills(list); })
+      .catch(() => { if (active) setSkillsError(true); });
+    return () => { active = false; };
+  }, [skillsProjectId]);
 
   const projectThreads = useMemo(() => selected ? projectThreadsFor(snapshot.threads, selected.id) : [], [selected, snapshot.threads]);
   const selectedMemory = memory?.scopes.find((scope) => scope.key === `project:${selected?.id}`);
@@ -58,6 +75,17 @@ export function ProjectsView({ snapshot, onCreateChat, onSelectThread, onOpenMem
             <span className="row-end">{relativeTime(thread.updatedAt)}<ChevronRight className="i sm" aria-hidden="true" /></span>
           </button>)}
           {projectThreads.length === 0 && <div className="list-row quiet">No chats here yet. Start one and Proteus works inside this folder.</div>}
+        </div>
+      </div>
+      <div className="list-group"><span className="list-label kicker">Skills</span>
+        <div className="list">
+          {skills?.map((skill) => <div className="list-row" key={`${skill.source}:${skill.name}`}>
+            <Sparkles className="i" aria-hidden="true" />
+            <span className="row-copy"><span className="row-title">{skill.name}</span><span className="row-sub" title={skill.path}>{skill.description}</span></span>
+            {skill.conflict && <span className="row-end"><span className="badge warn">Conflict</span></span>}
+          </div>)}
+          {skills?.length === 0 && <div className="list-row quiet">No skills found in this folder.</div>}
+          {skills === null && <div className="list-row quiet" role={skillsError ? "alert" : undefined}>{skillsError ? "Skills could not be loaded." : skillsProjectId ? "Loading skills…" : "Open a chat here to list this folder’s skills."}</div>}
         </div>
       </div>
       <div className="list-group"><span className="list-label kicker">This project</span>

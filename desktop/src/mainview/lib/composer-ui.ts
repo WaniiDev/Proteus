@@ -1,6 +1,7 @@
-import type { ChatMessage, ChatToolPart, OrbState, PendingInteraction, RuntimeSnapshot } from "../../shared/contracts";
+import type { ChatMessage, ChatToolPart, OrbState, PendingInteraction, ReasoningEffort, RuntimeSnapshot } from "../../shared/contracts";
 import { ORB_STATES } from "../orb/orb-spec";
 import { askQueue, askWhat } from "./ask-copy";
+import { effortName, levelIndex, meterStep, nearestLevel, orderedLevels } from "./effort";
 import { describeToolActivity } from "./tool-activity";
 
 export type ComposerAction = "send" | "queue" | "stop";
@@ -127,5 +128,70 @@ export function deriveIsland(args: { snapshot: RuntimeSnapshot; orbState: OrbSta
     askKind: askKickerSubject(asks),
     answerLabel: answer?.streaming ? "Speaking" : "Answer",
     answerLine: answer?.question ?? "",
+  };
+}
+
+export const PROJECT_LOCKED_TITLE = "Fixed once a conversation starts";
+
+export type ContextChipsView = {
+  /** No conversation yet, so there is nothing to bind a project to. */
+  showProject: boolean;
+  projectLocked: boolean;
+  projectLabel: string;
+  projectAria: string;
+  projectTitle: string;
+  modelLocked: boolean;
+  modelTitle: string;
+  /** The selected model's provider isn't connected: the chip is a warning that opens Settings. */
+  needsConnect: boolean;
+  providerId: string;
+  providerName: string;
+  modelName: string;
+  modelAria: string;
+  /** The selected model's thinking levels in order; empty means no effort part. */
+  levels: ReasoningEffort[];
+  effort: ReasoningEffort | null;
+  effortLabel: string;
+  effortAria: string;
+  /** Bars lit in the chip meter (0-4). */
+  meter: number;
+  atTop: boolean;
+};
+
+/** Everything the two context chips say and whether they can be used. Pure so the states are testable without a DOM. */
+export function deriveContextChips(args: { snapshot: RuntimeSnapshot; queuedDraftCount: number; runningElsewhere: boolean; askOpen: boolean; effortOverride?: ReasoningEffort | null }): ContextChipsView {
+  const { snapshot, queuedDraftCount, runningElsewhere, askOpen, effortOverride } = args;
+  const model = snapshot.models.find((candidate) => candidate.id === snapshot.selectedModelId);
+  const providerId = model?.providerId ?? snapshot.selectedProviderId;
+  const provider = snapshot.providers.find((candidate) => candidate.id === providerId);
+  const providerName = provider?.name ?? "Provider";
+  const modelName = model?.name ?? "Choose model";
+  const needsConnect = !provider?.verified || provider.availability !== "ready";
+  const projectLocked = !canChooseComposerWorkspace(snapshot, queuedDraftCount);
+  const modelLocked = askOpen || snapshot.activeRun !== null || runningElsewhere;
+  const levels = orderedLevels(model?.reasoningOptions);
+  const effort = nearestLevel(levels, effortOverride ?? snapshot.selectedReasoningEffort);
+  const index = levelIndex(levels, effort);
+  const effortLabel = effort ? effortName(effort) : "";
+  const label = snapshot.activeWorkspace.label;
+  return {
+    showProject: snapshot.activeThreadId !== null,
+    projectLocked,
+    projectLabel: label,
+    projectAria: `Working in ${label}. ${projectLocked ? "Fixed for this conversation." : "Change project."}`,
+    projectTitle: projectLocked ? PROJECT_LOCKED_TITLE : "Choose where Proteus works",
+    modelLocked,
+    modelTitle: askOpen ? "Answer Proteus first" : runningElsewhere || snapshot.activeRun !== null ? "Available when the run finishes" : needsConnect ? "Connect a provider to chat" : "Model and thinking",
+    needsConnect,
+    providerId,
+    providerName,
+    modelName,
+    modelAria: needsConnect ? `${providerName} is not connected. Open Settings.` : `Model ${modelName}${effort ? `, ${effortLabel.toLowerCase()} thinking` : ""}. Change model.`,
+    levels,
+    effort,
+    effortLabel,
+    effortAria: `Thinking ${effortLabel.toLowerCase()}. Change thinking.`,
+    meter: meterStep(levels.length, index),
+    atTop: levels.length > 1 && index === levels.length - 1,
   };
 }

@@ -5,7 +5,7 @@ import { normalizeError } from "../core/runtime-error-mapping";
 import type { LiveAssistantProjection, ProjectedToolOutcome } from "../core/runtime-projection";
 import { DEFAULT_MODEL_ID } from "../../shared/constants";
 import { DEFAULT_PROVIDER_ID } from "./constants";
-import { emptyWorkbench } from "./message-mapping";
+import { applyAnswerOutcomes, emptyWorkbench } from "./message-mapping";
 import type { InteractionResolution, PersistedThreadState, SnapshotListener } from "./types";
 
 /**
@@ -120,6 +120,7 @@ export class RuntimeContext {
     this.snapshot = {
       ...this.snapshot,
       ...next,
+      ...(next.messages ? { messages: applyAnswerOutcomes(next.messages, this.threadState.answerOutcomes) } : {}),
       ...(providers ? { providers } : {}),
       providerAuth: reconcileProviderAuth(nextProviders, requestedProviderAuth),
       revision: this.snapshot.revision + 1,

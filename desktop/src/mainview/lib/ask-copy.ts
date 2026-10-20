@@ -70,7 +70,7 @@ const CONSEQUENCE: Record<string, string> = {
 export function askSentence(interaction: PendingInteraction): string | undefined {
   if (interaction.status === "failed") return interaction.error?.message ?? "The response could not be sent.";
   if (interaction.kind === "tool_approval") return CONSEQUENCE[change(interaction).groupKey] ?? interaction.question ?? "Proteus is ready to use this tool. Review the request before it continues.";
-  return interaction.question;
+  return interaction.question ?? (interaction.kind === "submit_plan" ? interaction.plan?.summary || undefined : undefined);
 }
 
 /** The exact change, in mono: a command, a removed/added pair, the new file body, or the raw arguments. */

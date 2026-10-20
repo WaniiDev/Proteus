@@ -71,6 +71,27 @@ describe("asks in the Island", () => {
   });
 });
 
+describe("one live region", () => {
+  // The Copy button's own "Copied" confirmation is the one other announcement, and sits on a button.
+  const regions = (host: HTMLElement) => [...host.querySelectorAll('[aria-live], [role="status"], [role="alert"]')].filter((el) => !el.closest(".island") && !el.closest("button"));
+
+  test("the Island is the only live region, with a thread, steps, a continuation notice and an ask on screen", async () => {
+    const snapshot = buildFixture("ask");
+    const withSteps = { ...snapshot, messages: snapshot.messages.map((message) => (message.role === "assistant" ? { ...message, parts: [{ type: "tool" as const, id: "r", toolCallId: "r", name: "mastra_workspace_read_file", label: "Read", status: "completed" as const, input: { path: "a.md" } }, ...message.parts] } : message)) };
+    const t = await mount({ ...withSteps, continuation: { threadId: snapshot.activeThreadId!, toolCallId: "t3", phase: "slow" } as never });
+    expect(t.host.querySelector(".continuation-notice")).toBeTruthy();
+    expect(t.host.querySelector(".steps")).toBeTruthy();
+    expect(t.host.querySelectorAll(".island[aria-live]")).toHaveLength(1);
+    expect(regions(t.host)).toEqual([]);
+  });
+
+  test("Stop stays reachable while an ask is open", async () => {
+    const t = await mount(buildFixture("ask"));
+    const on = [...t.host.querySelectorAll(".island-end > [data-on='true']")].map((el) => el.textContent);
+    expect(on).toEqual(["Stop"]);
+  });
+});
+
 describe("answers in the Island", () => {
   const streaming = () => buildFixture("answer");
   const settled = () => {

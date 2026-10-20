@@ -1,5 +1,5 @@
 import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater, app } from "electrobun/bun";
-import { runtimeSnapshotDecodeReportSchema, type ProviderId, type ProviderModelId, type ProteusRPCSchema } from "../shared/contracts";
+import { runtimeSnapshotDecodeReportSchema, type AnswerIntentParams, type ProviderId, type ProviderModelId, type ProteusRPCSchema } from "../shared/contracts";
 import { encodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { TextRuntime } from "./runtime";
 
@@ -173,6 +173,14 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         } catch (error) {
           runtime.reportError(error);
           return { accepted: false, code: "resume-failed" as const, message: "The tool approval could not be processed.", retryable: true };
+        }
+      },
+      "chat.answer.intent": async (params: AnswerIntentParams) => {
+        try {
+          return await runtime.runAnswerIntent(params);
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false as const, code: "failed" as const, message: "That action could not be completed." };
         }
       },
       "chat.abort": async () => {

@@ -79,7 +79,7 @@ describe("tool approval ask", () => {
     const { h } = handlers({ onApproval: async () => ({ accepted: false, code: "stale", message: "That request changed.", retryable: false }) });
     const t = await mount(base, h);
     await act(async () => { t.buttons()[1]!.click(); });
-    expect(t.q('[role="alert"]').textContent).toBe("That request changed.");
+    expect(t.q('.island-note').textContent).toBe("That request changed.");
     expect(t.buttons().map((b) => b.disabled)).toEqual([false, false]);
     expect(t.buttons()[1]!.textContent).toBe("Approve edit");
   });

@@ -72,6 +72,13 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
   const stopRequestedRef = useRef(false);
   const [stopped, setStopped] = useState(false);
   const [morphing, setMorphing] = useState(false);
+  // During a run the status fills the slot; focusing, clicking or typing into it brings the input back so a follow-up can be queued.
+  const [engaged, setEngaged] = useState(false);
+  const focusInputRef = useRef(false);
+  const engage = () => {
+    focusInputRef.current = true;
+    setEngaged(true);
+  };
   const [slots, setSlots] = useState<Slots>({ on: "a", key: "", a: emptyStatus, b: emptyStatus });
 
   useImperativeHandle(ref, () => ({ wave: () => wave(waveRef.current) }), []);
@@ -93,7 +100,7 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
     return () => window.clearTimeout(timer);
   }, [running, stoppedMs]);
 
-  const visibleMode: IslandMode = mode === "ask" || mode === "answer" ? mode : stopped ? "status" : mode;
+  const visibleMode: IslandMode = mode === "ask" || mode === "answer" ? mode : stopped ? "status" : mode === "status" && engaged ? "input" : mode;
   const shownStatus = stopped && mode !== "ask" && mode !== "answer" ? STOPPED_STATUS : status;
   const statusOn = visibleMode === "status";
 
@@ -127,12 +134,19 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
     if (!active || active === document.body || bodyRef.current?.contains(active)) inputRef.current?.focus({ preventScroll: true });
   }, [visibleMode]);
 
+  // Engaging the status brings the input forward and focuses it.
+  useLayoutEffect(() => {
+    if (visibleMode !== "input" || !focusInputRef.current) return;
+    focusInputRef.current = false;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [visibleMode]);
+
   const inputOn = visibleMode === "input";
   const askOn = visibleMode === "ask";
   const answerOn = visibleMode === "answer";
-  // An ask answers from its body (Decline / Approve), so neither end button shows while it is open; an answer ends with Done.
+  // An ask answers from its body (Decline / Approve), so Send hides while it is open, but Stop stays for the run; an answer ends with Done.
   const sendOn = end === "send" && !askOn && !answerOn;
-  const stopOn = end === "stop" && !askOn && !answerOn;
+  const stopOn = end === "stop" && !answerOn;
   const flag = (on: boolean) => (on ? "true" : "false");
   const slotProps = (on: boolean) => ({ "data-on": flag(on), "aria-hidden": !on, inert: !on });
 
@@ -153,7 +167,7 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
           }}
         >
           <div className={`island-orb-slot${docked ? " is-docked" : ""}`} ref={orbAnchorRef} aria-hidden="true" />
-          <div className="island-slot">
+          <div className="island-slot" onClick={statusOn ? engage : undefined}>
             <textarea
               ref={inputRef}
               className="island-input"
@@ -165,7 +179,9 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
               maxLength={MAX_INPUT_LENGTH}
               disabled={!inputOn || inputDisabled}
               tabIndex={inputOn ? undefined : -1}
+              onBlur={(event) => { if (!event.currentTarget.value) setEngaged(false); }}
               onChange={(event) => {
+                setEngaged(true);
                 onInput(event.target.value);
                 onNudge?.();
               }}
@@ -175,8 +191,8 @@ export function Island({ orbState, docked, orbAnchorRef, mode, end, status, askK
                 event.currentTarget.form?.requestSubmit();
               }}
             />
-            <div className="island-status" {...slotProps(statusOn && slots.on === "a")}><strong>{slots.a.label}</strong>{" "}<span>{slots.a.line}</span></div>
-            <div className="island-status" {...slotProps(statusOn && slots.on === "b")}><strong>{slots.b.label}</strong>{" "}<span>{slots.b.line}</span></div>
+            <div className="island-status" {...slotProps(statusOn && slots.on === "a")} tabIndex={statusOn && slots.on === "a" ? 0 : undefined} onFocus={engage}><strong>{slots.a.label}</strong>{" "}<span>{slots.a.line}</span></div>
+            <div className="island-status" {...slotProps(statusOn && slots.on === "b")} tabIndex={statusOn && slots.on === "b" ? 0 : undefined} onFocus={engage}><strong>{slots.b.label}</strong>{" "}<span>{slots.b.line}</span></div>
             <div className="island-status" {...slotProps(askOn)}><span className="island-kicker">Needs you{askKind ? ` · ${askKind}` : ""}</span><span>Your call. Nothing moves without you.</span></div>
             <div className="island-status" {...slotProps(answerOn)}><strong>{answerLabel}</strong>{" "}<span>{answerLine}</span></div>
           </div>

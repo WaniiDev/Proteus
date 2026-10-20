@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { answerBlockSchema } from "./answer-catalog";
+import { answerBlockSchema, type AnswerIntent } from "./answer-catalog";
 
 export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "focusing", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
 export const orbStateSchema = z.enum(orbStates);
@@ -134,6 +134,17 @@ export const chatAnswerPartSchema = z.object({
   streaming: z.boolean(),
   outcomes: z.record(z.string(), z.string()).default({}),
 });
+export const ANSWER_INTENT_REFUSAL_CODES = ["refused", "already-done", "stale", "failed"] as const;
+/**
+ * Result of `chat.answer.intent` (ADR 0003 > Intents and safety). `outcome` is what is recorded on the row or block;
+ * `draft` (reply) is text for the composer, `open` (open) is a workspace-relative file the renderer should show.
+ * A refusal records nothing, so the person can try again unless the code is `already-done`.
+ */
+export type AnswerIntentResult =
+  | { accepted: true; outcome: string; draft?: string; open?: { path: string } }
+  | { accepted: false; code: (typeof ANSWER_INTENT_REFUSAL_CODES)[number]; message: string };
+export type AnswerIntentParams = { threadId: string; answerId: string; blockId?: string; rowId?: string; intent: AnswerIntent; optionId?: string };
+
 export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema, chatSourcePartSchema, chatAnswerPartSchema]);
 export type ChatMessagePart = z.infer<typeof chatMessagePartSchema>;
 export type ChatToolPart = z.infer<typeof chatToolPartSchema>;
@@ -524,6 +535,10 @@ export const proteusRpcSchema = {
       "chat.tool-approval.respond": {
         params: {} as { toolCallId: string; approved: boolean; fingerprint: string },
         response: {} as InteractionResponseResult,
+      },
+      "chat.answer.intent": {
+        params: {} as AnswerIntentParams,
+        response: {} as AnswerIntentResult,
       },
       "chat.abort": {
         params: undefined as undefined,

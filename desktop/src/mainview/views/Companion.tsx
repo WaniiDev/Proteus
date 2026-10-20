@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { PanelRight } from "lucide-react";
 import type { ChatAnswerPart, ChatEvent, InteractionResponseResult, OrbState, RuntimeSnapshot } from "../../shared/contracts";
 import { ORB_STATES } from "../orb/orb-spec";
 import { rpc } from "../lib/bridge";
 import { askQueue } from "../lib/ask-copy";
 import { groupConversationItems } from "../lib/ui-helpers";
-import { ContextPane, type ContextPaneTab } from "../components/ContextPane";
+import { ConversationMenu } from "../components/ConversationMenu";
 import { selectedProviderCanChat, type QueuedDraft } from "../lib/composer-ui";
 import { Composer } from "../components/Composer";
 import { Icon } from "../components/Icon";
 import type { OrbHandle } from "../components/Orb";
 import { OrbPresence } from "../components/OrbPresence";
+import { useFocusingMoment } from "../ds-app/focusing";
+import { ensureSurgeLayer } from "../ds-app/surge";
 import { PersistentOrbSurface } from "../components/PersistentOrbSurface";
 import { useConversationOrbState } from "../hooks/useConversationOrbState";
 import { useSmartScroll } from "../hooks/useSmartScroll";
@@ -22,7 +23,7 @@ import { AskBody } from "../components/island/asks/AskBody";
 import { StoppedNote } from "../components/ResolvedLine";
 import { QueuedMessageBubble } from "../components/QueuedMessageBubble";
 
-export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onIntent, onFollowUp }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean, fingerprint: string) => Promise<InteractionResponseResult>; /** An action inside an answer (approve, skip, choose...). The intent RPC is wired by the host. */ onIntent?: (event: AnswerIntentEvent) => void; onFollowUp?: (text: string) => void }) {
+export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onProviders, onModels, onProjects, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onIntent, onFollowUp }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onProviders?: () => void; onModels?: () => void; onProjects?: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean, fingerprint: string) => Promise<InteractionResponseResult>; /** An action inside an answer. The intent RPC is wired by the host. */ onIntent?: (event: AnswerIntentEvent) => void; onFollowUp?: (text: string) => void }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -35,15 +36,18 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
   const [dockOrbAnchor, setDockOrbAnchor] = useState<HTMLDivElement | null>(null);
   const heroOrbAnchorRef = useCallback((element: HTMLDivElement | null) => setHeroOrbAnchor(element), []);
   const dockOrbAnchorRef = useCallback((element: HTMLDivElement | null) => setDockOrbAnchor(element), []);
-  const contextToggleRef = useRef<HTMLButtonElement>(null);
-  const [contextOpenByThread, setContextOpenByThread] = useState<Map<string, boolean>>(() => new Map());
-  const [contextTabByThread, setContextTabByThread] = useState<Map<string, ContextPaneTab>>(() => new Map());
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}`);
-  const contextOpen = !!snapshot.activeThreadId && contextOpenByThread.get(snapshot.activeThreadId) === true;
-  const contextTab = snapshot.activeThreadId ? contextTabByThread.get(snapshot.activeThreadId) ?? "activity" : "activity";
-  const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
+  const stageRef = useRef<HTMLDivElement>(null);
+  // Max thinking is a moment on the orb and the stage: it never plays during a run or under reduced motion (see ds-app/focusing.ts).
+  const { onTopLevel } = useFocusingMoment({
+    orb: () => orbRef.current,
+    surgeLayer: () => (stageRef.current ? ensureSurgeLayer(stageRef.current) : null),
+    origin: () => (docked ? dockOrbAnchor : heroOrbAnchor),
+    stage: () => stageRef.current?.querySelector<HTMLElement>(":scope > .thread") ?? null,
+    runActive: snapshot.activeRun !== null,
+  });
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
@@ -51,29 +55,12 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
     if (!snapshot.activeThreadId || (!snapshot.messages.length && !snapshot.activeRun)) return;
     setDockedThreads((current) => (current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)));
   }, [snapshot.activeRun, snapshot.messages.length, snapshot.activeThreadId]);
-  useEffect(() => {
-    if (!contextOpen) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (snapshot.activeThreadId) setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-      requestAnimationFrame(() => contextToggleRef.current?.focus());
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [contextOpen, snapshot.activeThreadId]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
   const retryTarget = snapshot.retryMessageId ?? lastErrorMessage?.id;
   const conversationItems = useMemo(() => groupConversationItems(snapshot.messages), [snapshot.messages]);
   const pendingToolIds = useMemo(() => new Set(snapshot.interactions.map((item) => item.toolCallId)), [snapshot.interactions]);
-  // Asks live in the Island: "jump" brings the open one into focus.
-  const jumpToInteraction = (id: string) => {
-    const target = document.getElementById(`interaction-${id}`);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    target?.focus({ preventScroll: true });
-  };
   const islandRef = useRef<IslandHandle>(null);
   const asks = useMemo(() => askQueue(snapshot.interactions, snapshot.activeThreadId), [snapshot.interactions, snapshot.activeThreadId]);
   // The latest turn's answer stays in the Island while it streams and until the person settles it (Done or a new send).
@@ -125,12 +112,12 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
             <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
           </div>
         </div>
-        <button ref={contextToggleRef} type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${contextOpen ? " active" : ""}`} aria-label={contextOpen ? "Close context" : "Open context"} aria-expanded={contextOpen} aria-controls="conversation-context" disabled={!snapshot.activeThreadId} onClick={() => { if (!snapshot.activeThreadId) return; setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, !contextOpen)); }}><PanelRight size={16} /><span>Context</span>{workbenchAttention > 0 && <b>{workbenchAttention}</b>}</button>
+        <ConversationMenu snapshot={snapshot} />
       </div>
       <PersistentOrbSurface state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} heroAnchor={heroOrbAnchor} dockAnchor={dockOrbAnchor} />
       <div className="text-chat-layout">
-        <div className={`companion-grid ${contextOpen ? "context-present" : "context-absent"}`}>
-          <div className="stage">
+        <div className="companion-grid">
+          <div className="stage" ref={stageRef}>
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             {!docked && <OrbPresence state={state} anchorRef={heroOrbAnchorRef} />}
             {!docked && <section className="command-home-copy" aria-label="Start with Proteus">
@@ -143,7 +130,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
                 <button type="button" onClick={() => setInput("Research a question with sources and summarize what matters.")}>Research a question</button>
               </div>
             </section>}
-            <div className="thread" ref={threadRef} aria-live="polite">
+            <div className="thread" ref={threadRef}>
               {conversationItems.map((item) =>
                 item.type === "user" ? (
                   <div className="turn-user" key={item.message.id}>
@@ -161,7 +148,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
                 </div>
               ))}
               {snapshot.continuation && snapshot.continuation.threadId === snapshot.activeThreadId && snapshot.continuation.phase !== "resuming" && (
-                <div className={`continuation-notice continuation-${snapshot.continuation.phase}`} role="status">
+                <div className={`continuation-notice continuation-${snapshot.continuation.phase}`}>
                   <div>
                     <strong>{snapshot.continuation.phase === "slow" ? "Still continuing…" : "Checking the latest run state…"}</strong>
                     <p>{snapshot.continuation.phase === "slow" ? "Proteus has not reported new progress yet." : "Proteus is reconciling this decision with Mastra’s durable run history."}</p>
@@ -222,31 +209,16 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               onSubmit={handleSend}
               onAbort={onAbort}
               onSettings={onSettings}
+              onProviders={onProviders}
+              onModels={onModels}
+              onProjects={onProjects}
+              onTopLevel={onTopLevel}
               onNudge={() => orbRef.current?.nudge()}
               onWorkspaceSelect={(workspaceBinding) => rpc.request["threads.workspace.select"]({ workspaceBinding })}
               onModelSelect={(modelId) => rpc.request["models.select"]({ modelId }).then((result) => result.accepted)}
               onReasoningSelect={(reasoningEffort) => rpc.request["models.reasoning.select"]({ reasoningEffort }).then((result) => result.accepted)}
             />
           </div>
-          {contextOpen && (
-            <button
-              type="button"
-              className="context-backdrop"
-              aria-label="Close context pane"
-              onClick={() => {
-                if (!snapshot.activeThreadId) return;
-                setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-                requestAnimationFrame(() => contextToggleRef.current?.focus());
-              }}
-            />
-          )}
-          {contextOpen && <ContextPane snapshot={snapshot} tab={contextTab} onTabChange={(tab) => {
-            if (snapshot.activeThreadId) setContextTabByThread((current) => new Map(current).set(snapshot.activeThreadId as string, tab));
-          }} onJump={jumpToInteraction} onClose={() => {
-            if (!snapshot.activeThreadId) return;
-            setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-            requestAnimationFrame(() => contextToggleRef.current?.focus());
-          }} />}
         </div>
       </div>
     </section>

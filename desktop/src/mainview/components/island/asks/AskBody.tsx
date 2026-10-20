@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { InteractionResponseResult, PendingInteraction } from "../../../../shared/contracts";
 import { interactionSubmissionUi, type InteractionSubmissionAction } from "../../../lib/interaction-ui";
 import { approveLabel, askCode, askSentence, askTitle } from "../../../lib/ask-copy";
+import { markdownComponents } from "../../MarkdownCode";
 import { AskActions, interactionVariant } from "./AskPrimitives";
 
 export type AskHandlers = {
@@ -85,7 +88,7 @@ export function AskBody({ interaction, onRespond, onApproval, onResubmit, onDism
       {sentence && <p className="island-text">{sentence}</p>}
       {code && <pre className="island-code">{code}</pre>}
       {steps.length > 0 && <ol className="island-steps">{steps.map((step, index) => <li key={`${index}:${step}`}>{step}</li>)}</ol>}
-      {planText && <pre className="island-code">{planText}</pre>}
+      {planText && <div className="reply"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{planText}</ReactMarkdown></div>}
       {!failed && !isPlan && !isApproval && hasOptions && (
         <div className="island-options" role={multi ? "group" : "radiogroup"} aria-label={interaction.question ?? interaction.title}>
           {interaction.options.map((option) => (
@@ -115,9 +118,9 @@ export function AskBody({ interaction, onRespond, onApproval, onResubmit, onDism
       {!failed && !isPlan && !isApproval && hasOptions && otherSelected && <input ref={fieldRef} autoFocus disabled={resolving} className="island-field" aria-label="Your own answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your own answer…" />}
       {!failed && !isPlan && !isApproval && !hasOptions && <textarea ref={fieldRef} disabled={resolving} className="island-field" aria-label={interaction.question ?? interaction.title} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
       {!failed && isPlan && <textarea disabled={resolving} className="island-field" aria-label="Optional feedback or requested changes" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback or requested changes" rows={2} />}
-      {(localError || interaction.error) && !failed && <p className="island-note" role="alert">{localError ?? interaction.error?.message}</p>}
-      {failed && localError && <p className="island-note" role="alert">{localError}</p>}
-      {resolving && submissionUi.kicker && <p className="island-note" role="status">{submissionUi.kicker}</p>}
+      {(localError || interaction.error) && !failed && <p className="island-note">{localError ?? interaction.error?.message}</p>}
+      {failed && localError && <p className="island-note">{localError}</p>}
+      {resolving && submissionUi.kicker && <p className="island-note">{submissionUi.kicker}</p>}
       <AskActions
         variant={variant}
         disabled={resolving}
