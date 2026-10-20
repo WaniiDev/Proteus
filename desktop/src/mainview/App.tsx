@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { DEFAULT_MODEL_ID } from "../shared/constants";
 import type { ChatMessage, MemoryScope, OrbState, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { rpc } from "./lib/bridge";
+import { useScrollbars } from "./ds-app/useScrollbars";
 import { createRuntimeSnapshotTransport } from "./lib/runtime-snapshot-transport";
 import { reconcileQueuedDrafts, type QueuedDraft } from "./lib/composer-ui";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -58,6 +59,7 @@ function ignoreRpc(promise: Promise<unknown>): void {
 }
 
 export default function App() {
+  useScrollbars();
   const [view, setView] = useState<View>("companion");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
