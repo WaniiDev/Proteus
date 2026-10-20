@@ -17,7 +17,7 @@ describe("application scrollbar system", () => {
   it("keeps scrollbars compact, rounded, and high-contrast compatible", () => {
     expect(css).toContain("*::-webkit-scrollbar { width: 10px; height: 10px; }");
     expect(css).toContain("min-height: 36px;");
-    expect(css).toContain("border-radius: var(--r-pill);");
+    expect(css).toContain("border-radius: var(--app-r-pill);");
     expect(css).toContain("@media (forced-colors: active)");
     expect(css).toContain("scrollbar-color: auto;");
   });

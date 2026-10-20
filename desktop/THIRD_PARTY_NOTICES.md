@@ -5,7 +5,7 @@
 Plus Jakarta Sans, Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans).
 JetBrains Mono, Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
 
-Both are licensed under the SIL Open Font License, Version 1.1, available with an FAQ at https://openfontlicense.org.
+Both (including the Latin Extended subsets from the @fontsource-variable packages) are licensed under the SIL Open Font License, Version 1.1, available with an FAQ at https://openfontlicense.org.
 
 ```
 PREAMBLE
