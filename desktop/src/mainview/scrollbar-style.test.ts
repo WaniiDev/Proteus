@@ -1,30 +1,35 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
 
-const css = readFileSync(new URL("./proteus.css", import.meta.url), "utf8");
+const root = new URL(".", import.meta.url).pathname;
 
-describe("application scrollbar system", () => {
-  it("defines neutral scrollbar states and applies them globally", () => {
-    expect(css).toContain("--scrollbar-thumb:");
-    expect(css).toContain("--scrollbar-thumb-hover:");
-    expect(css).toContain("--scrollbar-thumb-active:");
-    expect(css).toContain("scrollbar-width: thin;");
-    expect(css).toContain("scrollbar-color: var(--scrollbar-thumb) transparent;");
-    expect(css).toContain("*::-webkit-scrollbar-thumb:hover");
-    expect(css).toContain("*::-webkit-scrollbar-thumb:active");
+function appCssFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    if (name === "ds" || name === "node_modules") return [];
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return appCssFiles(path);
+    return name.endsWith(".css") ? [path] : [];
+  });
+}
+
+describe("scrollbar system", () => {
+  it("sets no scrollbar-width or scrollbar-color in app CSS outside ds/", () => {
+    const files = appCssFiles(root);
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const css = readFileSync(file, "utf8");
+      expect(css).not.toMatch(/scrollbar-(width|color)/);
+      expect(css).not.toContain("--scrollbar-thumb");
+      expect(css).not.toContain("::-webkit-scrollbar");
+    }
   });
 
-  it("keeps scrollbars compact, rounded, and high-contrast compatible", () => {
-    expect(css).toContain("*::-webkit-scrollbar { width: 10px; height: 10px; }");
-    expect(css).toContain("min-height: 36px;");
-    expect(css).toContain("border-radius: var(--r-pill);");
-    expect(css).toContain("@media (forced-colors: active)");
-    expect(css).toContain("scrollbar-color: auto;");
-  });
-
-  it("uses the current navigation's compact conversation scrollbar", () => {
-    const sidebarCss = readFileSync(new URL("./sidebar.css", import.meta.url), "utf8");
-    expect(sidebarCss).toMatch(/\.app-nav__session-list[^}]*scrollbar-width:\s*thin/s);
-    expect(css).not.toContain(".sb-menu");
+  it("keeps the scrollbar section in ds/bundle.css", () => {
+    const css = readFileSync(join(root, "ds/bundle.css"), "utf8");
+    expect(css).toContain("/* ---------- Scrollbars");
+    expect(css).toContain('[data-scrollbar="on"]::-webkit-scrollbar-thumb');
+    expect(css).toContain('[data-scrollbar="fading"]::-webkit-scrollbar-thumb');
+    expect(css).toMatch(/forced-colors: active\) \{\s*::-webkit-scrollbar-thumb[^}]*CanvasText/);
   });
 });
