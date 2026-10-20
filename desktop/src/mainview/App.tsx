@@ -14,6 +14,7 @@ import { FilesDialog } from "./components/conversation/FilesDialog";
 import { AnswerIntentStateContext, answerIntentKey, type AnswerIntentEvent, type AnswerIntentState } from "./components/answer";
 import { Companion } from "./views/Companion";
 import { ProjectsView } from "./views/ProjectsView";
+import { MemoryView } from "./views/MemoryView";
 import { SettingsView, type SettingsSection } from "./views/SettingsView";
 
 const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
@@ -72,7 +73,7 @@ export default function App() {
   useScrollbars();
   const [view, setView] = useState<View>("companion");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
-  const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
+  const [memoryScope, setMemoryScope] = useState<MemoryScope | undefined>();
   const [input, setInput] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [, setOrbState] = useState<OrbState>("idle");
@@ -282,9 +283,8 @@ export default function App() {
     });
   };
   const handleOpenProjectMemory = (projectId: string) => {
-    setSettingsMemoryScope({ kind: "project", projectId });
-    setSettingsSection("memory");
-    setView("settings");
+    setMemoryScope({ kind: "project", projectId });
+    setView("memory");
   };
   const renderedSnapshot = useMemo<RuntimeSnapshot>(() => {
     if (localMessages.size === 0) return snapshot;
@@ -299,7 +299,7 @@ export default function App() {
     <>
       <div className="app-shell">
         <div className="ambient" aria-hidden="true"><i /><i /><i /></div>
-        <Sidebar view={view} settingsSection={settingsSection} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onMemory={() => { setSettingsMemoryScope(undefined); setSettingsSection("memory"); setView("settings"); }} onSettings={() => { if (settingsSection === "memory") { setSettingsMemoryScope(undefined); setSettingsSection("providers"); } setView("settings"); }} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} messages={snapshot.messages} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onPin={(threadId, pinned) => ignoreRpc(rpc.request["threads.pin"]({ threadId, pinned }))} onDeleteRequest={setDeleteTarget} />
+        <Sidebar view={view} disabled={snapshot.activeRun !== null || creatingChat} onView={handleNavigate} onMemory={() => { setMemoryScope(undefined); setView("memory"); }} onSettings={() => setView("settings")} onCreate={handleCreate} threads={snapshot.threads} activeThreadId={snapshot.activeThreadId} messages={snapshot.messages} onSwitch={(threadId) => ignoreRpc(rpc.request["threads.select"]({ threadId }))} onRename={handleRename} onPin={(threadId, pinned) => ignoreRpc(rpc.request["threads.pin"]({ threadId, pinned }))} onDeleteRequest={setDeleteTarget} />
         <main className="app-stage">
           <div className={viewLeaving ? "view is-leaving" : "view"}>
           {shownView === "companion" && (
@@ -315,7 +315,7 @@ export default function App() {
               onTransportRetry={() => transportRetryRef.current()}
               onSend={handleSend}
               onAbort={() => ignoreRpc(rpc.request["chat.abort"]())}
-              onSettings={() => handleNavigate("settings")} onProviders={() => { setSettingsMemoryScope(undefined); setSettingsSection("providers"); handleNavigate("settings"); }} onModels={() => { setSettingsMemoryScope(undefined); setSettingsSection("models"); handleNavigate("settings"); }} onProjects={() => handleNavigate("projects")}
+              onSettings={() => handleNavigate("settings")} onProviders={() => { setSettingsSection("providers"); handleNavigate("settings"); }} onModels={() => { setSettingsSection("models"); handleNavigate("settings"); }} onProjects={() => handleNavigate("projects")}
               onOrbState={setOrbState}
               onRetry={(messageId) => ignoreRpc(rpc.request["chat.retry"]({ messageId }))}
               onContinue={(messageId) => ignoreRpc(rpc.request["chat.continue"]({ messageId }))}
@@ -334,7 +334,8 @@ export default function App() {
             </AnswerIntentStateContext.Provider>
           )}
           {shownView === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
-          {shownView === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          {shownView === "memory" && <MemoryView scope={memoryScope} />}
+          {shownView === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={setSettingsSection} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
           </div>
         </main>
       </div>

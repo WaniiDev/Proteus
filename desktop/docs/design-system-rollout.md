@@ -81,6 +81,17 @@ ADR 0003 is accepted. The work is:
 
 The prototype's `genBlockOk` and `genAnswerOk` are the reference for the schema's limits.
 
+## Listed deviations from the prototype (Settings and Memory)
+
+- **Appearance keeps System, Day and Night.** The prototype has Day and Night only. `implementation.md` follows `prefers-color-scheme`, so System stays as the default choice.
+- **Developer has extras the prototype lacks** (the diagnostics log, copy and clear actions), because the runtime reports real events.
+- **Memory is a destination of its own**, as in the prototype, not a Settings tab. Settings keeps four tabs. Edit stays beside Forget on a saved item (the prototype has Forget only).
+- **Forgetting one item still confirms in a modal.** The prototype forgets at once and shows a "Forgotten" toast; move it onto `useToast()` once `ds/Toast` is merged.
+- **Model rows and the thinking slider use an app modifier for the disabled look** (`.list-row.model-row:disabled`, `.settings-effort.is-locked`), because the system has no `.list-row:disabled`. Upstream: add it to the List component.
+- **"Use a device code" stays on a signed-out Codex row.** The prototype has Sign in only; the device flow has no other entry (it is otherwise offered only after a failed sign-in).
+- **A stored key that was rejected offers "Remove saved key"**, and a Codex sign-in that is configured but unreachable keeps "Disconnect", so neither gets stuck.
+- **Refresh lives at the foot of the Models list** ("Refresh models"); the prototype has no refresh.
+
 ## Each phase ships when
 
 - Every screen it touched passes the system's **Done means** checklist (Day and Night against the card, keyboard, reduced motion, reduced transparency, more contrast, forced colours, copy, states covered by tests).

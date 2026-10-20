@@ -493,8 +493,8 @@ body { overflow: hidden; }
 .resolved-title { color: var(--ink); }
 .resolved-text { min-width: 0; overflow-wrap: anywhere; }
 /* Settings: the scroll area, the two-beat tab body, and layout for rows the DS leaves to the app. */
-.settings-view { flex: 1 1 0; min-height: 0; overflow-y: auto; }
-.settings-page .page-head { max-width: none; margin-bottom: 0; }
+.settings-view, .memory-view { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+.settings-page .page-head, .memory-page .page-head { max-width: none; margin-bottom: 0; }
 .settings-page .segmented { align-self: flex-start; }
 .settings-body { animation: p-view var(--dur-reveal) var(--ease-out) backwards; transition: opacity var(--dur-exit) var(--ease-in), transform var(--dur-exit) var(--ease-in); }
 .settings-body.is-leaving { opacity: 0; transform: translateY(-4px); pointer-events: none; }
@@ -502,10 +502,18 @@ body { overflow: hidden; }
 .provider-key-form { display: flex; gap: 8px; }
 .provider-key-form .input { flex: 1; min-width: 0; }
 .provider-auth-line { margin: 0; color: var(--body); font-size: 13.5px; }
-.provider-auth-code { padding: 12px 14px; border-radius: var(--r-lg); background: var(--surface-sunk); font: 500 20px/1.2 var(--font-mono); letter-spacing: 3px; }
+.provider-auth-code { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: var(--r-lg); background: var(--surface-sunk); font: 500 20px/1.2 var(--font-mono); letter-spacing: 3px; }
 .provider-auth-link { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
 .provider-auth-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-effort { flex: 1 1 240px; max-width: 300px; }
+/* A run is going: the DS has no .list-row:disabled, so model rows and the thinking slider take the disabled look here. */
+.list-row.model-row:disabled { opacity: var(--o-disabled); cursor: not-allowed; }
+.settings-effort.is-locked { opacity: var(--o-disabled); cursor: not-allowed; }
+.settings-effort.is-locked input { cursor: not-allowed; }
+.models-foot { display: flex; align-items: center; gap: 12px; }
+.models-foot > .btn { margin-left: auto; }
+.models-foot > .list-note { margin: 0; }
+.memory-surface .segmented { justify-self: start; }
 .diagnostic-actions { display: inline-flex; gap: 4px; margin-right: -12px; }
 .diagnostic-log { overflow-x: auto; max-height: 480px; overflow-y: auto; }
 .diagnostic-entry + .diagnostic-entry { border-top: 1px solid var(--line-soft); }

@@ -122,7 +122,8 @@ describe("ProjectsView", () => {
     expect(view).toContain('rpc.request["memory.get"]({ scope: { kind: "project", projectId: selected.id } })');
     expect(view).toContain("onOpenMemory(selected.id)");
     expect(app).toContain('createChat({ kind: "project", projectId }');
-    expect(app).toContain('setSettingsSection("memory")');
+    expect(app).toContain('setMemoryScope({ kind: "project", projectId })');
+    expect(app).toContain('setView("memory")');
   });
 
   test("a project page lists its skills as List rows when a chat in it is active", async () => {

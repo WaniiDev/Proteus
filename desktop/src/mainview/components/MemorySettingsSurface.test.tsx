@@ -57,7 +57,8 @@ describe("memory settings on Page + List", () => {
     expect(html).toContain("list-row switch");
     expect(html).toContain("Memory is on");
     expect(html).toContain("Proteus can reuse what you save here.");
-    expect(html).toContain("Nothing is learned silently.");
+    expect(html).not.toContain("Nothing is learned silently.");
+    expect(html).not.toContain("Removes every saved item");
     expect(html).toContain('role="tablist"');
     expect(html).toContain("Everywhere");
     expect(html).toContain("row-compose");
@@ -143,9 +144,10 @@ describe("memory settings behaviour", () => {
     const trigger = button(h.host, "Clear Everywhere");
     await act(async () => trigger.focus());
     await act(async () => trigger.click());
-    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Clear Everywhere?");
+    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Clear this space?");
+    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Everything saved in Everywhere will be forgotten. Other spaces are not affected.");
     const cancel = button(h.host, "Cancel");
-    const confirm = button(h.host.querySelector<HTMLElement>(".modal")!, "Clear");
+    const confirm = button(h.host.querySelector<HTMLElement>(".modal")!, "Clear space");
     expect(document.activeElement).toBe(cancel);
     const tab = async (shiftKey = false) => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true })); });
     await tab(true);

@@ -17,7 +17,7 @@ Screenshot (1280x800, server must be running; `BASE_URL` overrides the origin):
     cd desktop && NODE_PATH=$(npm root -g) node preview/shoot.mjs <outDir> [scenario[:view],...] [--themes=light,dark]
 
 Default list: `empty,thread,running,ask,settings:providers,settings:models,projects:projects,long`, each in light and dark.
-`view` is `projects`, `providers`, `models`, `memory` or `developer`. Chromium comes from
+`view` is `projects`, `memory` (the sidebar destination), `providers`, `models`, `appearance` or `developer`. Chromium comes from
 `/opt/pw-browsers/chromium` (override with `CHROMIUM=<path>`).
 
 Mutations (select, rename, delete and create thread, model, provider and reasoning select) update the

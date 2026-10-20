@@ -13,9 +13,11 @@ export type EffortSliderProps = {
   onTopLevel?: () => void;
   /** Hide the description line; the consumer places it elsewhere. */
   compact?: boolean;
+  /** Locked (for example during a run): the range cannot move and the keys do nothing. */
+  disabled?: boolean;
 };
 
-export function EffortSlider({ model, levels, value, onChange, onTopLevel, compact }: EffortSliderProps): ReactElement {
+export function EffortSlider({ model, levels, value, onChange, onTopLevel, compact, disabled }: EffortSliderProps): ReactElement {
   const offered = orderedLevels(levels);
   const count = offered.length;
   const index = levelIndex(offered, value);
@@ -46,7 +48,7 @@ export function EffortSlider({ model, levels, value, onChange, onTopLevel, compa
   };
   const handleKey = (event: KeyboardEvent<HTMLInputElement>) => {
     const target = keyTarget(event.key);
-    if (target === null || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (disabled || target === null || event.altKey || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
     const next = offered[target];
     if (next && next !== current) onChange(next);
@@ -64,6 +66,7 @@ export function EffortSlider({ model, levels, value, onChange, onTopLevel, compa
             value={index}
             aria-label={`Thinking for ${model}`}
             aria-valuetext={effortValueText(current, top)}
+            disabled={disabled}
             onChange={handle}
             onKeyDown={handleKey}
           />
