@@ -12,6 +12,15 @@ export interface OrbFX {
 // These boot values intentionally match the original prototype so the production orb
 // starts with the same framing and liquid character.
 export const ORB_CAMERA_DISTANCE = 3.15;
+// The canvas is this many times the orb's box so displacement, pulses and the done swell are never
+// cut off square at the canvas edge.
+export const ORB_CANVAS_BLEED = 2;
+
+// Camera distance that keeps a unit sphere's silhouette the same size inside the bled canvas as it was
+// at ORB_CAMERA_DISTANCE inside the unbled box.
+export function orbCameraDistance(base = ORB_CAMERA_DISTANCE, bleed = ORB_CANVAS_BLEED): number {
+  return 1 / Math.sin(Math.atan(Math.tan(Math.asin(1 / base)) / bleed));
+}
 export const ORB_INITIAL_FX = {
   amp: 0.14,
   speed: 0.45,
@@ -211,8 +220,8 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
 
   const resize = () => {
     if (!renderer || !camera || disposed) return;
-    const width = floatEl.clientWidth || 220;
-    const height = floatEl.clientHeight || 220;
+    const width = (floatEl.clientWidth || 220) * ORB_CANVAS_BLEED;
+    const height = (floatEl.clientHeight || 220) * ORB_CANVAS_BLEED;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
@@ -332,8 +341,8 @@ export function mountOrb(floatEl: HTMLElement, canvas: HTMLCanvasElement): OrbFX
     renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance" });
     if (!renderer.getContext()) throw new Error("WebGL context unavailable");
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(42, 1, 0.1, 10);
-    camera.position.z = ORB_CAMERA_DISTANCE;
+    camera = new THREE.PerspectiveCamera(42, 1, 0.1, 20);
+    camera.position.z = orbCameraDistance();
     uniforms = {
       uTime: { value: 0 },
       uAmp: { value: cur.amp },

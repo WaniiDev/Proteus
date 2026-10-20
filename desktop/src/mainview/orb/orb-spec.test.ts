@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { orbStates } from "../../shared/contracts";
-import { ORB_CAMERA_DISTANCE, ORB_INITIAL_FX } from "./orb3d";
+import { ORB_CAMERA_DISTANCE, ORB_CANVAS_BLEED, ORB_INITIAL_FX, orbCameraDistance } from "./orb3d";
 import { ORB_STATES } from "./orb-spec";
 
 describe("orb visual contract", () => {
@@ -69,6 +69,17 @@ describe("orb visual contract", () => {
   it("matches the prototype camera and initial liquid values", () => {
     expect(ORB_CAMERA_DISTANCE).toBe(3.15);
     expect(ORB_INITIAL_FX).toMatchObject({ amp: 0.14, speed: 0.45, freq: 1.15 });
+  });
+
+  it("lets the canvas bleed past the orb box without changing the orb's size", async () => {
+    // Silhouette radius as a fraction of the orb box's half-size, for a unit sphere at distance z, FOV 42deg,
+    // drawn on a canvas `bleed` times the box.
+    const silhouette = (z: number, bleed: number) => (Math.tan(Math.asin(1 / z)) / Math.tan((21 * Math.PI) / 180)) * bleed;
+    expect(ORB_CANVAS_BLEED).toBeGreaterThanOrEqual(2);
+    expect(silhouette(orbCameraDistance(), ORB_CANVAS_BLEED)).toBeCloseTo(silhouette(ORB_CAMERA_DISTANCE, 1), 6);
+
+    const css = await Bun.file(new URL("../proteus.css", import.meta.url)).text();
+    expect(css).toMatch(/\.orb-canvas\s*\{[^}]*inset:\s*-50%;[^}]*width:\s*200%;[^}]*height:\s*200%;[^}]*pointer-events:\s*none;/s);
   });
 
   it("exposes whether the live renderer is WebGL or the CSS fallback", async () => {
