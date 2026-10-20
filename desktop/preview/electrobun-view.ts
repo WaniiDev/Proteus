@@ -75,12 +75,22 @@ const handlers: Record<string, (params: Params) => unknown> = {
 
 function memoryState() {
   const stamp = "2026-10-20T10:00:00.000Z";
+  const entry = (id: string, category: string, content: string) => ({ id, category, content, createdAt: stamp, updatedAt: stamp });
   return {
     enabled: true,
-    scopes: [{
-      scope: { kind: "global" }, key: "global", label: "Global memory", status: "active",
-      entries: [{ id: "mem1", category: "preference", content: "Prefers short answers with a clear next step.", createdAt: stamp, updatedAt: stamp }],
-    }],
+    scopes: [
+      {
+        scope: { kind: "global" }, key: "global", label: "Everywhere", status: "active",
+        entries: [
+          entry("mem1", "preference", "Prefers short answers with a clear next step."),
+          entry("mem2", "preference", "Writes in British English."),
+          entry("mem3", "profile", "Product designer at a small studio in Leeds."),
+          entry("mem4", "work-style", "Wants the plan first, then the work."),
+        ],
+      },
+      { scope: { kind: "project", projectId: "p1" }, key: "project:p1", label: "Website redesign", status: "active", entries: [entry("mem5", "project-context", "The launch is in the second week of November.")] },
+      { scope: { kind: "project", projectId: "p2" }, key: "project:p2", label: "Tax documents", status: "active", entries: [] },
+    ],
   };
 }
 

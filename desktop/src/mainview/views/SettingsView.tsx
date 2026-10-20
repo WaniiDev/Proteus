@@ -1,9 +1,8 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Check, ChevronRight } from "lucide-react";
-import type { MemoryScope, ProviderId, ProviderModel, RuntimeSnapshot } from "../../shared/contracts";
+import type { ProviderId, ProviderModel, RuntimeSnapshot } from "../../shared/contracts";
 import { DiagnosticsPanel } from "../components/DiagnosticsPanel";
 import { EffortSlider } from "../components/EffortSlider";
-import { MemorySettingsPanel } from "../components/MemorySettingsPanel";
 import { ProviderSelect, ProviderSettings, browsableModels } from "../components/ProviderSettings";
 import { Segmented, segmentedTabId } from "../components/ds/Segmented";
 import { exitMs } from "../components/ds/motion";
@@ -12,12 +11,11 @@ import { effortHint, nearestLevel, NO_ADJUSTABLE_THINKING, orderedLevels } from 
 import { MODEL_SORT_OPTIONS, modelSortLabel, sortProviderModels, type ModelSort } from "../lib/model-sorting";
 import type { ThemeChoice } from "../lib/theme";
 
-export type SettingsSection = "providers" | "models" | "memory" | "appearance" | "developer";
+export type SettingsSection = "providers" | "models" | "appearance" | "developer";
 
 const TABS: { value: SettingsSection; label: string }[] = [
   { value: "providers", label: "Providers" },
   { value: "models", label: "Models" },
-  { value: "memory", label: "Memory" },
   { value: "appearance", label: "Appearance" },
   { value: "developer", label: "Developer" },
 ];
@@ -31,7 +29,7 @@ const THEME_OPTIONS: { value: ThemeChoice; label: string }[] = [
 /** The search row appears once a catalog is long enough to need it. */
 const SEARCH_FROM = 6;
 
-const price = (value: number | undefined) => (value === undefined ? "—" : `$${(value * 1_000_000).toFixed(2)}/M`);
+const price = (value: number) => `$${(value * 1_000_000).toFixed(2)}/M`;
 
 function AppearanceTab() {
   const { choice, setChoice } = useTheme();
@@ -52,7 +50,6 @@ type SettingsViewProps = {
   snapshot: RuntimeSnapshot;
   section: SettingsSection;
   onSection: (section: SettingsSection) => void;
-  memoryScope?: MemoryScope;
   apiKey: string;
   setApiKey: (value: string) => void;
   onConnect: (event: FormEvent<HTMLFormElement>) => void;
@@ -66,7 +63,7 @@ type SettingsViewProps = {
   onSelectReasoning: (effort: RuntimeSnapshot["selectedReasoningEffort"]) => void;
 };
 
-export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: SettingsViewProps) {
+export function SettingsView({ snapshot, section, onSection, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider, onSelectModel, onSelectReasoning }: SettingsViewProps) {
   const [shown, setShown] = useState<SettingsSection>(section);
   const [leaving, setLeaving] = useState(false);
   const [viewId, setViewId] = useState<ProviderId>(snapshot.selectedProviderId);
@@ -112,6 +109,7 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
   const level = nearestLevel(levels, snapshot.selectedReasoningEffort);
   const showEffort = browseConnected && selected?.providerId === browseId;
 
+  const refreshButton = <button className="btn btn-ghost sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}>{snapshot.status === "loading-models" ? "Refreshing…" : "Refresh models"}</button>;
   const browse = (providerId: ProviderId) => { setBrowseId(providerId); onSection("models"); };
 
   const body = shown === "providers"
@@ -119,10 +117,6 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
     : shown === "models"
       ? <>
           <div className="list-group">
-            <span className="list-label">
-              <span className="kicker">Models from</span>
-              <button className="btn btn-ghost sm" type="button" onClick={onRefresh} disabled={snapshot.status === "loading-models"}>{snapshot.status === "loading-models" ? "Refreshing…" : "Refresh"}</button>
-            </span>
             <ProviderSelect snapshot={snapshot} value={browseId} onChange={(id) => { setBrowseId(id); setModelSearch(""); }} label="Providers" />
             {browseConnected && catalog.length > 0 && (
               <>
@@ -140,10 +134,10 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
                   {displayedModels.map((model) => {
                     const chosen = isChosen(model);
                     return (
-                      <button type="button" role="radio" aria-checked={chosen} tabIndex={model.id === tabStopId ? 0 : -1} className="list-row" key={model.id} disabled={runActive} onClick={() => chooseModel(model)}>
+                      <button type="button" role="radio" aria-checked={chosen} tabIndex={model.id === tabStopId ? 0 : -1} className="list-row model-row" key={model.id} disabled={runActive} onClick={() => chooseModel(model)}>
                         <span className="row-copy">
                           <span className="row-title">{model.providerId === "codex" ? model.baseModelId ?? model.name : model.name}</span>
-                          <span className="row-sub">{model.description ?? model.rawId}</span>
+                          <span className="row-sub">{model.description ? `${model.description} · ` : ""}<span className="mono">{model.providerId === "codex" ? model.baseModelId ?? model.rawId : model.rawId}</span></span>
                         </span>
                         <span className="row-end"><Check className="i sm row-check" aria-hidden="true" /></span>
                       </button>
@@ -151,13 +145,21 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
                   })}
                   {displayedModels.length === 0 && <div className="list-row quiet">No models match.</div>}
                 </div>
-                <p className="list-note">
-                  {runActive ? "Models can change once the current run finishes." : "Applies to this conversation and becomes the default for new chats."}
-                  {showEffort && selected && ` ${selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}${selected.providerId === "openrouter" ? ` · Prompt ${price(selected.promptPrice)} · Completion ${price(selected.completionPrice)}` : ""}.`}
-                </p>
+                <div className="models-foot">
+                  {runActive || showEffort ? <p className="list-note">
+                    {runActive ? "Models can change once the current run finishes. " : ""}
+                    {showEffort && selected && `${selected.contextLength ? `${selected.contextLength.toLocaleString()} token context` : selected.providerId === "codex" ? "Context managed by Codex" : "Provider-managed context"}${selected.providerId === "openrouter" && selected.promptPrice !== undefined && selected.completionPrice !== undefined ? ` · Prompt ${price(selected.promptPrice)} · Completion ${price(selected.completionPrice)}` : ""}.`}
+                  </p> : null}
+                  {refreshButton}
+                </div>
               </>
             )}
-            {browseConnected && catalog.length === 0 && <div className="list"><div className="list-row quiet">No models loaded yet. Refresh to load them.</div></div>}
+            {browseConnected && catalog.length === 0 && (
+              <>
+                <div className="list"><div className="list-row quiet">No models loaded yet. Use Refresh models to load them.</div></div>
+                <div className="models-foot">{refreshButton}</div>
+              </>
+            )}
             {!browseConnected && browseProvider && (
               <div className="list">
                 <button type="button" className="list-row quiet" onClick={() => { setViewId(browseProvider.id); onSection("providers"); }}>
@@ -173,11 +175,11 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
                 <div className="list-row">
                   <span className="row-copy">
                     <span className="row-title">Reasoning effort</span>
-                    <span className="row-sub wrap">{level ? effortHint(level) : NO_ADJUSTABLE_THINKING}</span>
+                    <span className="row-sub wrap">{level ? `${effortHint(level)} Each chat can change it from the Island.${runActive ? " Locked until the current run finishes." : ""}` : NO_ADJUSTABLE_THINKING}</span>
                   </span>
                   {level && (
-                    <div className="settings-effort">
-                      <EffortSlider model={selected.name} levels={levels} value={level} compact onChange={(next) => { if (!runActive) onSelectReasoning(next); }} />
+                    <div className={`settings-effort${runActive ? " is-locked" : ""}`}>
+                      <EffortSlider model={selected.name} levels={levels} value={level} compact disabled={runActive} onChange={(next) => { if (!runActive) onSelectReasoning(next); }} />
                     </div>
                   )}
                 </div>
@@ -185,11 +187,9 @@ export function SettingsView({ snapshot, section, onSection, memoryScope, apiKey
             </div>
           )}
         </>
-      : shown === "memory"
-        ? <MemorySettingsPanel focusScope={memoryScope} />
-        : shown === "appearance"
-          ? <AppearanceTab />
-          : <DiagnosticsPanel />;
+      : shown === "appearance"
+        ? <AppearanceTab />
+        : <DiagnosticsPanel />;
 
   return (
     <section className="settings-view">

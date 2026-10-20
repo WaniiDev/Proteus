@@ -96,6 +96,9 @@ describe("provider settings", () => {
     expect(html).toContain('type="password"');
     expect(html).toContain(">Connect</button>");
     expect(html).toContain("Proteus checks the key by loading your OpenRouter models. Only a key that works is saved.");
+    expect(html).toContain('placeholder="Paste your key · sk-or-v1-…"');
+    expect(html).toContain("Add an OpenRouter API key");
+    expect(html).not.toContain("Disconnect");
     expect(html).not.toContain("Browse");
     expect(html).not.toContain("field-error");
   });
@@ -123,6 +126,14 @@ describe("provider settings", () => {
     expect(html).toContain('aria-invalid="true"');
     expect(html).toContain("dot err");
     expect(html).toContain("That key wasn’t accepted.");
+  });
+
+  test("a rejected key that is still stored can be removed, under a name that says what it does", () => {
+    const value = disconnected(snapshot(), "openrouter");
+    value.providers = value.providers.map((p) => p.id === "openrouter" ? { ...p, configured: true } : p);
+    const html = render(value, "openrouter");
+    expect(html).toContain("Remove saved key");
+    expect(html).not.toContain(">Disconnect<");
   });
 
   test("never renders a credential value beyond the controlled password input", async () => {
@@ -164,6 +175,7 @@ describe("provider settings", () => {
   test("codex not connected offers Sign in and a device code, with the expand closed", () => {
     const html = render(disconnected(snapshot(), "codex"), "codex");
     expect(html).toContain("Sign in</button>");
+    expect(html).toContain("Sign in with ChatGPT to load the Codex models.");
     expect(html).toContain("Use a device code");
     expect(html).not.toContain("list-expand is-open");
     expect(html).not.toContain('type="password"');
@@ -175,9 +187,11 @@ describe("provider settings", () => {
     const html = render(value, "codex");
     expect(html).toContain("Waiting for you");
     expect(html).toContain("list-expand is-open");
-    expect(html).toContain("QX7K-4MPD");
+    expect(html).toContain("Waiting for you in the browser");
+    expect(html).toContain("Approve the sign-in in your browser. If it asks for a code, enter:");
+    expect(html).toMatch(/<div class="provider-auth-code"><code>QX7K-4MPD<\/code><button[^>]*>Cancel<\/button><\/div>/);
     expect(html).toContain("Open authorization page");
-    expect(html).toContain("Cancel");
+    expect(html.match(/>Cancel</g)?.length).toBe(1);
     expect(html).not.toContain("Paste callback URL or code");
   });
 
@@ -198,7 +212,7 @@ describe("provider settings", () => {
     expect(html).toContain("Not connected");
     expect(html).toContain("dot err");
     expect(html).toContain('role="alert"');
-    expect(html).toContain("The sign-in timed out.");
+    expect(html.match(/The sign-in timed out\./g)?.length).toBe(1);
     expect(html).toContain("Try browser again");
     expect(html).toContain("Try a device code");
   });
@@ -279,6 +293,26 @@ describe("provider settings behaviour", () => {
     await h.setSnapshot({ ...snapshot(), status: "validating-key" });
     await h.setSnapshot(snapshot());
     expect(open()).toBe(false);
+    await h.unmount();
+  });
+
+  test("an empty Connect stays enabled and says why in words, without calling connect; typing clears it", async () => {
+    const h = await mount(disconnected(snapshot(), "openrouter"), "openrouter");
+    const connect = () => Array.from(h.host.querySelectorAll("button")).find((b) => b.textContent === "Connect")!;
+    expect(connect().disabled).toBe(false);
+    await act(async () => { h.host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(h.calls).toEqual([]);
+    expect(h.host.querySelector('[role="alert"]')?.textContent).toBe("Paste your OpenRouter key to connect. It starts with sk-or-v1-.");
+    expect(h.host.querySelector('input[type="password"]')!.getAttribute("aria-invalid")).toBe("true");
+    await type(h.host.querySelector<HTMLInputElement>('input[type="password"]')!, "s");
+    expect(h.host.querySelector('[role="alert"]')).toBeNull();
+    await h.unmount();
+  });
+
+  test("the replacement field has no hint line under it", async () => {
+    const h = await mount(snapshot(), "openrouter");
+    await act(async () => Array.from(h.host.querySelectorAll("button")).find((b) => b.textContent === "Replace key")!.click());
+    expect(h.host.querySelector(".field-hint")).toBeNull();
     await h.unmount();
   });
 

@@ -29,6 +29,16 @@ export const PROVIDER_HOW: Record<ProviderId, string> = {
   codex: "ChatGPT account",
 };
 
+/** What the field says when Connect is pressed with nothing in it: the reason, in words. */
+const EMPTY_KEY_MESSAGE: Partial<Record<ProviderId, string>> = {
+  openrouter: "Paste your OpenRouter key to connect. It starts with sk-or-v1-.",
+};
+const KEY_PLACEHOLDER: Partial<Record<ProviderId, string>> = {
+  openrouter: "Paste your key · sk-or-v1-…",
+};
+
+const CODEX_CODE_LINE = "Approve the sign-in in your browser. If it asks for a code, enter:";
+
 const KEY_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(["openrouter"]);
 /** Runtime errors that come from checking a key; they belong under the key field. */
 const KEY_ERROR_CODES: ReadonlySet<RuntimeError["code"]> = new Set(["invalid-credential", "forbidden", "offline", "timeout", "rate-limited", "secure-store-unavailable"]);
@@ -85,16 +95,16 @@ function subLine(snapshot: RuntimeSnapshot, provider: ProviderStatus, view: Prov
   const how = PROVIDER_HOW[provider.id];
   const auth = snapshot.providerAuth?.providerId === provider.id ? snapshot.providerAuth : null;
   switch (view.state) {
-    case "connected": return provider.detail ?? `${how} saved · ${modelCount(snapshot, provider.id)}`;
+    case "connected": return provider.detail ?? (KEY_PROVIDERS.has(provider.id) ? `${how} saved · ${modelCount(snapshot, provider.id)}` : "Signed in with ChatGPT");
     case "checking": return KEY_PROVIDERS.has(provider.id) ? "Checking the key with the provider…" : provider.detail ?? "Checking the connection…";
-    case "connecting": return auth?.instructions ?? "Finishing the sign-in…";
-    case "waiting": return "Finish signing in with your ChatGPT account.";
-    case "failed": return "Authorization failed.";
+    case "connecting": return auth?.status === "completing" ? "Finishing the sign-in…" : "Opening your browser…";
+    case "waiting": return "Waiting for you in the browser";
+    case "failed": return auth?.error ?? "Authorization failed.";
     case "unavailable": return provider.detail ?? "This provider can’t be reached right now.";
     default:
       if (rejected) return "That key wasn’t accepted.";
       if (KEY_PROVIDERS.has(provider.id)) return provider.detail ?? `Add an ${provider.name} API key to use its models.`;
-      return provider.detail ?? "Sign in with your ChatGPT account to use Codex.";
+      return "Sign in with ChatGPT to load the Codex models.";
   }
 }
 
@@ -103,6 +113,7 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
   const [replacing, setReplacing] = useState(false);
   const [authorizationCode, setAuthorizationCode] = useState("");
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const [emptyKey, setEmptyKey] = useState(false);
   const fieldId = useId();
   const wasChecking = useRef(false);
 
@@ -126,6 +137,7 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
 
   const choose = (next: ProviderId) => {
     setReplacing(false);
+    setEmptyKey(false);
     setAuthorizationCode("");
     if (onViewChange) onViewChange(next);
     else setOwnView(next);
@@ -140,8 +152,18 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
   const hintId = `${fieldId}-hint`;
   const errorId = `${fieldId}-error`;
 
+  const emptyMessage = emptyKey ? EMPTY_KEY_MESSAGE[provider.id] ?? "Paste your key to connect." : null;
+  const fieldError = emptyMessage ?? shownError?.message ?? null;
+  // A rejected key is still stored: Disconnect only means something for a connected provider, so this one is named for what it does.
+  const removable = provider.configured && !provider.verified && !locked && view.state !== "connecting" && view.state !== "waiting";
+
   const submitKey = (event: FormEvent<HTMLFormElement>) => {
     setDismissedError(null);
+    if (!apiKey.trim()) {
+      event.preventDefault();
+      setEmptyKey(true);
+      return;
+    }
     onConnect(event);
   };
 
@@ -155,20 +177,20 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
           <span className={rowDot ? `dot ${rowDot}` : "dot"} />
           <span className="row-copy">
             <span className="row-title">{view.label}</span>
-            <span className="row-sub">{sub}</span>
+            <span className="row-sub" role={view.state === "failed" ? "alert" : undefined}>{sub}</span>
           </span>
           <span className="row-end">
             {provider.verified && (isCurrent
               ? <span className="badge">In use</span>
               : <button className="btn btn-secondary sm" type="button" disabled={snapshot.activeRun !== null} onClick={() => onSelectProvider(provider.id)}>Use</button>)}
-            {isKeyProvider && provider.verified && !replacing && <button className="btn btn-ghost sm" type="button" disabled={locked} onClick={() => { setDismissedError(null); setReplacing(true); }}>Replace key</button>}
+            {isKeyProvider && provider.verified && !replacing && <button className="btn btn-ghost sm" type="button" disabled={locked} onClick={() => { setDismissedError(null); setEmptyKey(false); setReplacing(true); }}>Replace key</button>}
             {!isKeyProvider && !provider.configured && !auth && view.state !== "checking" && (
               <>
                 <button className="btn btn-secondary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Sign in</button>
                 <button className="btn btn-ghost sm" type="button" onClick={() => onStartCodexAuth("device")}>Use a device code</button>
               </>
             )}
-            {provider.configured && <button className="btn btn-danger-ghost sm" type="button" disabled={locked} onClick={() => onDisconnect(provider.id)}>Disconnect</button>}
+            {(provider.verified || removable) && <button className="btn btn-danger-ghost sm" type="button" disabled={locked} onClick={() => onDisconnect(provider.id)}>{provider.verified || !isKeyProvider ? "Disconnect" : "Remove saved key"}</button>}
           </span>
         </div>
 
@@ -181,24 +203,24 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
                     className="input"
                     type="password"
                     value={apiKey}
-                    onChange={(event) => { setApiKey(event.target.value); if (errorKey) setDismissedError(errorKey); }}
-                    placeholder={replacing ? "Enter a replacement key" : "sk-or-v1-…"}
+                    onChange={(event) => { setApiKey(event.target.value); setEmptyKey(false); if (errorKey) setDismissedError(errorKey); }}
+                    placeholder={replacing ? "Enter a replacement key" : KEY_PLACEHOLDER[provider.id] ?? "Paste your key"}
                     autoComplete="off"
                     aria-label={`${provider.name} API key`}
-                    aria-invalid={shownError ? true : undefined}
-                    aria-describedby={shownError ? errorId : hintId}
+                    aria-invalid={fieldError ? true : undefined}
+                    aria-describedby={fieldError ? errorId : replacing ? undefined : hintId}
                     disabled={locked}
                     tabIndex={keyFieldOpen ? undefined : -1}
                   />
-                  <button className="btn btn-primary" type="submit" disabled={locked || !apiKey.trim()} tabIndex={keyFieldOpen ? undefined : -1}>
+                  <button className="btn btn-primary" type="submit" disabled={locked} tabIndex={keyFieldOpen ? undefined : -1}>
                     {checking && <span className="spinner" aria-hidden="true" />}
                     {checking ? "Checking…" : replacing ? "Replace" : "Connect"}
                   </button>
-                  {replacing && <button className="btn btn-ghost" type="button" disabled={locked} onClick={() => { setReplacing(false); setApiKey(""); }}>Cancel</button>}
+                  {replacing && <button className="btn btn-ghost" type="button" disabled={locked} onClick={() => { setReplacing(false); setEmptyKey(false); setApiKey(""); }}>Cancel</button>}
                 </form>
-                {shownError
-                  ? <span className="field-error" id={errorId} role="alert">{shownError.message}</span>
-                  : <span className="field-hint" id={hintId}>Proteus checks the key by loading your {provider.name} models. Only a key that works is saved.</span>}
+                {fieldError
+                  ? <span className="field-error" id={errorId} role="alert">{fieldError}</span>
+                  : !replacing && <span className="field-hint" id={hintId}>Proteus checks the key by loading your {provider.name} models. Only a key that works is saved.</span>}
               </div>
             </div>
           </div>
@@ -210,10 +232,13 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
               <div className="list-expand-body">
                 {auth && (
                   <>
-                    {auth.status === "failed"
-                      ? <span className="field-error" role="alert">{auth.error ?? "Authorization failed."}</span>
-                      : <p className="provider-auth-line">{auth.instructions ?? "Finish signing in with your ChatGPT account."}</p>}
-                    {auth.code && <div className="provider-auth-code"><code>{auth.code}</code></div>}
+                    {auth.status !== "failed" && <p className="provider-auth-line">{auth.code && auth.status === "waiting" ? CODEX_CODE_LINE : auth.instructions ?? "Finish signing in with your ChatGPT account."}</p>}
+                    {auth.code && auth.status !== "failed" && (
+                      <div className="provider-auth-code">
+                        <code>{auth.code}</code>
+                        <button className="btn btn-ghost sm" type="button" onClick={onCancelCodexAuth}>Cancel</button>
+                      </div>
+                    )}
                     {auth.url && auth.status !== "failed" && <a className="provider-auth-link" href={auth.url} target="_blank" rel="noreferrer">Open authorization page <ExternalLink className="i sm" aria-hidden="true" /></a>}
                     {auth.mode === "browser" && auth.status === "waiting" && (
                       <form className="provider-key-form" onSubmit={(event) => { event.preventDefault(); onSubmitCodexAuth(authorizationCode); setAuthorizationCode(""); }}>
@@ -221,14 +246,16 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
                         <button className="btn btn-primary" type="submit" disabled={!authorizationCode.trim()}>Submit</button>
                       </form>
                     )}
-                    <div className="provider-auth-actions">
-                      {auth.status === "failed"
-                        ? <>
-                            <button className="btn btn-secondary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Try browser again</button>
-                            <button className="btn btn-ghost sm" type="button" onClick={() => onStartCodexAuth("device")}>Try a device code</button>
-                          </>
-                        : <button className="btn btn-ghost sm" type="button" onClick={onCancelCodexAuth}>Cancel</button>}
-                    </div>
+                    {(auth.status === "failed" || !auth.code) && (
+                      <div className="provider-auth-actions">
+                        {auth.status === "failed"
+                          ? <>
+                              <button className="btn btn-secondary sm" type="button" onClick={() => onStartCodexAuth("browser")}>Try browser again</button>
+                              <button className="btn btn-ghost sm" type="button" onClick={() => onStartCodexAuth("device")}>Try a device code</button>
+                            </>
+                          : <button className="btn btn-ghost sm" type="button" onClick={onCancelCodexAuth}>Cancel</button>}
+                      </div>
+                    )}
                   </>
                 )}
               </div>

@@ -1,3 +1,4 @@
+import { ToastProvider } from "./ds/Toast";
 import { describe, expect, test } from "bun:test";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -57,7 +58,8 @@ describe("memory settings on Page + List", () => {
     expect(html).toContain("list-row switch");
     expect(html).toContain("Memory is on");
     expect(html).toContain("Proteus can reuse what you save here.");
-    expect(html).toContain("Nothing is learned silently.");
+    expect(html).not.toContain("Nothing is learned silently.");
+    expect(html).not.toContain("Removes every saved item");
     expect(html).toContain('role="tablist"');
     expect(html).toContain("Everywhere");
     expect(html).toContain("row-compose");
@@ -118,22 +120,20 @@ describe("memory settings behaviour", () => {
     document.body.append(host);
     const root = createRoot(host);
     const saved = (name: string) => async (...args: unknown[]) => { calls.push(`${name}:${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join("|")}`); return true; };
-    await act(async () => root.render(<MemorySettingsSurface state={state} focusKey="global" busy={false} error={null}
-      onSetEnabled={saved("enabled")} onCreate={saved("create")} onUpdate={saved("update")} onDelete={saved("delete")} onReset={saved("reset")} />));
+    await act(async () => root.render(<ToastProvider><MemorySettingsSurface state={state} focusKey="global" busy={false} error={null}
+      onSetEnabled={saved("enabled")} onCreate={saved("create")} onUpdate={saved("update")} onDelete={saved("delete")} onReset={saved("reset")} /></ToastProvider>));
     return { host, unmount: async () => { await act(async () => root.unmount()); host.remove(); } };
   }
   const button = (host: HTMLElement, label: string) => Array.from(host.querySelectorAll("button")).find((b) => b.textContent === label || b.getAttribute("aria-label") === label)!;
 
-  test("Forget asks first, then deletes the entry", async () => {
+  test("Forget deletes the entry at once and says Forgotten in a toast", async () => {
     const calls: string[] = [];
     const h = await mount(memoryState(), calls);
     await act(async () => button(h.host, "Forget Lead status updates with blockers.").click());
-    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Forget this?");
-    expect(calls).toEqual([]);
-    await act(async () => button(h.host.querySelector<HTMLElement>(".modal")!, "Forget").click());
     await act(async () => { await settle(); });
     expect(calls).toEqual(["delete:{\"kind\":\"global\"}|memory-1"]);
     expect(h.host.querySelector('[role="dialog"]')).toBeNull();
+    expect(h.host.querySelector(".toast strong")?.textContent).toBe("Forgotten");
     await h.unmount();
   });
 
@@ -143,9 +143,10 @@ describe("memory settings behaviour", () => {
     const trigger = button(h.host, "Clear Everywhere");
     await act(async () => trigger.focus());
     await act(async () => trigger.click());
-    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Clear Everywhere?");
+    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Clear this space?");
+    expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Everything saved in Everywhere will be forgotten. Other spaces are not affected.");
     const cancel = button(h.host, "Cancel");
-    const confirm = button(h.host.querySelector<HTMLElement>(".modal")!, "Clear");
+    const confirm = button(h.host.querySelector<HTMLElement>(".modal")!, "Clear space");
     expect(document.activeElement).toBe(cancel);
     const tab = async (shiftKey = false) => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true })); });
     await tab(true);

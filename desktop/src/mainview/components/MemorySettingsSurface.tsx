@@ -7,6 +7,7 @@ import {
   type MemorySettingsState,
 } from "../../shared/contracts";
 import { Modal } from "./ds/Modal";
+import { useToast } from "./ds/Toast";
 import { Segmented } from "./ds/Segmented";
 import { Select } from "./ds/Select";
 
@@ -22,7 +23,7 @@ const CATEGORY_LABELS: Record<MemoryCategory, string> = {
 /** Up to this many spaces fit a Segmented; more use a Select. */
 const SEGMENTED_MAX = 4;
 
-type PendingRemoval = { kind: "entry"; entry: MemoryEntry } | { kind: "scope" };
+type PendingRemoval = { kind: "scope" };
 
 type MemorySettingsSurfaceProps = {
   state: MemorySettingsState;
@@ -41,6 +42,7 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
   const [category, setCategory] = useState<MemoryCategory>("preference");
   const [content, setContent] = useState("");
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
+  const toast = useToast();
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
 
   useEffect(() => setSelectedKey(focusKey), [focusKey]);
@@ -77,11 +79,8 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
   };
   const confirmRemoval = () => {
     if (!selected || !pendingRemoval) return;
-    const operation = pendingRemoval.kind === "entry"
-      ? () => onDelete(selected.scope, pendingRemoval.entry.id)
-      : () => onReset(selected.scope);
     setPendingRemoval(null);
-    void operation();
+    void onReset(selected.scope);
   };
 
   const scopeLine = (scope: MemorySettingsState["scopes"][number]) => scope.scope.kind === "global" ? "All workspaces" : scope.status === "archived" ? "Archived project" : "Project only";
@@ -104,7 +103,6 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
           <span className="switch-track" aria-hidden="true" />
         </label>
       </div>
-      <p className="list-note">Nothing is learned silently. Every saved item stays visible, editable and removable, and existing chats are never changed.</p>
     </div>
 
     {error && <p className="field-error" role="alert">{error}</p>}
@@ -147,7 +145,7 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
           <span className="row-copy"><span className="row-title wrap">{entry.content}</span></span>
           <span className="row-end">
             <button className="btn btn-ghost sm" type="button" disabled={busy} aria-label={`Edit ${entry.content}`} onClick={() => beginEdit(entry)}>Edit</button>
-            <button className="btn btn-danger-ghost sm" type="button" disabled={busy} aria-label={`Forget ${entry.content}`} onClick={() => setPendingRemoval({ kind: "entry", entry })}>Forget</button>
+            <button className="btn btn-danger-ghost sm" type="button" disabled={busy} aria-label={`Forget ${entry.content}`} onClick={() => selected && void onDelete(selected.scope, entry.id).then((done) => { if (done) toast("Forgotten"); })}>Forget</button>
           </span>
         </div>)}</div>
       </div>)}
@@ -156,17 +154,16 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
 
       {selected.entries.length > 0 && <div className="list-group">
         <div className="list"><button className="list-row danger" type="button" disabled={busy} onClick={() => setPendingRemoval({ kind: "scope" })}>Clear {name}</button></div>
-        <p className="list-note">Removes every saved item in this space. Other spaces stay as they are.</p>
       </div>}
     </>}
 
     {pendingRemoval && <Modal
-      title={pendingRemoval.kind === "entry" ? "Forget this?" : `Clear ${name}?`}
-      confirmLabel={pendingRemoval.kind === "entry" ? "Forget" : "Clear"}
+      title="Clear this space?"
+      confirmLabel="Clear space"
       onCancel={() => setPendingRemoval(null)}
       onConfirm={confirmRemoval}
     >
-      {pendingRemoval.kind === "entry" ? "It will no longer be used in future conversations." : "This removes every saved item in this space. Other spaces stay unchanged."}
+      Everything saved in {name} will be forgotten. Other spaces are not affected.
     </Modal>}
   </div>;
 }

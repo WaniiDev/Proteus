@@ -5,12 +5,10 @@ import { groupSessions, relativeTime } from "../lib/ui-helpers";
 import { Menu, MenuItem, MenuRule } from "./ds/Menu";
 import { useToast } from "./ds/Toast";
 
-export type View = "companion" | "projects" | "settings";
+export type View = "companion" | "projects" | "memory" | "settings";
 
 type SidebarProps = {
   view: View;
-  /** Which settings tab is showing, so Memory and Settings can tell which one is current. */
-  settingsSection?: string;
   disabled: boolean;
   onView: (view: View) => void;
   onMemory?: () => void;
@@ -88,7 +86,7 @@ function RenameField({ initial, label, onCommit, onCancel }: { initial: string; 
   return <input ref={ref} className="session-rename" aria-label={label} defaultValue={initial} maxLength={120} onKeyDown={onKeyDown} onBlur={onBlur} />;
 }
 
-export function Sidebar({ view, settingsSection, disabled, onView, onMemory, onSettings, onCreate, threads = [], activeThreadId, messages = [], onSwitch, onRename, onPin, onDeleteRequest }: SidebarProps) {
+export function Sidebar({ view, disabled, onView, onMemory, onSettings, onCreate, threads = [], activeThreadId, messages = [], onSwitch, onRename, onPin, onDeleteRequest }: SidebarProps) {
   const [menu, setMenu] = useState<{ threadId: string; anchor: HTMLButtonElement } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const menuThread = menu ? threads.find((thread) => thread.id === menu.threadId) : undefined;
@@ -115,7 +113,6 @@ export function Sidebar({ view, settingsSection, disabled, onView, onMemory, onS
     if (next && next !== thread.title) onRename?.(thread.id, next);
   };
   const copyTranscript = () => { void navigator.clipboard?.writeText(transcriptText(messages)).then(() => toast("Transcript copied")).catch(() => undefined); };
-  const memoryCurrent = view === "settings" && settingsSection === "memory";
 
   return <aside className="sidebar app-sidebar" aria-label="Main">
     <button type="button" className="btn btn-glass block" onClick={onCreate} disabled={disabled} title={disabled ? "Available when the current response finishes" : undefined}><Plus className="i" aria-hidden="true" />New chat</button>
@@ -147,8 +144,8 @@ export function Sidebar({ view, settingsSection, disabled, onView, onMemory, onS
     </div>
     <div className="sidebar-foot">
       <Destination icon={Folder} label="Projects" current={view === "projects"} onClick={() => onView("projects")} />
-      <Destination icon={Brain} label="Memory" current={memoryCurrent} onClick={() => (onMemory ?? (() => onView("settings")))()} />
-      <Destination icon={Settings2} label="Settings" current={view === "settings" && !memoryCurrent} onClick={() => (onSettings ?? (() => onView("settings")))()} />
+      <Destination icon={Brain} label="Memory" current={view === "memory"} onClick={() => (onMemory ?? (() => onView("memory")))()} />
+      <Destination icon={Settings2} label="Settings" current={view === "settings"} onClick={() => (onSettings ?? (() => onView("settings")))()} />
     </div>
     {menu && menuThread && <Menu key={menu.threadId} className="session-menu" label={`Actions for ${menuThread.title}`} anchor={menu.anchor} onClose={() => setMenu(null)}>
       <MenuItem icon={<Pencil className="i sm" aria-hidden="true" />} onSelect={() => setEditingId(menuThread.id)}>Rename</MenuItem>
