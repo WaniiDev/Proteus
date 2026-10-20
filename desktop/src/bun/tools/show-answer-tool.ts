@@ -7,14 +7,19 @@ export type ShowAnswerResult =
   | { ok: true; shown: true }
   | { ok: false; shown: false; retry: boolean; message: string };
 
-type ToolContext = { agent?: { threadId?: string; messages?: Array<{ role?: unknown }> } } | undefined;
+export const RUN_ID_CONTEXT_KEY = "proteus-run-id";
+
+type ToolContext = { agent?: { threadId?: string; messages?: Array<{ role?: unknown }> }; requestContext?: { get?: (key: string) => unknown } } | undefined;
 
 /**
- * Failures are counted per turn: the thread plus how many user messages the conversation holds, so a failure in one
- * turn never costs the retry in the next.
+ * Failures are counted per turn, keyed by the run id the runtime puts in the request context when a run starts, so a
+ * failure in one turn never costs the retry in the next. The conversation window (memory lastMessages) plateaus, so
+ * counting user messages is only the fallback for a caller that supplies no run id.
  */
 function turnKey(context: ToolContext): string {
   const agent = context?.agent;
+  const runId = context?.requestContext?.get?.(RUN_ID_CONTEXT_KEY);
+  if (typeof runId === "string" && runId) return `${agent?.threadId ?? "default"}:run:${runId}`;
   const userMessages = Array.isArray(agent?.messages) ? agent.messages.filter((message) => message?.role === "user").length : 0;
   return `${agent?.threadId ?? "default"}:${userMessages}`;
 }

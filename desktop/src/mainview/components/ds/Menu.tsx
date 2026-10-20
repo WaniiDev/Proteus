@@ -92,7 +92,13 @@ export function Menu({ label, anchor, placement = "beside", className = "", onCl
       leave(true);
       return;
     }
-    if (event.key === "Tab") { leave(false); return; }
+    if (event.key === "Tab") {
+      // The menu is portalled to the end of <body>: move focus to the anchor now and let the default Tab carry on from there,
+      // so focus continues to the anchor's neighbour rather than falling off the end of the page.
+      if (anchor?.isConnected) anchor.focus({ preventScroll: true });
+      leave(false);
+      return;
+    }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? []);
     if (items.length === 0) return;

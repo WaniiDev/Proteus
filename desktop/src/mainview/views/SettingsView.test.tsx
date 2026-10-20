@@ -82,4 +82,35 @@ describe("SettingsView", () => {
     await act(async () => root.unmount());
     host.remove();
   });
+
+  test("Models: the radio list is one tab stop and arrows, Home and End move and select", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const onSelectModel = mock((_id: string) => undefined);
+    const root = createRoot(host);
+    await act(async () => root.render(<SettingsView {...props("models")} onSelectModel={onSelectModel} />));
+    const radios = () => Array.from(host.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+    expect(radios().length).toBeGreaterThan(1);
+    const stops = radios().filter((radio) => radio.tabIndex === 0);
+    expect(stops).toHaveLength(1);
+    expect(stops[0]!.getAttribute("aria-checked")).toBe("true");
+    const press = async (key: string) => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
+    const count = radios().length;
+    await act(async () => stops[0]!.focus());
+    await press("End");
+    expect(document.activeElement).toBe(radios()[count - 1]!);
+    expect(onSelectModel).toHaveBeenCalledTimes(1);
+    await press("Home");
+    expect(document.activeElement).toBe(radios()[0]!);
+    await press("ArrowUp");
+    expect(document.activeElement).toBe(radios()[count - 1]!);
+    await press("ArrowRight");
+    expect(document.activeElement).toBe(radios()[0]!);
+    await press("ArrowDown");
+    expect(document.activeElement).toBe(radios()[1]!);
+    expect(onSelectModel).toHaveBeenCalledTimes(5);
+    await act(async () => root.unmount());
+    host.remove();
+  });
 });

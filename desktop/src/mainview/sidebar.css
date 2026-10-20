@@ -1,7 +1,6 @@
 /* Sidebar layout only: the pane, rows, menu and destinations are design-system classes. */
 .app-sidebar { flex: 0 0 248px; width: 248px; max-width: 280px; height: calc(100% - 2 * var(--s-3)); margin: var(--s-3) 0 var(--s-3) var(--s-3); min-height: 0; }
 .app-sidebar .menu-reason { margin-left: auto; color: var(--muted); font-size: 12px; }
-.app-nav-scrim { display: none; }
 
 @media (max-width: 839px) {
   .app-sidebar { flex-basis: auto; width: auto; max-width: none; height: auto; max-height: 50%; margin: var(--s-3) var(--s-3) 0; }

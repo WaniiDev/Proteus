@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   memoryCategories,
   type MemoryCategory,
@@ -6,6 +6,7 @@ import {
   type MemoryScope,
   type MemorySettingsState,
 } from "../../shared/contracts";
+import { Modal } from "./ds/Modal";
 import { Segmented } from "./ds/Segmented";
 import { Select } from "./ds/Select";
 
@@ -41,7 +42,6 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
   const [content, setContent] = useState("");
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
-  const cancelRemovalRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => setSelectedKey(focusKey), [focusKey]);
   const selected = state.scopes.find((scope) => scope.key === selectedKey) ?? state.scopes[0];
@@ -50,13 +50,6 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
       setSelectedKey(state.scopes[0].key);
     }
   }, [selectedKey, state]);
-  useEffect(() => {
-    if (!pendingRemoval) return;
-    cancelRemovalRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setPendingRemoval(null); };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [pendingRemoval]);
   const groupedEntries = useMemo(() => memoryCategories.map((name) => ({
     category: name,
     entries: selected?.entries.filter((entry) => entry.category === name) ?? [],
@@ -167,15 +160,13 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
       </div>}
     </>}
 
-    {pendingRemoval && <div className="scrim">
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="memory-removal-title">
-        <h2 id="memory-removal-title">{pendingRemoval.kind === "entry" ? "Forget this?" : `Clear ${name}?`}</h2>
-        <p>{pendingRemoval.kind === "entry" ? "It will no longer be used in future conversations." : "This removes every saved item in this space. Other spaces stay unchanged."}</p>
-        <div className="modal-actions">
-          <button ref={cancelRemovalRef} className="btn btn-secondary sm" type="button" onClick={() => setPendingRemoval(null)}>Cancel</button>
-          <button className="btn btn-danger sm" type="button" onClick={confirmRemoval}>{pendingRemoval.kind === "entry" ? "Forget" : "Clear"}</button>
-        </div>
-      </section>
-    </div>}
+    {pendingRemoval && <Modal
+      title={pendingRemoval.kind === "entry" ? "Forget this?" : `Clear ${name}?`}
+      confirmLabel={pendingRemoval.kind === "entry" ? "Forget" : "Clear"}
+      onCancel={() => setPendingRemoval(null)}
+      onConfirm={confirmRemoval}
+    >
+      {pendingRemoval.kind === "entry" ? "It will no longer be used in future conversations." : "This removes every saved item in this space. Other spaces stay unchanged."}
+    </Modal>}
   </div>;
 }

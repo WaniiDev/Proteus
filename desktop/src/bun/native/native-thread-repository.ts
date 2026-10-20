@@ -50,22 +50,55 @@ export class NativeThreadRepository {
     return result.messages;
   }
 
+  /**
+   * LibSQL's updateThread reads, merges and writes without a lock, so concurrent writers to one thread lose keys.
+   * Every metadata or title write for a thread goes through this per-thread queue.
+   */
+  private readonly writeQueues = new Map<string, Promise<unknown>>();
+
+  /** Run a thread's metadata read-merge-write exclusively; all writers (pin, rename, UI state) share this queue. */
+  exclusive<T>(threadId: string, task: () => Promise<T>): Promise<T> {
+    const run = (this.writeQueues.get(threadId) ?? Promise.resolve()).catch(() => undefined).then(task);
+    const tracked = run.catch(() => undefined).finally(() => {
+      if (this.writeQueues.get(threadId) === tracked) this.writeQueues.delete(threadId);
+    });
+    this.writeQueues.set(threadId, tracked);
+    return run;
+  }
+
+  /**
+   * Serialised partial write. `build` sees the stored thread and returns only the keys this writer owns
+   * (the store merges metadata shallowly). Returns null when the thread does not exist.
+   */
+  updateMetadata(threadId: string, build: (thread: StorageThreadType) => { title?: string; metadata: Record<string, unknown> }): Promise<StorageThreadType | null> {
+    return this.exclusive(threadId, async () => {
+      const thread = await this.memory.getThreadById({ threadId, resourceId: this.resourceId });
+      if (!thread) return null;
+      const { title, metadata } = build(thread);
+      return this.memory.updateThread({ id: threadId, ...(title === undefined ? {} : { title }), metadata });
+    });
+  }
+
   async rename(threadId: string, title: string): Promise<StorageThreadType> {
-    if (!(await this.get(threadId))) throw new Error("Conversation not found");
     // Title only: the store merges metadata shallowly, so no metadata is read back and rewritten here.
-    return this.memory.updateThread({ id: threadId, title, metadata: {} });
+    const updated = await this.updateMetadata(threadId, () => ({ title, metadata: {} }));
+    if (!updated) throw new Error("Conversation not found");
+    return updated;
   }
 
   /**
    * Pin metadata lives beside the title and the UI state, under its own key, so UI-state saves keep it.
-   * Only that key is written (the store merges metadata shallowly), so a concurrent UI-state save is never reverted.
+   * Only that key is written (the store merges metadata shallowly) and every writer is serialised per thread.
    */
   async setPinned(threadId: string, pinnedAt: string | null): Promise<StorageThreadType> {
-    const thread = await this.get(threadId);
-    if (!thread) throw new Error("Conversation not found");
-    const record: PinRecord = { pinnedAt, restoreUpdatedAt: thread.updatedAt.toISOString(), writtenAt: new Date().toISOString() };
-    // Unpinning writes an explicit null pinnedAt rather than omitting the key, because a merge cannot remove a key.
-    return withOriginalRecency(await this.memory.updateThread({ id: threadId, metadata: { [THREAD_PIN_METADATA_KEY]: record } }));
+    const updated = await this.updateMetadata(threadId, (thread) => {
+      const current = withOriginalRecency(thread);
+      // Unpinning writes an explicit null pinnedAt rather than omitting the key, because a merge cannot remove a key.
+      const record: PinRecord = { pinnedAt, restoreUpdatedAt: current.updatedAt.toISOString(), writtenAt: new Date().toISOString() };
+      return { metadata: { [THREAD_PIN_METADATA_KEY]: record } };
+    });
+    if (!updated) throw new Error("Conversation not found");
+    return withOriginalRecency(updated);
   }
 
   delete(threadId: string): Promise<void> {

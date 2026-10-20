@@ -183,24 +183,27 @@ export class ThreadService {
         const startedAt = performance.now();
         this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "start", threadId, durationMs: startedAt - queuedAt });
         try {
-          const memoryStore = await this.storage.getStore("memory");
-          const thread = await memoryStore?.getThreadById({
-            threadId,
-            resourceId: RESOURCE_ID,
-          });
-          if (failOnError && (!thread || !memoryStore)) throw new Error("Conversation metadata storage is unavailable");
-          if (thread && memoryStore) {
-            // Write only the key this path owns: the store merges metadata shallowly, so a concurrent pin is never overwritten.
-            // The legacy key can only be cleared by an explicit null; mapThread and loadThreadState treat null as absent.
-            await memoryStore.updateThread({
-              id: threadId,
-              metadata: {
-                [THREAD_METADATA_KEY]: next,
-                ...(thread.metadata && LEGACY_THREAD_METADATA_KEY in thread.metadata ? { [LEGACY_THREAD_METADATA_KEY]: null } : {}),
-              },
+          // LibSQL reads, merges and writes without a lock, so this write joins the repository's per-thread queue with pin and rename.
+          await this.threadRepo.exclusive(threadId, async () => {
+            const memoryStore = await this.storage.getStore("memory");
+            const thread = await memoryStore?.getThreadById({
+              threadId,
+              resourceId: RESOURCE_ID,
             });
-          }
-          if (thread && memoryStore) this.savedState.set(threadId, next);
+            if (failOnError && (!thread || !memoryStore)) throw new Error("Conversation metadata storage is unavailable");
+            if (thread && memoryStore) {
+              // Write only the key this path owns: the store merges metadata shallowly, so a concurrent pin is never overwritten.
+              // The legacy key can only be cleared by an explicit null; mapThread and loadThreadState treat null as absent.
+              await memoryStore.updateThread({
+                id: threadId,
+                metadata: {
+                  [THREAD_METADATA_KEY]: next,
+                  ...(thread.metadata && LEGACY_THREAD_METADATA_KEY in thread.metadata ? { [LEGACY_THREAD_METADATA_KEY]: null } : {}),
+                },
+              });
+            }
+            if (thread && memoryStore) this.savedState.set(threadId, next);
+          });
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "end", threadId, durationMs: performance.now() - startedAt });
         } catch (error) {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "error", threadId, durationMs: performance.now() - startedAt, payload: error });

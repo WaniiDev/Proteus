@@ -23,11 +23,17 @@ export function measureOrbPlacement(anchor: RectLike, container: Pick<DOMRect, "
   };
 }
 
+/**
+ * Exponential approach rate per second. A gap g settles in ln(g / ORB_SETTLE_PX) / rate, so 11.5 settles a 1200px gap in
+ * about 560ms, inside ORB_FLY_MS with room for frame quantisation (9 took 667-700ms for 800-1000px).
+ */
+const ORB_RATE = 11.5;
+
 /** Frame-rate-independent smoothing without overshoot or transition restarts. */
 export function advanceOrbPlacement(current: OrbPlacement, target: OrbPlacement, elapsedMs: number, reducedMotion = false): OrbPlacement {
   if (reducedMotion) return target;
   const elapsedSeconds = Math.min(Math.max(elapsedMs, 0) / 1_000, 0.05);
-  const blend = 1 - Math.exp(-9 * elapsedSeconds);
+  const blend = 1 - Math.exp(-ORB_RATE * elapsedSeconds);
   const next = {
     x: current.x + (target.x - current.x) * blend,
     y: current.y + (target.y - current.y) * blend,

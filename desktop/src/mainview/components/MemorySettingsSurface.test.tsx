@@ -109,6 +109,8 @@ describe("memory settings on Page + List", () => {
   });
 });
 
+const settle = () => new Promise((resolve) => setTimeout(resolve, 220));
+
 describe("memory settings behaviour", () => {
   async function mount(state: MemorySettingsState, calls: string[]) {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -129,20 +131,38 @@ describe("memory settings behaviour", () => {
     expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Forget this?");
     expect(calls).toEqual([]);
     await act(async () => button(h.host.querySelector<HTMLElement>(".modal")!, "Forget").click());
+    await act(async () => { await settle(); });
     expect(calls).toEqual(["delete:{\"kind\":\"global\"}|memory-1"]);
     expect(h.host.querySelector('[role="dialog"]')).toBeNull();
     await h.unmount();
   });
 
-  test("Escape and Cancel dismiss the dialog without deleting", async () => {
+  test("the dialog traps Tab, closes on Escape and Cancel, and returns focus to the trigger", async () => {
     const calls: string[] = [];
     const h = await mount(memoryState(), calls);
-    await act(async () => button(h.host, "Clear Everywhere").click());
+    const trigger = button(h.host, "Clear Everywhere");
+    await act(async () => trigger.focus());
+    await act(async () => trigger.click());
     expect(h.host.querySelector('[role="dialog"]')?.textContent).toContain("Clear Everywhere?");
-    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    const cancel = button(h.host, "Cancel");
+    const confirm = button(h.host.querySelector<HTMLElement>(".modal")!, "Clear");
+    expect(document.activeElement).toBe(cancel);
+    const tab = async (shiftKey = false) => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true })); });
+    await tab(true);
+    expect(document.activeElement).toBe(confirm);
+    await tab();
+    expect(document.activeElement).toBe(cancel);
+
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    expect(h.host.querySelector(".scrim")!.className).toContain("is-leaving");
+    await act(async () => { await settle(); });
     expect(h.host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(button(h.host, "Clear Everywhere"));
+
     await act(async () => button(h.host, "Clear Everywhere").click());
     await act(async () => button(h.host, "Cancel").click());
+    await act(async () => { await settle(); });
+    expect(h.host.querySelector('[role="dialog"]')).toBeNull();
     expect(calls).toEqual([]);
     await h.unmount();
   });

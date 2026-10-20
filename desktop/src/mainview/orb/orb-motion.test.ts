@@ -44,6 +44,27 @@ describe("persistent orb motion", () => {
     }
   });
 
+  it("settles within the dur-fly budget for any gap up to 1200px, without overshoot", () => {
+    for (const gap of [200, 800, 900, 1_000, 1_200]) {
+      const dock: OrbPlacement = { x: 40, y: 40, scaleX: 44 / 220, scaleY: 44 / 220 };
+      const hero: OrbPlacement = { x: 40 + gap, y: 40 + gap, scaleX: 1, scaleY: 1 };
+      for (const frameMs of [1_000 / 60, 1_000 / 30]) {
+        let placement = hero;
+        let elapsed = 0;
+        while (placement !== dock && elapsed < 2_000) {
+          const next = advanceOrbPlacement(placement, dock, frameMs);
+          expect(next.x).toBeGreaterThanOrEqual(dock.x);
+          expect(next.y).toBeGreaterThanOrEqual(dock.y);
+          expect(next.scaleX).toBeGreaterThanOrEqual(dock.scaleX);
+          placement = next;
+          elapsed += frameMs;
+        }
+        expect(placement).toBe(dock);
+        expect(elapsed).toBeLessThanOrEqual(ORB_FLY_MS);
+      }
+    }
+  });
+
   it("re-measures a moving anchor every frame and still lands on it", () => {
     let placement: OrbPlacement = { x: 300, y: 100, scaleX: 1, scaleY: 1 };
     let elapsed = 0;

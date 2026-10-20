@@ -71,6 +71,19 @@ describe("Menu", () => {
     await close();
   });
 
+  test("Tab returns focus to the anchor, lets Tab proceed from there and closes the menu", async () => {
+    const { trigger, close } = await open([]);
+    expect(document.activeElement?.getAttribute("role")).toBe("menuitem");
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => { document.activeElement!.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+    await wait(220);
+    expect(document.querySelector(".menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await close();
+  });
+
   test("an outside press closes it; choosing runs the action once", async () => {
     const log: string[] = [];
     const { close } = await open(log);
