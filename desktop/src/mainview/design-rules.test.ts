@@ -16,7 +16,8 @@
  * landed: file -> count per rule. The baseline ONLY SHRINKS. Each phase that
  * deletes old CSS must lower (or remove) its entries. The test passes when a
  * file's count is at or below its baseline, or the file is gone; it fails when a
- * count grows or a file that is not baselined has any violation.
+ * count grows, a file that is not baselined has any violation, or a count drops
+ * below its baseline without the baseline being lowered (so cleared violations stay cleared).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -26,8 +27,8 @@ type Rule = "colour" | "z-index" | "scrollbar" | "style" | "outline";
 type Counts = Partial<Record<Rule, number>>;
 
 const BASELINE: Record<string, Counts> = {
-  "index.css": { colour: 122, "z-index": 15 },
-  "proteus.css": { colour: 81, "z-index": 8 },
+  "index.css": { colour: 27, "z-index": 6 },
+  "proteus.css": { colour: 30, "z-index": 5 },
 };
 
 /** Custom properties that may be set through `style={{ ... }}`. */
@@ -140,6 +141,17 @@ describe("design-system guardrails", () => {
       }
     }
     expect(grown).toEqual([]);
+  });
+
+  it("keeps the baseline exact, so cleared violations are locked in", () => {
+    const stale: string[] = [];
+    for (const [file, counts] of Object.entries(BASELINE)) {
+      for (const [rule, allowed] of Object.entries(counts) as [Rule, number][]) {
+        const n = found[file]?.[rule] ?? 0;
+        if (n < allowed) stale.push(`${file}: ${rule} ${n} < baseline ${allowed}; lower the baseline`);
+      }
+    }
+    expect(stale).toEqual([]);
   });
 
   it("prints remaining violations versus baseline", () => {
