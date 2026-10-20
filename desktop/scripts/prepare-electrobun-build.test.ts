@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { isProteusWindowsDevBuildDirectory } from "./prepare-electrobun-build";
+import { findProjectRoot, isProteusWindowsDevBuildDirectory } from "./prepare-electrobun-build";
 
 describe("Electrobun Windows watch cleanup", () => {
   const projectRoot = resolve(import.meta.dir, "..");
@@ -22,5 +22,23 @@ describe("Electrobun Windows watch cleanup", () => {
     expect(config).toContain('watch: ["src/mainview", "src/shared"]');
     expect(config).toContain('watchIgnore: ["dist/**"]');
     expect(hook).toContain('"vite", "bin", "vite.js"');
+  });
+
+  test("runs under Hutch's runtime: no Bun-only APIs, triggered by the hook environment", async () => {
+    const hook = await Bun.file(resolve(projectRoot, "scripts", "prepare-electrobun-build.ts")).text();
+    const code = hook.replace(/\/\/.*$/gm, "");
+    for (const bunOnly of ["import.meta.main", "import.meta.dir", "Bun.spawnSync", "process.execPath"]) expect(code).not.toContain(bunOnly);
+    expect(code).toContain("if (process.env.ELECTROBUN_BUILD_ENV) prepareElectrobunBuild();");
+  });
+
+  test("finds the desktop project from the desktop folder or the repo root", () => {
+    expect(findProjectRoot(projectRoot)).toBe(projectRoot);
+    expect(findProjectRoot(resolve(projectRoot, ".."))).toBe(projectRoot);
+  });
+
+  test("the dev and start scripts build the renderer before Electrobun copies dist", async () => {
+    const pkg = await Bun.file(resolve(projectRoot, "package.json")).json();
+    expect(pkg.scripts.dev).toStartWith("vite build && ");
+    expect(pkg.scripts.start).toStartWith("vite build && ");
   });
 });
