@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search } from "lucide-react";
 import type { DiagnosticEntry, DiagnosticsSnapshot } from "../../shared/contracts";
 import { rpc } from "../lib/bridge";
-import { Icon } from "./Icon";
 
 function diagnosticText(entry: DiagnosticEntry): string {
   return [entry.type, entry.phase, entry.threadId, entry.runId, entry.toolCallId, entry.payload === undefined ? "" : JSON.stringify(entry.payload)].filter(Boolean).join(" ").toLowerCase();
@@ -28,25 +26,60 @@ export function DiagnosticsPanel() {
     if (!diagnostics) return;
     void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
   };
-  return <section className="card settings-card diagnostics-card">
-    <div className="settings-section-head"><div><span className="settings-eyebrow">Developer tools</span><h2 className="title-md">Runtime diagnostics</h2><p className="settings-intro">Captures emitted Mastra lifecycle events, tool inputs and outputs, RPC timing, storage timing, and provider-emitted reasoning. Private chain-of-thought is never exposed.</p></div><label className="diagnostics-toggle"><input type="checkbox" checked={diagnostics?.enabled ?? true} onChange={(event) => rpc.request["diagnostics.set-enabled"]({ enabled: event.target.checked }).then(setDiagnostics)} /><span>Capture</span></label></div>
-    <div className="diagnostics-toolbar">
-      <div className="model-search diagnostics-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter events, IDs, or payloads" aria-label="Filter diagnostics" /></div>
-      <select value={source} onChange={(event) => setSource(event.target.value as typeof source)} aria-label="Diagnostic source"><option value="all">All sources</option><option value="mastra">Mastra</option><option value="runtime">Runtime</option><option value="rpc">RPC</option><option value="storage">Storage</option></select>
-      <button className="btn-outline sm" type="button" onClick={refresh}><Icon name="refresh" size={15} /> Refresh</button>
-      <button className="btn-outline sm" type="button" onClick={copyReport}><Icon name="copy" size={15} /> Copy report</button>
-      <button className="btn-outline sm" type="button" onClick={() => rpc.request["diagnostics.export"]().then((result) => setExportPath(result.path))}>Export</button>
-      <button className="btn-danger-ghost" type="button" onClick={() => rpc.request["diagnostics.clear"]().then(setDiagnostics)}>Clear</button>
+  const capturing = diagnostics?.enabled ?? true;
+  return <div className="list-stack">
+    <div className="list-group">
+      <div className="list">
+        <label className="list-row switch">
+          <span className="switch-copy">
+            <strong>{capturing ? "Capturing diagnostics" : "Capture is off"}</strong>
+            <small>Events stay on this device. Credentials are never recorded.</small>
+          </span>
+          <input type="checkbox" checked={capturing} onChange={(event) => rpc.request["diagnostics.set-enabled"]({ enabled: event.target.checked }).then(setDiagnostics)} />
+          <span className="switch-track" aria-hidden="true" />
+        </label>
+      </div>
+      <p className="list-note">Captures Mastra lifecycle events, tool inputs and outputs, RPC and storage timing, and reasoning the provider emits. Private chain-of-thought is never exposed.</p>
     </div>
-    <div className="diagnostics-meta"><span>{entries.length.toLocaleString()} visible events</span>{diagnostics?.filePath && <code>{diagnostics.filePath}</code>}{exportPath && <span>Exported to <code>{exportPath}</code></span>}</div>
-    {error && <p className="settings-note error">{error}</p>}
-    <div className="diagnostics-list" aria-live="polite">
-      {entries.map((entry) => <details className={`diagnostic-entry source-${entry.source}`} key={entry.sequence}>
-        <summary><span className="diagnostic-sequence">#{entry.sequence}</span><span className="diagnostic-source">{entry.source}</span><strong>{entry.type}</strong>{entry.phase && <span>{entry.phase}</span>}{entry.durationMs !== undefined && <time>{entry.durationMs.toFixed(1)} ms</time>}<time>{new Date(entry.timestamp).toLocaleTimeString()}</time></summary>
-        <div className="diagnostic-identifiers">{entry.threadId && <code>thread {entry.threadId}</code>}{entry.runId && <code>run {entry.runId}</code>}{entry.toolCallId && <code>tool {entry.toolCallId}</code>}</div>
-        {entry.payload !== undefined && <pre>{JSON.stringify(entry.payload, null, 2)}</pre>}
-      </details>)}
-      {entries.length === 0 && <p className="diagnostics-empty">No matching events yet. Reproduce the plan approval bug, then inspect the latest events here.</p>}
+
+    <div className="list-group">
+      <div className="list-label">
+        <span className="kicker">Recent events · {entries.length.toLocaleString()}</span>
+        <span className="diagnostic-actions">
+          <button className="btn btn-ghost sm" type="button" onClick={refresh}>Refresh</button>
+          <button className="btn btn-ghost sm" type="button" onClick={copyReport}>Copy report</button>
+          <button className="btn btn-ghost sm" type="button" onClick={() => rpc.request["diagnostics.export"]().then((result) => setExportPath(result.path))}>Export</button>
+        </span>
+      </div>
+      <div className="list">
+        <div className="list-row row-compose">
+          <input className="row-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter events, IDs or payloads" aria-label="Filter diagnostics" />
+          <select className="row-select" value={source} onChange={(event) => setSource(event.target.value as typeof source)} aria-label="Diagnostic source">
+            <option value="all">All sources</option><option value="mastra">Mastra</option><option value="runtime">Runtime</option><option value="rpc">RPC</option><option value="storage">Storage</option>
+          </select>
+        </div>
+      </div>
+      {error && <span className="field-error" role="alert">{error}</span>}
+      <div className="list diagnostic-log" aria-live="polite">
+        {entries.map((entry) => <details className="diagnostic-entry" key={entry.sequence}>
+          <summary className="list-row event">
+            <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleTimeString([], { hour12: false })}</time>
+            <span>{entry.source}</span>
+            <span>{entry.type}{entry.phase ? ` · ${entry.phase}` : ""}{entry.durationMs !== undefined ? ` · ${entry.durationMs.toFixed(1)} ms` : ""}</span>
+          </summary>
+          <div className="diagnostic-detail">
+            {(entry.threadId || entry.runId || entry.toolCallId) && <p>{entry.threadId && <code>thread {entry.threadId}</code>}{entry.runId && <code>run {entry.runId}</code>}{entry.toolCallId && <code>tool {entry.toolCallId}</code>}</p>}
+            {entry.payload !== undefined && <pre>{JSON.stringify(entry.payload, null, 2)}</pre>}
+          </div>
+        </details>)}
+        {entries.length === 0 && <div className="list-row quiet">No matching events yet.</div>}
+      </div>
+      {(diagnostics?.filePath || exportPath) && <p className="list-note">{diagnostics?.filePath && <>Log file <code>{diagnostics.filePath}</code>. </>}{exportPath && <>Exported to <code>{exportPath}</code>.</>}</p>}
     </div>
-  </section>;
+
+    <div className="list-group">
+      <div className="list"><button className="list-row danger" type="button" onClick={() => rpc.request["diagnostics.clear"]().then(setDiagnostics)}>Clear diagnostics</button></div>
+      <p className="list-note">Removes the captured events from this device.</p>
+    </div>
+  </div>;
 }

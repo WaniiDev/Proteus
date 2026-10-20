@@ -563,8 +563,6 @@ main { position: relative; z-index: 1; flex: 1; min-width: 0; }
 .wb-done p { font-size: 14.5px; line-height: 1.55; color: var(--on-dark); }
 
 /* ---------- Settings ---------- */
-.settings-card { margin-bottom: var(--s-base); }
-.settings-card h2 { margin-bottom: var(--s-xs); }
 
 @media (prefers-reduced-motion: reduce) {
   .orb-css, .orb-ring, .orb-orbit, .orb-swirl, .ambient-orb, .wb-empty-orb { animation: none !important; }

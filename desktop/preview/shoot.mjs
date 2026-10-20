@@ -26,9 +26,7 @@ async function open(page, view) {
   if (view === "projects") await page.getByRole("button", { name: "Projects", exact: true }).click();
   else {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    if (view === "models") await page.getByRole("button", { name: /Models & thinking/ }).click();
-    if (view === "memory") await page.getByRole("button", { name: /^Memory/ }).click();
-    if (view === "developer") await page.getByRole("button", { name: /^Developer/ }).click();
+    if (view !== "providers") await page.getByRole("tab", { name: new RegExp(`^${view}`, "i") }).click();
   }
 }
 

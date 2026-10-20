@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Brain } from "lucide-react";
 import type { MemoryScope, MemorySettingsState } from "../../shared/contracts";
 import { rpc } from "../lib/bridge";
 import { MemorySettingsSurface } from "./MemorySettingsSurface";
@@ -36,17 +35,9 @@ export function MemorySettingsPanel({ focusScope }: { focusScope?: MemoryScope }
 
   if (!state) {
     if (!error) {
-      return <section className="memory-control memory-control--loading" aria-busy="true">
-        <div className="memory-control__loading-mark"><Brain size={22} /></div>
-        <strong>Opening your memory library</strong>
-        <p>Loading saved context and project spaces…</p>
-      </section>;
+      return <div className="list" aria-busy="true"><div className="list-row quiet">Opening your memory. Loading saved context and project spaces…</div></div>;
     }
-    return <section className="memory-control memory-control--unavailable" role="alert">
-      <div className="memory-control__loading-mark"><Brain size={22} /></div>
-      <strong>Memory is unavailable</strong>
-      <p>{error} No saved-memory status has been changed.</p>
-    </section>;
+    return <div className="list"><div className="list-row quiet" role="alert"><span className="row-copy"><span className="row-title">Memory is unavailable</span><span className="row-sub wrap">{error} No saved-memory status has been changed.</span></span></div></div>;
   }
 
   return <MemorySettingsSurface
