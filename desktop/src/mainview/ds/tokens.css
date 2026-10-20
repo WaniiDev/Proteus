@@ -1,0 +1,214 @@
+/* Vendored from the Proteus design system (https://claude.ai/artifact/LzFK4X4p6i68rg66ANb1yE), version 1792479946-eecd. Do not edit; update the system and re-copy. */
+/* Proteus — generated from tokens.json */
+:root, [data-theme="light"] {
+  --canvas: #f2f2f4;
+  --surface: #ffffff;
+  --surface-sunk: #e9e9ee;
+  --surface-hover: #f2f2f4;
+  --ink: #0f0f12;
+  --body: #2a2a30;
+  --muted: #66666f;
+  --faint: #8a8a93;
+  --line: #e6e6eb;
+  --line-soft: #eeeef2;
+  --line-strong: #82828b;
+  --primary: #0f0f12;
+  --on-primary: #ffffff;
+  --island: #111114;
+  --island-glass: rgba(17,17,20,.86);
+  --island-raised: #1c1c21;
+  --island-line: #6b6b75;
+  --on-island: #f4f4f6;
+  --on-island-soft: #c9c9d1;
+  --on-island-muted: #a1a1aa;
+  --island-action: #ffffff;
+  --on-island-action: #111114;
+  --ask: #f4c5a8;
+  --focus-ring: #5b4fc4;
+  --focus-ring-island: #c8b8e0;
+  --success: #16a34a;
+  --success-ink: #166534;
+  --success-soft: rgba(22,163,74,.10);
+  --attention: #c2410c;
+  --attention-soft: rgba(194,65,12,.08);
+  --error: #dc2626;
+  --error-ink: #991b1b;
+  --error-soft: rgba(220,38,38,.07);
+  --on-error: #ffffff;
+  --overlay: rgba(15,15,18,.32);
+  --glass: rgba(255,255,255,.72);
+  --glass-line: rgba(15,15,18,.08);
+  --pane: rgba(255,255,255,.46);
+  --pane-active: rgba(255,255,255,.82);
+  --glass-highlight: rgba(255,255,255,.9);
+  --g-mint: #a7e5d3;
+  --g-lavender: #c8b8e0;
+  --g-sky: #a8c8e8;
+  --g-peach: #f4c5a8;
+  --g-rose: #e8b8c4;
+  --g-mint-pale: #d8f3e8;
+  --orb-idle-a: var(--g-mint);
+  --orb-idle-b: var(--g-lavender);
+  --orb-summoned-a: var(--g-sky);
+  --orb-summoned-b: var(--g-lavender);
+  --orb-away-a: #f0efed;
+  --orb-away-b: #e7e5e4;
+  --orb-remembering-a: var(--g-lavender);
+  --orb-remembering-b: var(--g-rose);
+  --orb-verifying-a: var(--g-mint);
+  --orb-verifying-b: var(--g-sky);
+  --orb-speaking-a: var(--g-rose);
+  --orb-speaking-b: var(--g-peach);
+  --orb-listening-a: var(--g-sky);
+  --orb-listening-b: var(--g-mint);
+  --orb-thinking-a: var(--g-lavender);
+  --orb-thinking-b: var(--g-sky);
+  --orb-focusing-a: var(--g-lavender);
+  --orb-focusing-b: var(--g-peach);
+  --orb-working-a: var(--g-peach);
+  --orb-working-b: var(--g-lavender);
+  --orb-drafting-a: var(--g-peach);
+  --orb-drafting-b: var(--g-rose);
+  --orb-waiting-a: #e7e5e4;
+  --orb-waiting-b: #f0efed;
+  --orb-done-a: var(--g-mint);
+  --orb-done-b: var(--g-mint-pale);
+  --orb-interrupted-a: #d6d3d1;
+  --orb-interrupted-b: #e7e5e4;
+  --orb-error-a: var(--g-rose);
+  --orb-error-b: #d6d3d1;
+  --orb-recovery-a: var(--g-lavender);
+  --orb-recovery-b: var(--g-mint);
+  --shadow-xs: 0 1px 3px rgba(15,15,18,.06);
+  --shadow-knob: 0 1px 3px rgba(15,15,18,.25);
+  --shadow-hover: 0 10px 28px rgba(15,15,18,.07);
+  --shadow-island: 0 18px 48px rgba(15,15,18,.22), 0 2px 6px rgba(15,15,18,.12);
+  --shadow-pop: 0 16px 40px rgba(15,15,18,.14), 0 2px 6px rgba(15,15,18,.06);
+}
+[data-theme="dark"] {
+  --canvas: #0e0e10;
+  --surface: #17171a;
+  --surface-sunk: #1f1f23;
+  --surface-hover: #1f1f23;
+  --ink: #f4f4f6;
+  --body: #d4d4da;
+  --muted: #9a9aa4;
+  --faint: #6b6b75;
+  --line: #26262b;
+  --line-soft: #1f1f23;
+  --line-strong: #76767f;
+  --primary: #f4f4f6;
+  --on-primary: #0f0f12;
+  --island: #232328;
+  --island-glass: rgba(44,44,50,.82);
+  --island-raised: #2e2e34;
+  --island-line: #76767f;
+  --on-island: #f4f4f6;
+  --on-island-soft: #c9c9d1;
+  --on-island-muted: #a1a1aa;
+  --island-action: #f4f4f6;
+  --on-island-action: #111114;
+  --ask: #f4c5a8;
+  --focus-ring: #c8b8e0;
+  --focus-ring-island: #c8b8e0;
+  --success: #3fbf7f;
+  --success-ink: #8fd9bd;
+  --success-soft: rgba(63,191,127,.14);
+  --attention: #f4a36b;
+  --attention-soft: rgba(244,163,107,.12);
+  --error: #f07171;
+  --error-ink: #f4a3a3;
+  --error-soft: rgba(240,113,113,.12);
+  --on-error: #1c0909;
+  --overlay: rgba(0,0,0,.6);
+  --glass: rgba(30,30,34,.7);
+  --glass-line: rgba(255,255,255,.09);
+  --pane: rgba(30,30,34,.42);
+  --pane-active: rgba(255,255,255,.08);
+  --glass-highlight: rgba(255,255,255,.12);
+  --orb-away-a: #5a5550;
+  --orb-away-b: #45413d;
+  --orb-waiting-a: #6b655f;
+  --orb-waiting-b: #55504b;
+  --orb-interrupted-a: #7a746d;
+  --orb-interrupted-b: #5a5550;
+  --orb-error-b: #7a746d;
+  --shadow-xs: 0 1px 3px rgba(0,0,0,.3);
+  --shadow-knob: 0 1px 3px rgba(0,0,0,.5);
+  --shadow-hover: 0 10px 28px rgba(0,0,0,.45);
+  --shadow-island: 0 18px 48px rgba(0,0,0,.6), 0 2px 6px rgba(0,0,0,.4);
+  --shadow-pop: 0 16px 40px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.35);
+}
+:root {
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-9: 36px;
+  --s-18: 72px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-2xl: 24px;
+  --r-island: 28px;
+  --r-pill: 9999px;
+  --dur-press: 100ms;
+  --dur-hover: 140ms;
+  --dur-exit: 160ms;
+  --dur-enter: 220ms;
+  --dur-reveal: 360ms;
+  --dur-morph: 520ms;
+  --dur-ink: 900ms;
+  --dur-drop: 420ms;
+  --dur-ripple: 700ms;
+  --dur-fly: 640ms;
+  --dur-blend: 460ms;
+  --stagger: 40ms;
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-in: cubic-bezier(.4,0,1,1);
+  --ease-move: cubic-bezier(.65,0,.35,1);
+  --ease-standard: cubic-bezier(.4,0,.2,1);
+  --ease-morph: cubic-bezier(.32,1.18,.4,1);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --ease-breathe: cubic-bezier(.45,0,.55,1);
+  --orb-period-away: 12s;
+  --orb-period-waiting: 9s;
+  --orb-period-remembering: 8s;
+  --orb-period-idle: 6.5s;
+  --orb-period-thinking: 3.2s;
+  --orb-period-verifying: 2.8s;
+  --orb-period-listening: 2.4s;
+  --orb-period-drafting: 2.4s;
+  --orb-period-working: 1.7s;
+  --orb-period-speaking: 1.15s;
+  --glass-blur: 24px;
+  --glass-saturate: 180%;
+  --lens-rest: 10;
+  --lens-ripple: 34;
+  --z-surge: 30;
+  --z-island: 40;
+  --z-menu: 80;
+  --z-modal: 100;
+  --z-toast: 200;
+  --o-disabled: .4;
+  --font-sans: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+.display-xl { font-family: var(--font-sans); font-size: 44px; line-height: 1.05; font-weight: 700; letter-spacing: -1.76px; }
+.display-lg { font-family: var(--font-sans); font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -1.12px; }
+.heading { font-family: var(--font-sans); font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.6px; }
+.title-lg { font-family: var(--font-sans); font-size: 19px; line-height: 1.3; font-weight: 700; letter-spacing: -0.38px; }
+.title { font-family: var(--font-sans); font-size: 16px; line-height: 1.35; font-weight: 600; letter-spacing: -0.16px; }
+.message { font-family: var(--font-sans); font-size: 16px; line-height: 1.7; font-weight: 400; }
+.body { font-family: var(--font-sans); font-size: 15px; line-height: 1.5; font-weight: 400; }
+.body-sm { font-family: var(--font-sans); font-size: 14px; line-height: 1.5; font-weight: 400; }
+.small { font-family: var(--font-sans); font-size: 13px; line-height: 1.45; font-weight: 400; }
+.caption { font-family: var(--font-sans); font-size: 12px; line-height: 1.45; font-weight: 400; }
+.label { font-family: var(--font-sans); font-size: 11.5px; line-height: 1.3; font-weight: 600; letter-spacing: 0.69px; }
+.mono { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; font-weight: 400; }
+@font-face { font-family: "Plus Jakarta Sans"; src: url("fonts/PlusJakartaSans-latin-wght.woff2") format("woff2"); font-weight: 200 800; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-latin-wght.woff2") format("woff2"); font-weight: 100 800; font-style: normal; font-display: swap; }
