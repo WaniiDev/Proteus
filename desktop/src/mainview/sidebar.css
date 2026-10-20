@@ -1,7 +1,15 @@
 /* Sidebar layout only: the pane, rows, menu and destinations are design-system classes. */
 .app-sidebar { flex: 0 0 248px; width: 248px; max-width: 280px; height: calc(100% - 2 * var(--s-3)); margin: var(--s-3) 0 var(--s-3) var(--s-3); min-height: 0; }
-.app-sidebar .menu-reason { margin-left: auto; color: var(--muted); font-size: 12px; }
 
 @media (max-width: 839px) {
   .app-sidebar { flex-basis: auto; width: auto; max-width: none; height: auto; max-height: 50%; margin: var(--s-3) var(--s-3) 0; }
 }
+
+/* Menu rows the DS leaves to the app (upstream to DS: a disabled menu item and its reason). Menus are portalled to <body>, so these are not scoped to the sidebar. */
+.menu > button.is-disabled { opacity: var(--o-disabled); cursor: not-allowed; }
+.menu > button.is-disabled:hover { background: transparent; }
+.menu .menu-label { flex: 0 0 auto; white-space: nowrap; }
+.menu .menu-reason { flex: 0 1 auto; min-width: 0; margin-left: auto; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A deleted conversation fades and folds its row away (motion.md, Rows); the DS folds .list-row, not .session (upstream to DS). */
+.session.is-leaving { overflow: hidden; pointer-events: none; animation: p-fold var(--dur-enter) var(--ease-in) both; }

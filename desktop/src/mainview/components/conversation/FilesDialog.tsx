@@ -63,7 +63,7 @@ export function FilesDialog({ snapshot, initialPath, onClose }: { snapshot: Runt
   return <ConversationDialog title="Files in this conversation" onClose={onClose}>
     {error && <p className="field-error" role="alert">{error}</p>}
     {file ? <>
-      <button type="button" className="btn btn-ghost sm" onClick={() => setFile(null)}><ArrowLeft className="i sm" aria-hidden="true" />Files</button>
+      <button type="button" className="btn btn-ghost sm conversation-back" onClick={() => setFile(null)}><ArrowLeft className="i sm" aria-hidden="true" />Files</button>
       <div className="list">
         <div className="list-row"><span className="row-copy"><span className="row-title" title={file.path}>{file.path}</span><span className="row-sub">{[formatBytes(file.size), new Date(file.modifiedAt).toLocaleString(), file.truncated ? "Preview truncated" : ""].filter(Boolean).join(" · ")}</span></span>
           {file.kind === "text" && <span className="row-end"><button type="button" className="btn btn-primary sm" disabled={!dirty || busy} onClick={() => void save()}>Save</button></span>}

@@ -17,6 +17,7 @@ mock.module("../lib/bridge", () => ({
   } },
 }));
 const { ProjectsView } = await import("./ProjectsView");
+const { ToastProvider } = await import("../components/ds/Toast");
 
 useDom();
 
@@ -32,10 +33,12 @@ async function mount(snap: RuntimeSnapshot, handlers: Partial<Record<"onCreateCh
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<ProjectsView snapshot={snap} onCreateChat={handlers.onCreateChat ?? (() => {})} onSelectThread={handlers.onSelectThread ?? (() => {})} onOpenMemory={handlers.onOpenMemory ?? (() => {})} />));
+  await act(async () => root.render(<ToastProvider><ProjectsView snapshot={snap} onCreateChat={handlers.onCreateChat ?? (() => {})} onSelectThread={handlers.onSelectThread ?? (() => {})} onOpenMemory={handlers.onOpenMemory ?? (() => {})} /></ToastProvider>));
   return { host, done: async () => { await act(async () => root.unmount()); host.remove(); } };
 }
 const click = (el: Element | null | undefined) => act(async () => { (el as HTMLElement).click(); });
+// Opening a project or going back is a two-beat swap: the exit beat, then the next page.
+const go = async (el: Element | null | undefined) => { await click(el); await wait(260); };
 const byText = (host: Element, selector: string, text: string) => Array.from(host.querySelectorAll(selector)).find((el) => el.textContent?.includes(text));
 
 describe("ProjectsView", () => {
@@ -48,8 +51,48 @@ describe("ProjectsView", () => {
     expect(rows[0]!.querySelector(".row-end")?.textContent).toBe("2 chats");
     expect(rows[0]!.querySelector(".row-end svg")).not.toBeNull();
     expect(rows[1]!.querySelector(".row-end .dot.warn")).not.toBeNull();
+    // A missing folder ends with the way back in, not a chat count.
+    expect(rows[1]!.querySelector(".row-end")?.textContent).toBe("Reconnect");
     expect(host.querySelector(".page-head h1.heading")?.textContent).toBe("Projects");
     expect(host.querySelector("input")).toBeNull();
+    await done();
+  });
+
+  test("App owns the .view wrapper: the page is a block scroller with the 720px .page, rows rise with --i", async () => {
+    const { host, done } = await mount(snapshot([project("p1", "One", "ready"), project("p2", "Two", "ready")]));
+    const section = host.querySelector("section")!;
+    expect(section.className).toBe("projects-view");
+    expect(section.classList.contains("view")).toBe(false);
+    expect(section.querySelector(":scope > .page")).not.toBeNull();
+    const rows = host.querySelectorAll("button.list-row.enter");
+    expect(rows).toHaveLength(2);
+    expect((rows[1] as HTMLElement).style.getPropertyValue("--i")).toBe("1");
+    await done();
+  });
+
+  test("opening a project is two beats: the list fades, then the project page rises in; Back is the same", async () => {
+    const { host, done } = await mount(snapshot([project("p1", "One", "ready")]));
+    await click(host.querySelector("button.list-row"));
+    expect(host.querySelector(".page")!.classList.contains("is-leaving")).toBe(true);
+    expect(host.querySelector(".page-head h1")?.textContent).toBe("Projects");
+    await wait(260);
+    expect(host.querySelector(".page")!.classList.contains("is-leaving")).toBe(false);
+    expect(host.querySelector(".page-head h1")?.textContent).toBe("One");
+    expect(host.querySelector(".list-row.enter")).not.toBeNull();
+    await click(host.querySelector("button.page-back"));
+    expect(host.querySelector(".page")!.classList.contains("is-leaving")).toBe(true);
+    await wait(260);
+    expect(host.querySelector(".page-head h1")?.textContent).toBe("Projects");
+    await done();
+  });
+
+  test("project dates read as a short date or today", async () => {
+    const today = new Date().toISOString();
+    const { host, done } = await mount(snapshot([{ ...project("p1", "One", "ready"), createdAt: "2025-09-02T12:00:00.000Z", lastOpenedAt: today }]));
+    await go(host.querySelector("button.list-row"));
+    const added = byText(host, ".list-row", "Added")!;
+    expect(added.querySelector(".row-end")?.textContent).toBe("Sep 2, 2025");
+    expect(byText(host, ".list-row", "Last opened")!.querySelector(".row-end")?.textContent).toBe("today");
     await done();
   });
 
@@ -75,13 +118,13 @@ describe("ProjectsView", () => {
     calls.length = 0;
     const picked: string[] = [];
     const { host, done } = await mount(snapshot([project("p1", "One", "ready"), project("p2", "Gone", "missing")], [thread("t1", "p1")]), { onSelectThread: (id) => picked.push(id) });
-    await click(host.querySelector("button.list-row"));
+    await go(host.querySelector("button.list-row"));
     expect(host.querySelector("button.page-back")?.textContent).toBe("Projects");
     expect(host.querySelector(".page-head h1")?.textContent).toBe("One");
     await click(byText(host, "button.list-row", "Chat t1"));
     expect(picked).toEqual(["t1"]);
-    await click(host.querySelector("button.page-back"));
-    await click(host.querySelectorAll("button.list-row")[1]);
+    await go(host.querySelector("button.page-back"));
+    await go(host.querySelectorAll("button.list-row")[1]);
     expect(host.querySelector(".notice.warn")).not.toBeNull();
     await click(byText(host, ".page-actions button", "Reconnect"));
     expect(calls).toEqual(["reconnect"]);
@@ -91,7 +134,7 @@ describe("ProjectsView", () => {
   test("Forget project opens the Modal, Escape closes it and focus returns to the trigger", async () => {
     calls.length = 0;
     const { host, done } = await mount(snapshot([project("p1", "One", "ready")]));
-    await click(host.querySelector("button.list-row"));
+    await go(host.querySelector("button.list-row"));
     const trigger = byText(host, "button.list-row.danger", "Forget project") as HTMLButtonElement;
     trigger.focus();
     await click(trigger);
@@ -108,11 +151,14 @@ describe("ProjectsView", () => {
   test("confirming Forget project removes it", async () => {
     calls.length = 0;
     const { host, done } = await mount(snapshot([project("p1", "One", "ready")]));
-    await click(host.querySelector("button.list-row"));
+    await go(host.querySelector("button.list-row"));
     await click(byText(host, "button.list-row.danger", "Forget project"));
     await click(host.querySelector(".modal .btn-danger"));
     await wait(220);
     expect(calls).toEqual(["remove:p1"]);
+    const toast = host.querySelector(".toast");
+    expect(toast?.querySelector("strong")?.textContent).toBe("Forgot One");
+    expect(toast?.querySelector("p")?.textContent).toBe("The folder is still on disk. Its project memory was cleared.");
     await done();
   });
 
@@ -129,7 +175,7 @@ describe("ProjectsView", () => {
     skillList = [{ name: "review", description: "Review a diff", path: "/home/p1/.agents/skills/review", source: "project", conflict: true }, { name: "plan", description: "Plan work", path: "/home/p1/.agents/skills/plan", source: "project", conflict: false }];
     calls.length = 0;
     const { host, done } = await mount(snapshot([project("p1", "Alpha", "ready")], [], "p1"));
-    await click(host.querySelector("button.list-row"));
+    await go(host.querySelector("button.list-row"));
     await wait(0);
     const label = byText(host, ".list-label", "Skills");
     expect(label).toBeDefined();
@@ -142,7 +188,7 @@ describe("ProjectsView", () => {
   test("a project page explains how to see skills when no chat in it is active, without calling the workspace", async () => {
     calls.length = 0;
     const { host, done } = await mount(snapshot([project("p1", "Alpha", "ready")]));
-    await click(host.querySelector("button.list-row"));
+    await go(host.querySelector("button.list-row"));
     await wait(0);
     expect(host.textContent).toContain("Open a chat here to list this folder’s skills.");
     expect(calls).not.toContain("skills");

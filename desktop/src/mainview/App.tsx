@@ -10,6 +10,7 @@ import { createRuntimeSnapshotTransport } from "./lib/runtime-snapshot-transport
 import { reconcileQueuedDrafts, type QueuedDraft } from "./lib/composer-ui";
 import { Sidebar, type View } from "./components/Sidebar";
 import { DeleteThreadModal } from "./components/DeleteThreadModal";
+import { ToastProvider, useToast } from "./components/ds/Toast";
 import { FilesDialog } from "./components/conversation/FilesDialog";
 import { AnswerIntentStateContext, answerIntentKey, type AnswerIntentEvent, type AnswerIntentState } from "./components/answer";
 import { Companion } from "./views/Companion";
@@ -69,7 +70,12 @@ function ignoreRpc(promise: Promise<unknown>): void {
 }
 
 export default function App() {
+  return <ToastProvider><AppShell /></ToastProvider>;
+}
+
+function AppShell() {
   useScrollbars();
+  const toast = useToast();
   const [view, setView] = useState<View>("companion");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [settingsMemoryScope, setSettingsMemoryScope] = useState<MemoryScope | undefined>();
@@ -263,6 +269,12 @@ export default function App() {
     const workspace = snapshot.activeWorkspace;
     void createChat(workspace.binding, workspace.label, workspace.availability);
   };
+  const handleDisconnect = (providerId: string) => {
+    const name = snapshot.providers.find((provider) => provider.id === providerId)?.name ?? "provider";
+    void rpc.request["providers.disconnect"]({ providerId })
+      .then((result: { accepted: boolean }) => { if (result.accepted) toast(`Disconnected ${name}`, providerId === "codex" ? "The sign-in was removed from this device." : "The key was removed from this device."); })
+      .catch(() => undefined);
+  };
   const handleRename = (threadId: string, title: string) => {
     ignoreRpc(rpc.request["threads.rename"]({ threadId, title }));
   };
@@ -334,7 +346,7 @@ export default function App() {
             </AnswerIntentStateContext.Provider>
           )}
           {shownView === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
-          {shownView === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          {shownView === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={handleDisconnect} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
           </div>
         </main>
       </div>

@@ -16,7 +16,6 @@ body { overflow: hidden; }
 .app-shell { position: relative; display: flex; height: 100%; min-height: 0; overflow: hidden; }
 .app-stage { position: relative; flex: 1; min-width: 0; height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .app-stage > .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.view.active { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto; }
 .stage { height: 100%; min-height: 0; overflow: hidden; }
 
 /* Text-chat stage + Workbench. Relevant structured work occupies a persistent
@@ -453,14 +452,11 @@ body { overflow: hidden; }
 .workspace-search-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .menu.session-menu.conversation-menu { width: 248px; }
 .conversation-file-text { height: 280px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
+.conversation-back { justify-self: start; }
 .conversation-file-media { width: 100%; height: 280px; border: 0; border-radius: var(--r-md); object-fit: contain; }
 
 /* Supporting surfaces — one quiet desktop language */
 .page-narrow { width: min(100%, 1120px); max-width: none; margin: 0 auto; padding: 44px clamp(24px, 4vw, 56px) 64px; }
-.page-head { max-width: 680px; margin-bottom: 34px; }
-.page-head .caption-uppercase { margin-bottom: 8px; }
-.page-head .display-lg { margin: 0; font-size: clamp(34px, 4vw, 48px); letter-spacing: -.025em; }
-.page-sub { max-width: 620px; margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .model-settings-card { padding: 22px; }
 .modal-backdrop { background: rgba(41,37,36,.28); backdrop-filter: blur(8px); }
 .modal-card { border-radius: 18px; box-shadow: 0 24px 72px rgba(41,37,36,.18), 0 2px 8px rgba(41,37,36,.07); }
@@ -470,10 +466,9 @@ body { overflow: hidden; }
 
 @media (max-width: 620px) {
   .page-narrow { padding: 30px 16px 48px; }
-  .page-head { margin-bottom: 24px; }
 }
 
-.page-head h1.project-name, .page-head .project-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-name, .project-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal-name { overflow-wrap: anywhere; }
 
 /* ---------- Thread (messages) ---------- */
@@ -493,10 +488,11 @@ body { overflow: hidden; }
 .resolved-title { color: var(--ink); }
 .resolved-text { min-width: 0; overflow-wrap: anywhere; }
 /* Settings: the scroll area, the two-beat tab body, and layout for rows the DS leaves to the app. */
-.settings-view { flex: 1 1 0; min-height: 0; overflow-y: auto; }
-.settings-page .page-head { max-width: none; margin-bottom: 0; }
+.settings-view, .projects-view { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 .settings-page .segmented { align-self: flex-start; }
 .settings-body { animation: p-view var(--dur-reveal) var(--ease-out) backwards; transition: opacity var(--dur-exit) var(--ease-in), transform var(--dur-exit) var(--ease-in); }
+.projects-body { transition: opacity var(--dur-exit) var(--ease-in), transform var(--dur-exit) var(--ease-in); }
+.projects-body.is-leaving { opacity: 0; transform: translateY(-4px); pointer-events: none; }
 .settings-body.is-leaving { opacity: 0; transform: translateY(-4px); pointer-events: none; }
 .provider-list { --expand-indent: 16px; }
 .provider-key-form { display: flex; gap: 8px; }
@@ -559,3 +555,7 @@ body { overflow: hidden; }
 /* Jump to latest: the glass button, pinned to the foot of the thread. */
 .latest-btn { position: sticky; bottom: 8px; width: fit-content; margin: 12px 4px 0 auto; }
 .companion-view .stage-body > .orb-presence { width: min(100%, 720px); }
+
+/* Toast layout: the DS .toast leaves the copy and the dismiss button to the app. */
+.toast-copy { flex: 1; min-width: 0; }
+.toast-dismiss { flex: none; width: 28px; height: 28px; }
