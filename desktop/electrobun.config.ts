@@ -1,4 +1,11 @@
+import { readFileSync } from "node:fs";
 import type { ElectrobunConfig } from "electrobun";
+
+// @mastra/code-sdk's Kimi provider reads its version from ../../package.json relative to the bundle at load time,
+// which does not exist inside the packaged app. It checks the MASTRACODE_VERSION build constant first, so define it.
+const codeSdkVersion: string = JSON.parse(
+  readFileSync(new URL("./node_modules/@mastra/code-sdk/package.json", import.meta.url), "utf8"),
+).version;
 
 export default {
   app: {
@@ -13,6 +20,7 @@ export default {
       // Proteus does not enable that browser subsystem, so keep it out of the
       // desktop runtime bundle instead of pulling Playwright into production.
       external: ["@mastra/stagehand", "playwright-core", "playwright-core/*"],
+      define: { MASTRACODE_VERSION: JSON.stringify(codeSdkVersion) },
     },
     copy: {
       "dist/index.html": "views/mainview/index.html",
