@@ -34,6 +34,7 @@ function render(value: RuntimeSnapshot): string {
     setApiKey={() => undefined}
     onConnect={() => undefined}
     onDisconnect={() => undefined}
+    onConnectAnthropic={() => undefined}
     onStartCodexAuth={() => undefined}
     onSubmitCodexAuth={() => undefined}
     onCancelCodexAuth={() => undefined}
@@ -60,6 +61,22 @@ describe("provider settings redesign", () => {
     value.providers[1] = { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration" };
     expect(render(value)).toContain("Connect in browser");
     expect(render(value)).toContain("Use device code");
+  });
+
+  test("offers an Anthropic API key form and shows why a stored key is unavailable", () => {
+    const value = snapshot();
+    value.providers.push({ id: "anthropic", name: "Anthropic", configured: false, verified: false, availability: "needs-configuration", detail: "Add an Anthropic API key to use Claude models." });
+    let html = render(value);
+    expect(html).toContain("2 of 3 connected");
+    expect(html).toContain("Anthropic API key");
+    expect(html).toContain("sk-ant-");
+    expect(html).toContain("Add an Anthropic API key to use Claude models.");
+
+    value.providers[2] = { id: "anthropic", name: "Anthropic", configured: true, verified: false, availability: "unavailable", detail: "That Anthropic API key is invalid or disabled." };
+    html = render(value);
+    expect(html).toContain("Enter a replacement key");
+    expect(html).toContain("That Anthropic API key is invalid or disabled.");
+    expect(html).toContain("Disconnect key");
   });
 
   test("keeps browser OAuth completion and cancellation controls", () => {

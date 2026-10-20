@@ -19,6 +19,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   providers: [
     { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
     { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration" },
+    { id: "anthropic", name: "Anthropic", configured: false, verified: false, availability: "needs-configuration" },
   ],
   models: [
     {
@@ -285,7 +286,7 @@ export default function App() {
             />
           )}
           {view === "projects" && <ProjectsView snapshot={snapshot} onCreateChat={handleCreateProjectChat} onSelectThread={handleSelectProjectThread} onOpenMemory={handleOpenProjectMemory} />}
-          {view === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
+          {view === "settings" && <SettingsView snapshot={snapshot} section={settingsSection} onSection={(section) => { setSettingsSection(section); if (section !== "memory") setSettingsMemoryScope(undefined); }} memoryScope={settingsMemoryScope} apiKey={apiKey} setApiKey={setApiKey} onConnect={handleConnect} onDisconnect={(providerId) => ignoreRpc(rpc.request["providers.disconnect"]({ providerId }))} onConnectAnthropic={(anthropicKey) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "anthropic", mode: "api-key", apiKey: anthropicKey }))} onStartCodexAuth={(mode) => ignoreRpc(rpc.request["providers.connect"]({ providerId: "codex", mode }))} onSubmitCodexAuth={(value) => ignoreRpc(rpc.request["providers.auth.submit"]({ providerId: "codex", value }))} onCancelCodexAuth={() => ignoreRpc(rpc.request["providers.auth.cancel"]({ providerId: "codex" }))} onRefresh={() => ignoreRpc(rpc.request["models.refresh"]())} onSelectProvider={(providerId) => ignoreRpc(rpc.request["providers.select"]({ providerId }))} onSelectModel={(modelId) => ignoreRpc(rpc.request["models.select"]({ modelId }))} onSelectReasoning={(reasoningEffort) => ignoreRpc(rpc.request["models.reasoning.select"]({ reasoningEffort }))} />}
         </main>
       </div>
       {newChatError && <div className="app-shell-notice" role="alert"><span>{newChatError}</span><button type="button" onClick={() => setNewChatError(null)} aria-label="Dismiss new chat error"><X size={14} /></button></div>}

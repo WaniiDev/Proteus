@@ -57,6 +57,7 @@ export class RuntimeContext {
     providers: [
       { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
       { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Connect a ChatGPT subscription to use Codex." },
+      { id: "anthropic", name: "Anthropic", configured: false, verified: false, availability: "needs-configuration", detail: "Add an Anthropic API key to use Claude models." },
     ],
     models: [
       {
@@ -129,7 +130,7 @@ export class RuntimeContext {
   }
 
   idleStatus(providerId = this.snapshot.selectedProviderId): RuntimeSnapshot["status"] {
-    if (providerId === "codex") return this.snapshot.providers.find((provider) => provider.id === "codex")?.availability === "ready" ? "ready" : "error";
+    if (providerId !== "openrouter") return this.snapshot.providers.find((provider) => provider.id === providerId)?.availability === "ready" ? "ready" : "error";
     return this.snapshot.credential.verified ? "ready" : "needs-key";
   }
 
