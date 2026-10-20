@@ -38,7 +38,12 @@ describe("Electrobun Windows watch cleanup", () => {
 
   test("the dev and start scripts build the renderer before Electrobun copies dist", async () => {
     const pkg = await Bun.file(resolve(projectRoot, "package.json")).json();
-    expect(pkg.scripts.dev).toStartWith("vite build && ");
-    expect(pkg.scripts.start).toStartWith("vite build && ");
+    for (const script of ["dev", "start"]) expect(pkg.scripts[script]).toContain("electrobun prepare && vite build && ");
+  });
+
+  test("Vite resolves electrobun/* through the Hutch devkit aliases, never node_modules", async () => {
+    const vite = await Bun.file(resolve(projectRoot, "vite.config.ts")).text();
+    expect(vite).toContain("electrobunViteAliases(devkit)");
+    expect(vite).toContain("resolve: { alias: electrobunAliases }");
   });
 });
