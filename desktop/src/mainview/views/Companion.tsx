@@ -16,6 +16,7 @@ import { useSmartScroll } from "../hooks/useSmartScroll";
 import { MessageActions } from "../components/MessageActions";
 import { AssistantTurn } from "../components/AssistantTurn";
 import { InteractionCard } from "../components/InteractionCard";
+import { StoppedNote } from "../components/ResolvedLine";
 import { QueuedMessageBubble } from "../components/QueuedMessageBubble";
 
 export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean) => Promise<InteractionResponseResult> }) {
@@ -98,10 +99,8 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
             <div className="thread" ref={threadRef} aria-live="polite">
               {conversationItems.map((item) =>
                 item.type === "user" ? (
-                  <div className="msg user" key={item.message.id}>
-                    <div className="bubble">
-                      <span>{item.message.text}</span>
-                    </div>
+                  <div className="turn-user" key={item.message.id}>
+                    <div className="bubble">{item.message.text}</div>
                     <MessageActions message={item.message} />
                   </div>
                 ) : (
@@ -148,7 +147,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
                   )}
                 </div>
               )}
-              {snapshot.error?.code === "aborted" && <div className="run-stopped-note">Response stopped. You can continue from the partial answer above.</div>}
+              {snapshot.error?.code === "aborted" && lastMessage?.status !== "interrupted" && <StoppedNote />}
               {showLatest && (
                 <button type="button" className="latest-btn" onClick={jumpLatest}>
                   <Icon name="latest" size={14} /> Latest
