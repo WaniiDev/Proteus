@@ -25,12 +25,17 @@ export function MessageActions({ message, onRetry, onContinue }: { message: Chat
       timer.current = window.setTimeout(() => setCopied(false), COPIED_MS);
     }, () => undefined);
   };
+  const retry = message.status === "error" && message.retryable && onRetry;
+  const resume = message.status === "interrupted" && onContinue;
+  if (!message.text.trim() && !retry && !resume) return null;
   return (
     <div className="turn-actions">
-      <button type="button" className="btn btn-ghost sm turn-action" onClick={copy} aria-label={copyLabel(message)}>
-        <Icon name="copy" size={14} />
-        <span>{copied ? "Copied" : "Copy"}</span>
-      </button>
+      {message.text.trim() && (
+        <button type="button" className="btn btn-ghost sm turn-action" onClick={copy} aria-label={copyLabel(message)}>
+          <Icon name="copy" size={14} />
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      )}
       {message.status === "error" && message.retryable && onRetry && (
         <button type="button" className="btn btn-ghost sm turn-action" onClick={onRetry}>
           <Icon name="retry" size={14} /> Retry

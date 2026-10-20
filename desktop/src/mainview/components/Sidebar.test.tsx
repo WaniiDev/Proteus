@@ -267,9 +267,9 @@ describe("Sidebar deleting a conversation", () => {
   it("keeps the row mounted as .is-leaving for the enter beat, then removes it", async () => {
     const host = document.createElement("div"); document.body.append(host);
     const root = createRoot(host);
-    await act(async () => root.render(<Sidebar {...base} threads={threads} activeThreadId="a" />));
+    await act(async () => root.render(<Sidebar {...base} threads={threads} activeThreadId="a" messages={[message("user", "Hello")]} />));
     expect(host.querySelectorAll(".session")).toHaveLength(5);
-    await act(async () => root.render(<Sidebar {...base} threads={threads.filter((item) => item.id !== "b")} activeThreadId="a" />));
+    await act(async () => root.render(<Sidebar {...base} threads={threads.filter((item) => item.id !== "b")} activeThreadId="a" messages={[message("user", "Hello")]} />));
     const leaving = host.querySelectorAll(".session.is-leaving");
     expect(leaving).toHaveLength(1);
     expect(leaving[0]!.textContent).toContain("Nightly sync");
@@ -278,6 +278,18 @@ describe("Sidebar deleting a conversation", () => {
     expect(host.querySelector(".session.is-leaving")).toBeNull();
     expect(host.querySelectorAll(".session")).toHaveLength(4);
     expect(host.textContent).not.toContain("Nightly sync");
+    await act(async () => root.unmount()); host.remove();
+  });
+});
+
+describe("Sidebar new chat", () => {
+  it("does not list the active chat until it has a message", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(<Sidebar {...base} threads={threads} activeThreadId="a" messages={[]} />));
+    expect(host.querySelectorAll(".session")).toHaveLength(4);
+    await act(async () => root.render(<Sidebar {...base} threads={threads} activeThreadId="a" messages={[message("user", "Hello")]} />));
+    expect(host.querySelectorAll(".session")).toHaveLength(5);
     await act(async () => root.unmount()); host.remove();
   });
 });

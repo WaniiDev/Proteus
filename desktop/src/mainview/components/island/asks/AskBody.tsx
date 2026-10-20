@@ -120,7 +120,7 @@ export function AskBody({ interaction, onRespond, onApproval, onResubmit, onDism
       )}
       {!failed && !isPlan && !isApproval && hasOptions && otherSelected && <input ref={fieldRef} autoFocus disabled={resolving} className="island-field" aria-label="Your own answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your own answer…" />}
       {!failed && !isPlan && !isApproval && !hasOptions && <textarea ref={fieldRef} disabled={resolving} className="island-field" aria-label={interaction.question ?? interaction.title} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
-      {!failed && isPlan && <textarea disabled={resolving} className="island-field" aria-label="Optional feedback or requested changes" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback or requested changes" rows={2} />}
+      {!failed && isPlan && <textarea disabled={resolving} className="island-field" aria-label="Optional feedback or requested changes" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback — for example, QA needs two days" rows={2} />}
       {isApproval && !failed && <p className="island-note">{HOST_EXECUTION_NOTE}</p>}
       {(localError || interaction.error) && !failed && <p className="island-note">{localError ?? interaction.error?.message}</p>}
       {failed && localError && <p className="island-note">{localError}</p>}

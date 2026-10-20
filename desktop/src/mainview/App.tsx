@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { X } from "lucide-react";
+import { TriangleAlert, X } from "lucide-react";
 import { DEFAULT_MODEL_ID } from "../shared/constants";
 import type { AnswerIntentResult, ChatMessage, MemoryScope, OrbState, ProviderId, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { rpc } from "./lib/bridge";
@@ -61,7 +61,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   error: null,
 };
 
-/** Escape stops the run only from inside the Island, and never while an ask or an answer is open (Escape belongs to that surface then). */
+/** Escape stops the run only from inside the Island, and never while an ask is open (Escape belongs to that surface then). A streaming answer does not hold it: Stop stays reachable. */
 export function shouldAbortOnEscape(target: EventTarget | null, surfaceOpen: boolean): boolean {
   if (surfaceOpen) return false;
   return target instanceof Element && target.closest(".island") !== null;
@@ -82,6 +82,7 @@ function AppShell() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [memoryScope, setMemoryScope] = useState<MemoryScope | undefined>();
   const [input, setInput] = useState("");
+  const [draftVersion, setDraftVersion] = useState(0);
   const [apiKey, setApiKey] = useState("");
   const [, setOrbState] = useState<OrbState>("idle");
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(DEFAULT_SNAPSHOT);
@@ -151,7 +152,7 @@ function AppShell() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== "Escape" || !snapshot.activeRun) return;
-      if (shouldAbortOnEscape(event.target, snapshot.interactions.length > 0 || document.querySelector(".island.is-open") !== null)) ignoreRpc(rpc.request["chat.abort"]());
+      if (shouldAbortOnEscape(event.target, snapshot.interactions.length > 0)) ignoreRpc(rpc.request["chat.abort"]());
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -234,7 +235,11 @@ function AppShell() {
       return false;
     }
     if (result.open) setFilesPath(result.open.path);
-    if (result.draft !== undefined) setInput(result.draft);
+    if (result.draft !== undefined) {
+      setInput(result.draft);
+      setDraftVersion((version) => version + 1);
+      toast("Draft saved");
+    }
     return event.intent === "approve";
   };
   const intentState = useMemo<AnswerIntentState>(() => ({ pending: intentPending, notes: intentNotes }), [intentPending, intentNotes]);
@@ -335,6 +340,7 @@ function AppShell() {
               onInteraction={(toolCallId, response) => rpc.request["chat.interaction.respond"]({ toolCallId, response })}
               onInteractionDismiss={(toolCallId) => rpc.request["chat.interaction.dismiss"]({ toolCallId })}
               onIntent={handleAnswerIntent}
+              draftVersion={draftVersion}
               onFollowUp={handleFollowUp}
               onRename={handleRename}
               onPin={(threadId, pinned) => ignoreRpc(rpc.request["threads.pin"]({ threadId, pinned }))}
@@ -353,7 +359,7 @@ function AppShell() {
         </main>
       </div>
       <Lens />
-      {newChatError && <div className="app-shell-notice" role="alert"><span>{newChatError}</span><button type="button" onClick={() => setNewChatError(null)} aria-label="Dismiss new chat error"><X size={14} /></button></div>}
+      {newChatError && <div className="app-shell-notice"><div className="notice error" role="alert"><TriangleAlert className="i" aria-hidden="true" /><div><p>{newChatError}</p></div><button type="button" className="btn btn-ghost sm" onClick={() => setNewChatError(null)} aria-label="Dismiss new chat error"><X size={14} aria-hidden="true" /></button></div></div>}
       {filesPath !== null && <FilesDialog snapshot={snapshot} initialPath={filesPath} onClose={() => setFilesPath(null)} />}
       {deleteTarget && <DeleteThreadModal thread={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm} />}
     </>

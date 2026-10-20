@@ -7,6 +7,7 @@ import type {
   WorkspaceBinding,
   WorkspaceBindingUpdateResult,
 } from "../../shared/contracts";
+import { TriangleAlert } from "lucide-react";
 import { deriveIsland } from "../lib/composer-ui";
 import { ContextChips } from "./island/ContextChips";
 import { Island, type IslandHandle } from "./island/Island";
@@ -123,6 +124,13 @@ export function Composer({
       body={body}
       bodyScroll={bodyScroll}
       meta={chips}
+      notice={canChat ? undefined : (
+        <div className="notice warn">
+          <TriangleAlert className="i" aria-hidden="true" />
+          <div><strong>{providerName} isn’t connected.</strong><p>Connect it in Settings to start chatting. Conversations stay on this device.</p></div>
+          <button type="button" className="btn btn-secondary sm" onClick={onProviders ?? onSettings}>Open Settings</button>
+        </div>
+      )}
     />
   );
 }

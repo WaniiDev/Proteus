@@ -201,6 +201,17 @@ describe("Island variants", () => {
     await t.done();
   });
 
+  test("a streaming answer keeps Stop reachable; Done replaces it once the run is over", async () => {
+    let stops = 0;
+    const t = await mount({ mode: "answer", end: "stop", answerLabel: "Speaking", answerLine: "What needs my attention?", onStop: () => { stops += 1; } });
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
+    await act(async () => { t.qa(".island-end .btn").find((el) => el.textContent === "Stop")!.click(); });
+    expect(stops).toBe(1);
+    await t.render({ mode: "answer", end: "send", answerLabel: "Answer", answerLine: "What needs my attention?" });
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Done"]);
+    await t.done();
+  });
+
   test("the body is an always-mounted slot that is inert until the Island is open", async () => {
     const t = await mount({ body: <p className="probe">Edit docs/plan.md</p> });
     const body = t.q(".island-body");

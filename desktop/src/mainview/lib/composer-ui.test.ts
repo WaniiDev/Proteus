@@ -135,7 +135,7 @@ describe("composer UI policy", () => {
       const snapshot = base();
       snapshot.messages = [user("1", "Hello", "2026-08-04T00:00:01.000Z")];
       expect(deriveIsland(args(snapshot)).placeholder).toBe("Ask a follow-up…");
-      expect(deriveIsland(args(snapshot, { canChat: false })).placeholder).toBe("Configure Codex in Settings to chat");
+      expect(deriveIsland(args(snapshot, { canChat: false })).placeholder).toBe("Connect Codex in Settings to chat");
       expect(deriveIsland(args(snapshot, { canChat: false, runningElsewhere: true })).placeholder).toBe("Another conversation is running…");
     });
 

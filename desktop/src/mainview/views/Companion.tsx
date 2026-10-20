@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { ChatAnswerPart, ChatEvent, InteractionResponseResult, OrbState, RuntimeSnapshot, ThreadSummary } from "../../shared/contracts";
+import { CircleAlert, TriangleAlert } from "lucide-react";
 import { rpc } from "../lib/bridge";
 import { askQueue } from "../lib/ask-copy";
 import { groupConversationItems } from "../lib/ui-helpers";
@@ -31,7 +32,7 @@ function exitBeatMs(): number {
   return Number.isFinite(value) ? value : 160;
 }
 
-export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onProviders, onModels, onProjects, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onIntent, onFollowUp, onRename, onPin, onDeleteRequest, threadLeaving = false }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onProviders?: () => void; onModels?: () => void; onProjects?: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean, fingerprint: string) => Promise<InteractionResponseResult>; /** An action inside an answer. The intent RPC is wired by the host. */ onIntent?: (event: AnswerIntentEvent) => unknown; onFollowUp?: (text: string) => void; /** The header menu's conversation actions, the same handlers the sidebar gets. */ onRename?: (threadId: string, title: string) => void; onPin?: (threadId: string, pinned: boolean) => void; onDeleteRequest?: (thread: ThreadSummary) => void; /** The exit beat of a conversation swap: the thread fades up before the next one rises. */ threadLeaving?: boolean }) {
+export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onProviders, onModels, onProjects, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onIntent, onFollowUp, onRename, onPin, onDeleteRequest, draftVersion = 0, threadLeaving = false }: { draftVersion?: number; snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onProviders?: () => void; onModels?: () => void; onProjects?: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean, fingerprint: string) => Promise<InteractionResponseResult>; /** An action inside an answer. The intent RPC is wired by the host. */ onIntent?: (event: AnswerIntentEvent) => unknown; onFollowUp?: (text: string) => void; /** The header menu's conversation actions, the same handlers the sidebar gets. */ onRename?: (threadId: string, title: string) => void; onPin?: (threadId: string, pinned: boolean) => void; onDeleteRequest?: (thread: ThreadSummary) => void; /** The exit beat of a conversation swap: the thread fades up before the next one rises. */ threadLeaving?: boolean }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -109,6 +110,17 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
     if (!liveAnswer) return;
     setDismissedAnswers((current) => new Set(current).add(liveAnswer.answerId));
   }, [liveAnswer]);
+  // A reply put a draft in the input: the open answer settles into the thread first (as Done does), then the input takes focus.
+  const settleRef = useRef(settleAnswer);
+  settleRef.current = settleAnswer;
+  const seenDraftVersion = useRef(draftVersion);
+  useEffect(() => {
+    if (seenDraftVersion.current === draftVersion) return undefined;
+    seenDraftVersion.current = draftVersion;
+    settleRef.current();
+    const frame = window.requestAnimationFrame(() => islandRef.current?.focusInput());
+    return () => window.cancelAnimationFrame(frame);
+  }, [draftVersion]);
   const handleFollowUp = (text: string) => {
     settleAnswer();
     onFollowUp?.(text);
@@ -178,7 +190,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
                     <div className="bubble">{item.message.text}</div>
                   </div>
                 ) : (
-                  <AssistantTurn key={`turn:${item.id}`} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} openAnswerId={liveAnswerId ?? heldAnswerId} onIntent={handleIntent} onFollowUp={handleFollowUp} />
+                  <AssistantTurn key={`turn:${item.id}`} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} openAnswerId={liveAnswerId ?? heldAnswerId} onIntent={handleIntent} onFollowUp={handleFollowUp} failureNoted={item === lastItem && snapshot.error !== null && snapshot.error.code !== "aborted"} />
                 ),
               )}
               {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} />)}
@@ -189,6 +201,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               ))}
               {snapshot.continuation && snapshot.continuation.threadId === snapshot.activeThreadId && snapshot.continuation.phase !== "resuming" && (
                 <div className="notice warn">
+                  <TriangleAlert className="i" aria-hidden="true" />
                   <div>
                     <strong>{snapshot.continuation.phase === "slow" ? "Still continuing…" : "Checking the latest run state…"}</strong>
                     <p>{snapshot.continuation.phase === "slow" ? "Proteus has not reported new progress yet." : "Proteus is reconciling this decision with Mastra’s durable run history."}</p>
@@ -198,26 +211,22 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               )}
               {transportError && (
                 <div className="notice error">
+                  <CircleAlert className="i" aria-hidden="true" />
                   <div>
                     <strong>Desktop connection needs attention.</strong>
                     <p>{transportError}</p>
                   </div>
-                  <button type="button" className="btn btn-secondary sm" onClick={onTransportRetry}>
-                    <Icon name="retry" size={14} /> Reconnect
-                  </button>
+                  <button type="button" className="btn btn-secondary sm" onClick={onTransportRetry}>Reconnect</button>
                 </div>
               )}
               {snapshot.error && snapshot.error.code !== "aborted" && (
                 <div className="notice error">
+                  <CircleAlert className="i" aria-hidden="true" />
                   <div>
-                    <strong>That turn did not finish.</strong>
+                    <strong>I hit a problem and stopped safely.</strong>
                     <p>{snapshot.error.message}</p>
                   </div>
-                  {snapshot.error.retryable && retryTarget && (
-                    <button type="button" className="btn btn-secondary sm" onClick={() => onRetry(retryTarget)}>
-                      <Icon name="retry" size={14} /> Retry
-                    </button>
-                  )}
+                  {snapshot.error.retryable && retryTarget && <button type="button" className="btn btn-secondary sm" onClick={() => onRetry(retryTarget)}>Try again</button>}
                 </div>
               )}
               {snapshot.error?.code === "aborted" && lastMessage?.status !== "interrupted" && <StoppedNote />}

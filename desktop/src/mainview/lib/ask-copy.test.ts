@@ -51,7 +51,9 @@ describe("ask copy", () => {
 describe("resolved asks", () => {
   it("records an approval, a decline, a plan decision and an answered question from the tool part", () => {
     expect(resolvedAsk(tool({ status: "completed" }))).toMatchObject({ label: "Approved", title: "Edit docs/plan.md", tone: "ok" });
-    expect(resolvedAsk(tool({ status: "error" }))).toMatchObject({ label: "Approved" });
+    expect(resolvedAsk(tool({ status: "error" }))).toMatchObject({ label: "Approved", tone: "muted" });
+    expect(resolvedAsk(tool({ status: "error" }))!.title).toEndWith(" — failed");
+    expect(resolvedAsk(tool({ status: "completed" }))!.title).not.toContain("failed");
     expect(resolvedAsk(tool({ status: "declined" }))).toMatchObject({ label: "Declined", title: "Edit docs/plan.md", tone: "muted" });
     expect(resolvedAsk(tool({ name: "submit_plan", input: { path: "plans/q3.md" }, status: "completed" }))).toMatchObject({ label: "Approved", title: "plans/q3.md" });
     expect(resolvedAsk(tool({ name: "submit_plan", input: { path: "plans/q3.md" }, status: "declined" }))).toMatchObject({ label: "Changes requested" });

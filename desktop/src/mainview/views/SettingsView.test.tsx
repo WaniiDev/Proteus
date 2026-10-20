@@ -65,7 +65,7 @@ describe("SettingsView", () => {
 
   test("Models: a model without adjustable thinking says so", () => {
     const snapshot = buildFixture("settings");
-    const other = { ...snapshot, selectedModelId: "openrouter/google/gemini-flash" as const };
+    const other = { ...snapshot, models: snapshot.models.map((model) => (model.id === snapshot.selectedModelId ? { ...model, reasoningOptions: undefined } : model)) };
     const html = renderToStaticMarkup(<SettingsView {...props("models")} snapshot={other} />);
     expect(html).toContain("This model doesn’t offer adjustable thinking.");
     expect(html).not.toContain('type="range"');

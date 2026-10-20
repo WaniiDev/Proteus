@@ -132,7 +132,9 @@ export function resolvedAsk(tool: ChatToolPart): ResolvedAsk | null {
   if (!needsApproval(tool)) return null;
   const named = [capitalize(describeToolActivity({ ...tool, status: "waiting" }).action.replace(/^Waiting for approval to /, "")), descriptor.target].filter(Boolean).join(" ");
   if (tool.status === "declined") return { id: tool.toolCallId, label: "Declined", title: named, tone: "muted" };
-  if (tool.status === "completed" || tool.status === "error") return { id: tool.toolCallId, label: "Approved", title: named, tone: "ok" };
+  if (tool.status === "completed") return { id: tool.toolCallId, label: "Approved", title: named, tone: "ok" };
+  // Approved, then it failed: the line says so ("Failed" is states.md's word for an `error` step).
+  if (tool.status === "error") return { id: tool.toolCallId, label: "Approved", title: `${named} — failed`, tone: "muted" };
   return null;
 }
 

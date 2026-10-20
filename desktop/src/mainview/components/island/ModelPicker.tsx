@@ -38,6 +38,8 @@ const CHECK = (
 );
 
 function contextNote(model: ProviderModel): string {
+  // A short catalogue note reads best ("Balanced speed and depth for everyday work"); a long one does not fit a row, so the context size stands in.
+  if (model.description && model.description.length <= 64) return model.description;
   if (!model.contextLength) return model.baseModelId ?? model.rawId;
   const k = model.contextLength >= 1_000_000 ? `${+(model.contextLength / 1_000_000).toFixed(1)}M` : `${Math.round(model.contextLength / 1000)}K`;
   return `${k} context`;
@@ -88,8 +90,8 @@ export function ModelPicker({ open, chipsRef, onDismiss, providers, browseProvid
       )}
       {error && <p className="field-error" role="alert">{error}</p>}
       <div className="picker-foot">
-        <span>{running ? "Applies from your next message." : "Used for your next message."}</span>
-        <button type="button" className="btn btn-ghost sm" onClick={onManage}>Manage models in Settings<ChevronRight className="i sm" aria-hidden="true" /></button>
+        <span>{!connected ? "Keys stay in Windows Credential Manager." : running ? "Applies from your next message." : "Used for your next message."}</span>
+        <button type="button" className="btn btn-ghost sm" onClick={onManage}>Settings<ChevronRight className="i sm" aria-hidden="true" /></button>
       </div>
     </PickerShell>
   );
