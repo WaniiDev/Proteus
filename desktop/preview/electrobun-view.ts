@@ -11,6 +11,8 @@ const requested = params.get("scenario") as Scenario | null;
 const scenario: Scenario = requested && (scenarios as readonly string[]).includes(requested) ? requested : "thread";
 const theme = params.get("theme") === "dark" ? "dark" : "light";
 document.documentElement.dataset.theme = theme;
+// The app's initTheme() runs after this module and reads the stored choice, so store it too.
+try { localStorage.setItem("proteus.ui.theme", theme); } catch { /* storage unavailable */ }
 
 let state: RuntimeSnapshot = buildFixture(scenario);
 const listeners = new Map<string, Set<(payload: RuntimeSnapshotEnvelope) => void>>();
