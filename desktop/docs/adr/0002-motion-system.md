@@ -27,7 +27,7 @@ When a Tide glass surface (ADR 0001) changes shape it moves like liquid for one 
 - **Droplets.** Menus, pickers, modals and toasts bud out of what opened them as a small round drop, stretch just past full size and settle (420ms); closing, they shrink back into a drop at the trigger.
 - **Wave.** Sending or approving sends one ring of the orb's colour across the Island glass.
 - **Liquid thumb.** A segmented thumb moves leading edge first and pulls its trailing edge after it, stretching like a drop.
-- **Caustic.** The orb's colour glowing through the Island blends with the orb's own state change.
+- **Caustic.** The orb's colour glowing through the Island blends with the orb's own state change, fades out as an ask opens and returns as the Island settles.
 
 These ride on the choreography above and never replace it; they only happen when something transforms, never on a timer. The ambient field behind the glass drifts imperceptibly (3% over 40s) and is the only loop besides the orb's breath.
 
