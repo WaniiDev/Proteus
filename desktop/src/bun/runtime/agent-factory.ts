@@ -1,4 +1,5 @@
 import { Agent } from "@mastra/core/agent";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { ThinkingLevel } from "@mastra/code-sdk/providers/openai-codex";
@@ -10,6 +11,7 @@ import { createWorkspaceTools, Workspace } from "@mastra/core/workspace";
 import type { ProviderModelId, ReasoningEffort } from "../../shared/contracts";
 import { type CodexCredentialStore, type CredentialVault } from "../providers/credentials";
 import { isOpenRouterModelId } from "../providers/openrouter";
+import { isAnthropicModelId, resolveAnthropicModel } from "../providers/anthropic";
 import { TaskToolPolicy } from "../tools/task-tool-policy";
 import { AGENT_INSTRUCTIONS } from "../core/agent-instructions";
 import { COMMAND_SAFETY_INSTRUCTIONS } from "../tools/command-safety-instructions";
@@ -29,7 +31,7 @@ import { sanitizeToolDetail } from "./message-mapping";
 import type { RuntimeContext } from "./context";
 
 function productModelFromSession(value: string | undefined): ProviderModelId {
-  if (value && isOpenRouterModelId(value)) return value;
+  if (value && (isOpenRouterModelId(value) || isAnthropicModelId(value))) return value;
   if (value?.startsWith("openai/") && value.length > "openai/".length) return `codex/${value.slice("openai/".length)}`;
   if (value?.startsWith("codex/") && value.length > "codex/".length) return value as ProviderModelId;
   return DEFAULT_MODEL_ID;
@@ -42,6 +44,7 @@ function codexThinkingLevel(value: ReasoningEffort | null): ThinkingLevel {
 export type ProteusAgentDeps = {
   ctx: RuntimeContext;
   vault: CredentialVault;
+  anthropicVault: CredentialVault;
   codexCredentialStore: CodexCredentialStore;
   workspaceRegistry: WorkspaceRegistry;
   memory: Memory;
@@ -52,7 +55,7 @@ export type ProteusAgentDeps = {
 };
 
 /** Build the single Mastra agent: instructions, tools, processors and the per-turn model resolver. */
-export function createProteusAgent({ ctx, vault, codexCredentialStore, workspaceRegistry, memory, scopedMemory, workspace, taskToolPolicy, diagnostics }: ProteusAgentDeps): Agent {
+export function createProteusAgent({ ctx, vault, anthropicVault, codexCredentialStore, workspaceRegistry, memory, scopedMemory, workspace, taskToolPolicy, diagnostics }: ProteusAgentDeps): Agent {
     const nativeToolCallGuard = new NativeToolCallGuard();
     nativeToolCallGuard.onViolation = (violation) => {
       diagnostics.record({ source: "runtime", type: "tool_call_integrity_violation", payload: violation });
@@ -65,6 +68,7 @@ export function createProteusAgent({ ctx, vault, codexCredentialStore, workspace
     // from the OAuth-backed gateway model and would fail every Codex turn.
     const codexTools = createOpenAI({}).tools;
     const openRouterTools = createOpenRouter().tools;
+    const anthropicTools = createAnthropic({}).tools;
     const toolSearch = new ToolSearchProcessor({
       tools: { web_fetch: webFetchTool },
       storage: "context",
@@ -88,7 +92,9 @@ export function createProteusAgent({ ctx, vault, codexCredentialStore, workspace
         show_answer: showAnswerTool,
         web_search: ctx.snapshot.selectedProviderId === "codex"
           ? codexTools.webSearch()
-          : openRouterTools.webSearch({ engine: "auto", maxResults: 5 }),
+          : ctx.snapshot.selectedProviderId === "anthropic"
+            ? anthropicTools.webSearch_20250305({ maxUses: 5 })
+            : openRouterTools.webSearch({ engine: "auto", maxResults: 5 }),
         ...workingTools,
         ...(requestContext.get("proteus-memory-enabled") === true ? memoryTools : {}),
         ...await createCompatibleWorkspaceTools(await workspaceRegistry.resolveFromContext(requestContext), requestContext),
@@ -126,6 +132,11 @@ export function createProteusAgent({ ctx, vault, codexCredentialStore, workspace
         const modelId = productModelFromSession(ctx.snapshot.selectedModelId);
         if (modelId.startsWith("codex/")) {
           return resolveCodexGatewayModel(modelId, codexThinkingLevel(ctx.snapshot.selectedReasoningEffort), codexCredentialStore);
+        }
+        if (isAnthropicModelId(modelId)) {
+          const anthropicKey = await anthropicVault.get();
+          if (!anthropicKey) throw new Error("No verified Anthropic credential");
+          return resolveAnthropicModel(modelId, anthropicKey);
         }
         const apiKey = await vault.get();
         if (!apiKey) throw new Error("No verified OpenRouter credential");

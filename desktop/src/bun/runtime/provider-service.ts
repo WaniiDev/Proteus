@@ -1,8 +1,9 @@
 import { loginOpenAICodex } from "@mastra/code-sdk/auth/providers/openai-codex";
 import { Utils } from "electrobun/bun";
-import type { ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot } from "../../shared/contracts";
+import type { ProviderId, ProviderModelId, ProviderStatus, ReasoningEffort, RuntimeSnapshot } from "../../shared/contracts";
 import { type CodexCredentialStore, type CredentialVault } from "../providers/credentials";
 import { listOpenRouterTextModels, validateOpenRouterKey } from "../providers/openrouter";
+import { listAnthropicModels } from "../providers/anthropic";
 import { selectedModelMissingFromCatalog } from "../providers/provider-readiness";
 import { createProteusCodexCatalogProvider, DEFAULT_CODEX_REASONING, listProteusCodexModels } from "../providers/codex-models";
 import { describeCodexOAuthFailure, type CodexOAuthFailureStage } from "../providers/codex-oauth-failure";
@@ -12,20 +13,34 @@ import { makeRuntimeError, normalizeError } from "../core/runtime-error-mapping"
 import type { RuntimeContext } from "./context";
 import type { ThreadService } from "./thread-service";
 
+const ANTHROPIC_NOT_CONNECTED = "Add an Anthropic API key to use Claude models.";
+
+function describeAnthropicFailure(error: unknown): string {
+  const normalized = normalizeError(error);
+  if (normalized.code === "invalid-credential") return "That Anthropic API key is invalid or disabled.";
+  if (normalized.code === "forbidden") return "Anthropic refused model access for this API key.";
+  if (normalized.code === "rate-limited") return "Anthropic is rate-limiting requests. Try again shortly.";
+  if (normalized.code === "offline" || normalized.code === "timeout") return "Anthropic could not be reached. Check your connection and retry.";
+  if (normalized.code === "secure-store-unavailable") return normalized.message;
+  return "Anthropic is unavailable.";
+}
+
 /** Provider auth, credential validation, model catalog, and model and reasoning selection. */
 export class ProviderService {
   readonly modelUsage = new Map<ProviderModelId, { useCount: number; lastUsedAt: string }>();
   codexAuthAbortController: AbortController | null = null;
   codexManualInput: { resolve: (value: string) => void; reject: (error: Error) => void } | null = null;
   private readonly vault: CredentialVault;
+  private readonly anthropicVault: CredentialVault;
   private readonly codexCredentialStore: CodexCredentialStore;
   private readonly codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>;
   private readonly modelPreferences: ModelPreferencesStorage;
   private readonly threads: ThreadService;
   private readonly abortRun: () => void;
 
-  constructor(private readonly ctx: RuntimeContext, deps: { vault: CredentialVault; codexCredentialStore: CodexCredentialStore; codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>; modelPreferences: ModelPreferencesStorage; threads: ThreadService; abortRun: () => void }) {
+  constructor(private readonly ctx: RuntimeContext, deps: { vault: CredentialVault; anthropicVault: CredentialVault; codexCredentialStore: CodexCredentialStore; codexCatalogProvider: ReturnType<typeof createProteusCodexCatalogProvider>; modelPreferences: ModelPreferencesStorage; threads: ThreadService; abortRun: () => void }) {
     this.vault = deps.vault;
+    this.anthropicVault = deps.anthropicVault;
     this.codexCredentialStore = deps.codexCredentialStore;
     this.codexCatalogProvider = deps.codexCatalogProvider;
     this.modelPreferences = deps.modelPreferences;
@@ -69,6 +84,78 @@ export class ProviderService {
         providers: this.ctx.snapshot.providers.map((provider) => provider.id === "codex" ? { ...provider, configured: true, verified: false, availability: "unavailable", detail: error instanceof Error ? error.message : "Codex is unavailable." } : provider),
       });
     }
+  }
+
+  private anthropicProviders(update: Pick<ProviderStatus, "configured" | "verified" | "availability"> & { detail?: string }): RuntimeSnapshot["providers"] {
+    return this.ctx.snapshot.providers.map((provider) => provider.id === "anthropic" ? { ...provider, ...update } : provider);
+  }
+
+  async refreshAnthropicModels(): Promise<void> {
+    let apiKey: string | null;
+    try {
+      apiKey = await this.anthropicVault.get();
+    } catch (error) {
+      this.ctx.publish({
+        models: this.mergeProviderModels("anthropic", []),
+        providers: this.anthropicProviders({ configured: false, verified: false, availability: "unavailable", detail: describeAnthropicFailure(error) }),
+      });
+      return;
+    }
+    if (!apiKey) {
+      this.ctx.publish({
+        models: this.mergeProviderModels("anthropic", []),
+        providers: this.anthropicProviders({ configured: false, verified: false, availability: "needs-configuration", detail: ANTHROPIC_NOT_CONNECTED }),
+      });
+      return;
+    }
+    this.ctx.publish({ providers: this.anthropicProviders({ configured: true, verified: false, availability: "checking" }) });
+    try {
+      const models = await listAnthropicModels(apiKey);
+      if (models.length === 0) throw new Error("Anthropic did not return any models for this API key.");
+      this.ctx.publish({
+        models: this.mergeProviderModels("anthropic", models),
+        providers: this.anthropicProviders({ configured: true, verified: true, availability: "ready", detail: "Connected with an Anthropic API key." }),
+      });
+    } catch (error) {
+      this.ctx.publish({
+        providers: this.anthropicProviders({ configured: true, verified: false, availability: "unavailable", detail: describeAnthropicFailure(error) }),
+      });
+    }
+  }
+
+  private async connectAnthropic(apiKey: string): Promise<void> {
+    await this.ctx.ensureInitialized();
+    const candidate = apiKey.trim();
+    if (!candidate) throw new Error("Anthropic API key cannot be empty");
+    if (this.ctx.startingRun || this.ctx.runId) throw makeRuntimeError("busy");
+    const previous = this.ctx.snapshot.providers.find((provider) => provider.id === "anthropic")!;
+    this.ctx.publish({ providers: this.anthropicProviders({ configured: previous.configured, verified: false, availability: "checking" }) });
+    try {
+      // Listing models validates the key, so only a working key is stored.
+      const models = await listAnthropicModels(candidate);
+      if (models.length === 0) throw new Error("Anthropic did not return any models for this API key.");
+      await this.anthropicVault.set(candidate);
+      this.ctx.publish({
+        models: this.mergeProviderModels("anthropic", models),
+        providers: this.anthropicProviders({ configured: true, verified: true, availability: "ready", detail: "Connected with an Anthropic API key." }),
+        status: this.ctx.idleStatus(),
+      });
+    } catch (error) {
+      this.ctx.publish({ providers: this.anthropicProviders({ ...previous, detail: describeAnthropicFailure(error) }) });
+      throw normalizeError(error);
+    }
+  }
+
+  private async disconnectAnthropic(): Promise<void> {
+    await this.ctx.ensureInitialized();
+    if (this.ctx.startingRun || this.ctx.runId) throw makeRuntimeError("busy");
+    await this.anthropicVault.delete();
+    this.ctx.publish({
+      models: this.mergeProviderModels("anthropic", []),
+      providers: this.anthropicProviders({ configured: false, verified: false, availability: "needs-configuration", detail: ANTHROPIC_NOT_CONNECTED }),
+      status: this.ctx.snapshot.selectedProviderId === "anthropic" ? "error" : this.ctx.idleStatus(),
+      error: null,
+    });
   }
 
   async validateStoredCredential(): Promise<void> {
@@ -124,6 +211,10 @@ export class ProviderService {
   async connectProvider(providerId: ProviderId, options: { apiKey?: string; mode?: "api-key" | "browser" | "device" }): Promise<void> {
     if (providerId === "openrouter") {
       await this.connect(options.apiKey ?? "");
+      return;
+    }
+    if (providerId === "anthropic") {
+      await this.connectAnthropic(options.apiKey ?? "");
       return;
     }
     await this.ctx.ensureInitialized();
@@ -225,6 +316,10 @@ export class ProviderService {
       await this.disconnect();
       return;
     }
+    if (providerId === "anthropic") {
+      await this.disconnectAnthropic();
+      return;
+    }
     await this.ctx.ensureInitialized();
     if (this.ctx.startingRun || this.ctx.runId) throw makeRuntimeError("busy");
     await this.cancelProviderAuth("codex");
@@ -293,6 +388,7 @@ export class ProviderService {
     await this.ctx.ensureInitialized();
     if (this.ctx.startingRun || this.ctx.runId) throw makeRuntimeError("busy");
     await this.refreshCodexModels();
+    await this.refreshAnthropicModels();
     const apiKey = await this.vault.get();
     if (!apiKey || !this.ctx.snapshot.credential.verified) {
       return;

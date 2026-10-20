@@ -12,6 +12,7 @@ const parse = (input: Input): RuntimeSnapshot => runtimeSnapshotSchema.parse({ .
 const providers: RuntimeSnapshot["providers"] = [
   { id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" },
   { id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" },
+  { id: "anthropic", name: "Anthropic", configured: true, verified: true, availability: "ready" },
 ];
 
 const models: RuntimeSnapshot["models"] = [
@@ -20,6 +21,7 @@ const models: RuntimeSnapshot["models"] = [
   { id: "openrouter/openai/gpt-mini", providerId: "openrouter", rawId: "openai/gpt-mini", name: "GPT Mini", reasoningOptions: ["minimal", "low", "medium", "high"], contextLength: 128_000, promptPrice: 0.0000004, completionPrice: 0.0000016, popularityRank: 2, inputModalities: ["text"], outputModalities: ["text"] },
   { id: "openrouter/google/gemini-flash", providerId: "openrouter", rawId: "google/gemini-flash", name: "Gemini Flash", contextLength: 1_000_000, popularityRank: 3, inputModalities: ["text", "image"], outputModalities: ["text"] },
   { id: "codex/gpt-codex", providerId: "codex", rawId: "gpt-codex", name: "GPT Codex", reasoningOptions: ["low", "medium", "high", "xhigh"], reasoningEffort: "high", contextLength: 400_000, inputModalities: ["text"], outputModalities: ["text"] },
+  { id: "anthropic/claude-opus-5-5", providerId: "anthropic", rawId: "claude-opus-5-5", name: "Claude Opus 5.5", contextLength: 200_000, inputModalities: ["text"], outputModalities: ["text"] },
 ];
 
 const base = {
@@ -157,25 +159,25 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
     }
     case "settings":
       return parse({
-        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Sign in with your ChatGPT account" }],
+        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Sign in with your ChatGPT account" }, { id: "anthropic", name: "Anthropic", configured: false, verified: false, availability: "needs-configuration", detail: "Add an Anthropic API key to use Claude models." }],
         threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
       });
     case "settings-rejected":
       return parse({
         status: "needs-key", credential: { configured: true, verified: false },
-        providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: false, availability: "needs-configuration" }, providers[1]!],
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: false, availability: "needs-configuration" }, providers[1]!, providers[2]!],
         error: { code: "invalid-credential", message: "OpenRouter rejected that key. Check it and try again.", retryable: false },
         threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
       });
     case "settings-checking":
       return parse({
         status: "validating-key", credential: { configured: false, verified: false },
-        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!],
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!, providers[2]!],
         threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
       });
     case "settings-device":
       return parse({
-        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "checking" }],
+        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "checking" }, providers[2]!],
         providerAuth: { providerId: "codex", mode: "device", status: "waiting", url: "https://auth.example.com/device", instructions: "Open the page and enter this code.", code: "QX7K-4MPD" },
         selectedProviderId: "codex", selectedModelId: "codex/gpt-codex",
         threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),

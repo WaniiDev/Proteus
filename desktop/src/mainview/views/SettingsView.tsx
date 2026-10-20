@@ -52,7 +52,7 @@ type SettingsViewProps = {
   onSection: (section: SettingsSection) => void;
   apiKey: string;
   setApiKey: (value: string) => void;
-  onConnect: (event: FormEvent<HTMLFormElement>) => void;
+  onConnect: (event: FormEvent<HTMLFormElement>, providerId: ProviderId) => void;
   onDisconnect: (providerId: ProviderId) => void;
   onStartCodexAuth: (mode: "browser" | "device") => void;
   onSubmitCodexAuth: (value: string) => void;

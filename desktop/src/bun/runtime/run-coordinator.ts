@@ -188,7 +188,8 @@ export class RunCoordinator {
       if (this.ctx.pendingThreadSelectionId !== null) throw makeRuntimeError("busy");
       await this.ctx.ensureInitialized();
       if (this.ctx.snapshot.selectedProviderId === "openrouter" && (!this.ctx.snapshot.credential.configured || !this.ctx.snapshot.credential.verified)) throw makeRuntimeError("invalid-credential");
-      if (this.ctx.snapshot.selectedProviderId === "codex" && this.ctx.snapshot.providers.find((provider) => provider.id === "codex")?.availability !== "ready") throw makeRuntimeError("model-unavailable");
+      const selectedProviderId = this.ctx.snapshot.selectedProviderId;
+      if (selectedProviderId !== "openrouter" && this.ctx.snapshot.providers.find((provider) => provider.id === selectedProviderId)?.availability !== "ready") throw makeRuntimeError("model-unavailable");
       let threadId = this.ctx.selectedThreadId ?? this.ctx.snapshot.activeThreadId;
       if (!threadId) threadId = await this.threads.createThread("New chat");
       return this.queueNativeMessage(threadId, candidate, { clientMessageId: messageId, optimistic: true });

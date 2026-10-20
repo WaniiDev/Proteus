@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { DEFAULT_MODEL_ID } from "../shared/constants";
-import type { AnswerIntentResult, ChatMessage, MemoryScope, OrbState, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
+import type { AnswerIntentResult, ChatMessage, MemoryScope, OrbState, ProviderId, RuntimeSnapshot, RuntimeSnapshotEnvelope, ThreadSummary, WorkspaceBinding } from "../shared/contracts";
 import { rpc } from "./lib/bridge";
 import { useScrollbars } from "./ds-app/useScrollbars";
 import { useViewSwap } from "./ds-app/useViewSwap";
@@ -26,6 +26,7 @@ const DEFAULT_SNAPSHOT: RuntimeSnapshot = {
   providers: [
     { id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" },
     { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration" },
+    { id: "anthropic", name: "Anthropic", configured: false, verified: false, availability: "needs-configuration" },
   ],
   models: [
     {
@@ -237,11 +238,11 @@ function AppShell() {
     return event.intent === "approve";
   };
   const intentState = useMemo<AnswerIntentState>(() => ({ pending: intentPending, notes: intentNotes }), [intentPending, intentNotes]);
-  const handleConnect = (event: FormEvent<HTMLFormElement>) => {
+  const handleConnect = (event: FormEvent<HTMLFormElement>, providerId: ProviderId) => {
     event.preventDefault();
     const candidate = apiKey;
     setApiKey("");
-    ignoreRpc(rpc.request["providers.connect"]({ providerId: "openrouter", mode: "api-key", apiKey: candidate }));
+    ignoreRpc(rpc.request["providers.connect"]({ providerId, mode: "api-key", apiKey: candidate }));
   };
   const createChat = async (workspaceBinding: WorkspaceBinding, workspaceLabel: string, availability: "ready" | "missing") => {
     if (snapshot.activeRun || creatingChatRef.current) return;

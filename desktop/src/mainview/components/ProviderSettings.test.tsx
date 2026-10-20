@@ -17,11 +17,13 @@ function snapshot(): RuntimeSnapshot {
     providers: [
       { id: "openrouter", name: "OpenRouter", configured: true, verified: true, availability: "ready" },
       { id: "codex", name: "Codex", configured: true, verified: true, availability: "ready", detail: "Connected with ChatGPT OAuth." },
+      { id: "anthropic", name: "Anthropic", configured: true, verified: true, availability: "ready", detail: "Connected with an Anthropic API key." },
     ],
     models: [
       { id: "codex/gpt-5", providerId: "codex", rawId: "gpt-5", name: "GPT-5", inputModalities: ["text"], outputModalities: ["text"] },
       { id: "openrouter/a", providerId: "openrouter", rawId: "a", name: "A", inputModalities: ["text"], outputModalities: ["text"] },
       { id: "openrouter/b", providerId: "openrouter", rawId: "b", name: "B", inputModalities: ["text"], outputModalities: ["text"] },
+      { id: "anthropic/claude-opus-5-5", providerId: "anthropic", rawId: "claude-opus-5-5", name: "Claude Opus 5.5", inputModalities: ["text"], outputModalities: ["text"] },
     ],
     selectedProviderId: "codex",
     selectedModelId: "codex/gpt-5",
@@ -63,7 +65,7 @@ const disconnected = (value: RuntimeSnapshot, id: ProviderId) => {
 describe("provider settings", () => {
   test("labels the select with how many providers are connected and shows one provider's list", () => {
     const html = render(snapshot(), "openrouter");
-    expect(html).toContain("Provider · 2 of 2 connected");
+    expect(html).toContain("Provider · 3 of 3 connected");
     expect(html).toContain('class="select-trigger"');
     expect(html).toContain("Credentials stay in Windows Credential Manager");
     expect(html).not.toContain("provider-connection");
@@ -168,6 +170,77 @@ describe("provider settings", () => {
     const rows = value.providers.map((provider) => ({ view: providerView(value, provider), error: keyErrorFor(value, provider) }));
     expect(JSON.stringify(rows)).not.toContain(secret);
     expect(JSON.stringify(value)).not.toContain(secret);
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  test("anthropic is an API-key provider like OpenRouter: connected row, Use, Replace key, Disconnect, Browse", () => {
+    const html = render(snapshot(), "anthropic");
+    expect(html).toContain("Connected");
+    expect(html).toContain("API key saved · 1 model");
+    expect(html).toContain(">Use</button>");
+    expect(html).toContain("Replace key");
+    expect(html).toContain("Disconnect");
+    expect(html).toContain("Browse");
+    expect(html).not.toContain("list-expand is-open");
+  });
+
+  test("anthropic not connected: key field open with the sk-ant placeholder and hint", () => {
+    const value = disconnected(snapshot(), "anthropic");
+    value.providers = value.providers.map((p) => p.id === "anthropic" ? { ...p, detail: "Add an Anthropic API key to use Claude models." } : p);
+    const html = render(value, "anthropic");
+    expect(html).toContain("Provider · 2 of 3 connected");
+    expect(html).toContain("list-expand is-open");
+    expect(html).toContain('placeholder="Paste your key · sk-ant-…"');
+    expect(html).toContain('aria-label="Anthropic API key"');
+    expect(html).toContain("Proteus checks the key by loading your Anthropic models.");
+    expect(html).not.toContain("field-error");
+    expect(html).not.toContain("Disconnect");
+  });
+
+  test("anthropic rejected key: the runtime detail is the field error and the stored key can be removed", () => {
+    const value = snapshot();
+    value.providers = value.providers.map((p) => p.id === "anthropic" ? { ...p, verified: false, availability: "unavailable" as const, detail: "That Anthropic API key is invalid or disabled." } : p);
+    const html = render(value, "anthropic");
+    expect(html).toContain("list-expand is-open");
+    expect(html).toContain('<span class="field-error"');
+    expect(html).toContain("That Anthropic API key is invalid or disabled.");
+    expect(html).toContain("That key wasn’t accepted.");
+    expect(html).toContain("dot err");
+    expect(html).toContain("Remove saved key");
+  });
+
+  test("anthropic replace that failed keeps the old key connected and shows the message in the open field", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const value = snapshot();
+    value.providers = value.providers.map((p) => p.id === "anthropic" ? { ...p, detail: "Anthropic could not be reached. Check your connection and retry." } : p);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(<ProviderSettings snapshot={value} viewId="anthropic" onViewChange={noop} onBrowseModels={noop} apiKey="" setApiKey={noop}
+      onConnect={noop} onDisconnect={noop} onStartCodexAuth={noop} onSubmitCodexAuth={noop} onCancelCodexAuth={noop} onSelectProvider={noop} />));
+    expect(host.textContent).toContain("Connected");
+    expect(host.textContent).toContain("Anthropic could not be reached");
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  test("anthropic empty submit says why, sends nothing and names the provider on connect", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const value = disconnected(snapshot(), "anthropic");
+    const calls: ProviderId[] = [];
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const view = (apiKey: string) => <ProviderSettings snapshot={value} viewId="anthropic" onViewChange={noop} onBrowseModels={noop} apiKey={apiKey} setApiKey={noop}
+      onConnect={(_event, id) => { calls.push(id); }} onDisconnect={noop} onStartCodexAuth={noop} onSubmitCodexAuth={noop} onCancelCodexAuth={noop} onSelectProvider={noop} />;
+    await act(async () => root.render(view("")));
+    await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(calls).toEqual([]);
+    expect(host.textContent).toContain("Paste your Anthropic key to connect. It starts with sk-ant-.");
+    await act(async () => root.render(view("sk-ant-x")));
+    await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(calls).toEqual(["anthropic"]);
     await act(async () => root.unmount());
     host.remove();
   });

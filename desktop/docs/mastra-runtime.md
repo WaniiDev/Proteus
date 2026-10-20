@@ -110,7 +110,9 @@ Renderer (`App.tsx`): `handleAnswerIntent` calls `chat.answer.intent` for each a
 
 ## Providers
 
-OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with each conversation; the most recently chosen combination seeds new conversations without changing existing ones. There is no silent fallback to OpenRouter.
+OpenRouter, Codex and Anthropic are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with each conversation; the most recently chosen combination seeds new conversations without changing existing ones. There is no silent fallback to OpenRouter.
+
+Anthropic uses an API key stored in its own Windows Credential Manager account (`anthropic.api-key`). Connecting lists models through the official Anthropic SDK (`GET /v1/models`), which validates the key; only an accepted key is stored. Retired models are hidden. Turns resolve the selected model with `@ai-sdk/anthropic`, and `web_search` uses Anthropic's `web_search_20250305` server tool. Anthropic state lives in `providers[]` (like Codex); the top-level `credential` field remains OpenRouter's.
 
 Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: false`. MastraCode owns ChatGPT OAuth and model construction. Credentials remain in Windows Credential Manager and never enter IPC snapshots, messages, diagnostics, thread metadata, or plan files.
 
@@ -125,7 +127,7 @@ Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: fal
 
 - `context.ts`: the shared state: the snapshot and its `publish`, selection, per-thread state cache, the single run marker (`runId`/`runThreadId`), optimistic and live-projected messages, pending-interaction bookkeeping, the composer mutation queue.
 - `thread-service.ts`: thread CRUD, selection and the switch queue, `stateFor`/`updateThreadState`, persisted thread state (write queue, rollback), `syncThreadState`/`syncMessages`.
-- `provider-service.ts`: OpenRouter and Codex auth, credential validation, model catalog, model and reasoning selection.
+- `provider-service.ts`: OpenRouter, Codex and Anthropic auth, credential validation, model catalog, model and reasoning selection.
 - `workspace-service.ts`: workspace binding, project registry, the server-owned per-thread `RequestContext`.
 - `memory-service.ts`: scoped durable memory settings and entries.
 - `interaction-service.ts`: `ask_user`, plan and tool-approval responses, resolving and failed bookkeeping, plan hydration.
@@ -133,11 +135,11 @@ Codex uses MastraCode's `MastraCodeGateway` with `routeThroughMastraGateway: fal
 - `run-coordinator.ts`: native stream projection, send, queue, retry, continue and abort.
 - `message-projector.ts`, `message-mapping.ts`: Mastra message to chat message mapping; `agent-factory.ts`: the `Agent` definition; `constants.ts`, `types.ts`: shared constants and types.
 
-Other backend modules are grouped by feature under `src/bun/`: `core/` (projection, error mapping, diagnostics, Mastra foundation, instructions, legacy cutover), `native/` (agent driver, stream projection, thread repository, tool-call guard), `providers/` (OpenRouter, Codex, auth, readiness, model preferences, credentials), `workspace/` (workspace registry and policy, tool compat, project registry), `memory/` (settings, tools, scoped memory) and `tools/` (approval, task and plan policy, tool decisions, working tools, ask-user). Error normalization lives in `core/runtime-error-mapping.ts`; the OpenRouter gateway lives in `providers/openrouter.ts`.
+Other backend modules are grouped by feature under `src/bun/`: `core/` (projection, error mapping, diagnostics, Mastra foundation, instructions, legacy cutover), `native/` (agent driver, stream projection, thread repository, tool-call guard), `providers/` (OpenRouter, Codex, Anthropic, auth, readiness, model preferences, credentials), `workspace/` (workspace registry and policy, tool compat, project registry), `memory/` (settings, tools, scoped memory) and `tools/` (approval, task and plan policy, tool decisions, working tools, ask-user). Error normalization lives in `core/runtime-error-mapping.ts`; the OpenRouter gateway lives in `providers/openrouter.ts`.
 
 ## Initialization and thread load failures
 
-`initialize()` runs storage, preferences, diagnostics, legacy cutover and thread sync, then continues to the provider and credential steps (Codex model refresh, stored credential validation) even when loading the thread state fails. Thread sync publishes the thread list before loading the target thread. If a thread metadata read fails, the runtime keeps the previous selection (or clears it when that thread is gone), surfaces a retryable error and records a `thread_state_load` diagnostic; nothing is cached for the failed thread, and it never defaults the thread to the app workspace, because that would silently redirect an attached project conversation. Startup only records the failure and continues; an explicit `selectThread` or `createThread` whose target fails to load rejects (the RPC answers `accepted: false`) without subscribing to the target. A retry whose clone cannot be loaded and selected rejects, deletes the clone and republishes the thread list, so no stale "· retry" entry remains. `deleteThread` drops the deleted thread even when loading the next one fails, and both delete (even a failed one) and retry-clone cleanup forget the thread's saved state and continuation track.
+`initialize()` runs storage, preferences, diagnostics, legacy cutover and thread sync, then continues to the provider and credential steps (Codex and Anthropic model refresh, stored credential validation) even when loading the thread state fails. Thread sync publishes the thread list before loading the target thread. If a thread metadata read fails, the runtime keeps the previous selection (or clears it when that thread is gone), surfaces a retryable error and records a `thread_state_load` diagnostic; nothing is cached for the failed thread, and it never defaults the thread to the app workspace, because that would silently redirect an attached project conversation. Startup only records the failure and continues; an explicit `selectThread` or `createThread` whose target fails to load rejects (the RPC answers `accepted: false`) without subscribing to the target. A retry whose clone cannot be loaded and selected rejects, deletes the clone and republishes the thread list, so no stale "· retry" entry remains. `deleteThread` drops the deleted thread even when loading the next one fails, and both delete (even a failed one) and retry-clone cleanup forget the thread's saved state and continuation track.
 
 ## Storage and packaging
 
