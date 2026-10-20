@@ -4,7 +4,7 @@ import { Mastra } from "@mastra/core/mastra";
 import { Memory } from "@mastra/memory";
 import { LocalFilesystem, Workspace, WORKSPACE_TOOLS } from "@mastra/core/workspace";
 import { Utils } from "electrobun/bun";
-import type { DiagnosticsSnapshot, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot, WorkspaceBinding, WorkspaceBindingUpdateResult } from "../shared/contracts";
+import type { AnswerIntentParams, AnswerIntentResult, DiagnosticsSnapshot, InteractionResponseResult, MemoryCategory, MemoryScope, MemorySettingsState, ProviderId, ProviderModelId, ReasoningEffort, RuntimeSnapshot, WorkspaceBinding, WorkspaceBindingUpdateResult } from "../shared/contracts";
 import { createCodexCredentialStore, createCredentialVault, ensureUserDataDirectory, type CodexCredentialStore, type CredentialVault } from "./providers/credentials";
 import { openRouterGateway } from "./providers/openrouter";
 import { TaskToolPolicy } from "./tools/task-tool-policy";
@@ -30,6 +30,7 @@ import { WorkspaceService } from "./runtime/workspace-service";
 import { ProviderService } from "./runtime/provider-service";
 import { MemoryService } from "./runtime/memory-service";
 import { RunCoordinator } from "./runtime/run-coordinator";
+import { AnswerIntentService } from "./runtime/answer-intent-service";
 
 /** Public entry point of the Mastra-backed text runtime; the services in runtime/ own the behaviour. */
 
@@ -48,6 +49,7 @@ export class TextRuntime {
   private readonly providers: ProviderService;
   private readonly memories: MemoryService;
   private readonly runs: RunCoordinator;
+  private readonly answerIntents: AnswerIntentService;
   private initializePromise: Promise<RuntimeSnapshot> | undefined;
   private shutdownPromise: Promise<void> | null = null;
 
@@ -112,6 +114,7 @@ export class TextRuntime {
     this.providers = new ProviderService(ctx, { vault, codexCredentialStore, codexCatalogProvider, modelPreferences, threads: this.threads, abortRun: () => this.runs.abort() });
     this.memories = new MemoryService(ctx, { projects, scopedMemory });
     this.runs = new RunCoordinator(ctx, { nativeDriver, diagnostics: this.diagnostics, memory, threadRepo, threads: this.threads, workspaces: this.workspaces, interactions: this.interactions, continuation: this.continuation, projector: this.projector });
+    this.answerIntents = new AnswerIntentService(ctx, { threads: this.threads, workspaceRegistry: this.workspaceRegistry, workspaces: this.workspaces, runs: this.runs, diagnostics: this.diagnostics });
     ctx.ensureInitialized = async () => { await this.initialize(); };
 
     this.mastra = new Mastra({
@@ -334,6 +337,10 @@ export class TextRuntime {
 
   async respondToToolApproval(toolCallId: string, approved: boolean, fingerprint: string): Promise<InteractionResponseResult> {
     return this.interactions.respondToToolApproval(toolCallId, approved, fingerprint);
+  }
+
+  async runAnswerIntent(params: AnswerIntentParams): Promise<AnswerIntentResult> {
+    return this.answerIntents.run(params);
   }
 
   async retry(messageId: string): Promise<{ runId: string }> {
