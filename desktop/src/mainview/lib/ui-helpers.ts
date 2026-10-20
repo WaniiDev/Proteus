@@ -22,7 +22,7 @@ export function groupAssistantPartRuns(parts: ChatMessagePart[]): AssistantPartR
       runs.push({ type: "text", part });
       continue;
     }
-    if (part.type === "source-url") continue;
+    if (part.type === "source-url" || part.type === "answer") continue; // answers get their own renderer (WAN-529)
     const previous = runs.at(-1);
     if (previous?.type === "tools") previous.tools.push(part);
     else runs.push({ type: "tools", tools: [part] });

@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatMessagePart, ChatToolPart } from "../../shared/contracts";
 import { toolResultError } from "../tools/tool-result-error";
 import { extractSafeErrorMessage } from "../core/error-message";
+import { answerPart, answerRejected, projectAnswerInput, projectAnswerText, SHOW_ANSWER_NAME } from "./answer-stream";
 
 export type NativeAgentChunk = {
   type: string;
@@ -38,6 +39,8 @@ function usageFrom(payload: Record<string, unknown> | undefined): NativeStreamPr
 
 export class NativeStreamProjector {
   private readonly turns = new Map<string, NativeStreamProjection>();
+  /** Raw streamed `show_answer` input text per run and tool call. */
+  private readonly answerInput = new Map<string, string>();
 
   apply(threadId: string, chunk: NativeAgentChunk): NativeStreamProjection | null {
     const runId = chunk.runId;
@@ -72,7 +75,40 @@ export class NativeStreamProjector {
 
     const toolCallId = typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
     const toolName = typeof payload.toolName === "string" ? payload.toolName : undefined;
-    if (toolCallId && toolName && ["tool-call-input-streaming-start", "tool-call", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended"].includes(chunk.type)) {
+    // show_answer streams as an answer item: only complete, valid blocks reach the snapshot (ADR 0003).
+    const answerIndex = toolCallId ? parts.findIndex((part) => part.type === "answer" && part.toolCallId === toolCallId) : -1;
+    const isAnswerCall = toolName === SHOW_ANSWER_NAME || answerIndex >= 0;
+    let answerHandled = false;
+    if (toolCallId && isAnswerCall) {
+      const key = `${runId}:${toolCallId}`;
+      const id = `${runId}:answer:${toolCallId}`;
+      const write = (part: ChatMessagePart) => {
+        if (answerIndex >= 0) parts[answerIndex] = part;
+        else parts.push(part);
+      };
+      const rejected = chunk.type === "tool-result" ? answerRejected(payload.result) ?? toolResultError(payload.result) : undefined;
+      if (chunk.type === "tool-call-input-streaming-start") {
+        this.answerInput.set(key, "");
+        if (answerIndex < 0) write(answerPart({ id, toolCallId, projection: { title: "", blocks: [] }, streaming: true }));
+        answerHandled = true;
+      } else if (chunk.type === "tool-call-delta") {
+        const text = `${this.answerInput.get(key) ?? ""}${typeof payload.argsTextDelta === "string" ? payload.argsTextDelta : ""}`;
+        this.answerInput.set(key, text);
+        write(answerPart({ id, toolCallId, projection: projectAnswerText(text), streaming: true }));
+        answerHandled = true;
+      } else if (chunk.type === "tool-call") {
+        this.answerInput.delete(key);
+        write(answerPart({ id, toolCallId, projection: projectAnswerInput(payload.args), streaming: false }));
+        answerHandled = true;
+      } else if (chunk.type === "tool-result" && !rejected && payload.isError !== true) {
+        answerHandled = true;
+      } else if (answerIndex >= 0 && ["tool-result", "tool-error"].includes(chunk.type)) {
+        // Rejected composition or failed call: the person never sees the answer, only a failed tool step.
+        this.answerInput.delete(key);
+        parts.splice(answerIndex, 1);
+      }
+    }
+    if (!answerHandled && toolCallId && toolName && ["tool-call-input-streaming-start", "tool-call", "tool-result", "tool-error", "tool-call-approval", "tool-call-suspended"].includes(chunk.type)) {
       const index = parts.findIndex((part) => part.type === "tool" && part.toolCallId === toolCallId);
       const prior = index >= 0 && parts[index]?.type === "tool" ? parts[index] as ChatToolPart : undefined;
       const resultError = chunk.type === "tool-result" ? toolResultError(payload.result) : undefined;
@@ -89,6 +125,11 @@ export class NativeStreamProjector {
       };
       if (index >= 0) parts[index] = next;
       else parts.push(next);
+    }
+
+    if (["finish", "abort", "error"].includes(chunk.type)) {
+      parts = parts.map((part) => (part.type === "answer" && part.streaming ? { ...part, streaming: false } : part));
+      for (const key of [...this.answerInput.keys()]) if (key.startsWith(`${runId}:`)) this.answerInput.delete(key);
     }
 
     if (chunk.type === "finish") {
@@ -110,6 +151,7 @@ export class NativeStreamProjector {
   }
 
   delete(runId: string): void {
+    for (const key of [...this.answerInput.keys()]) if (key.startsWith(`${runId}:`)) this.answerInput.delete(key);
     this.turns.delete(runId);
   }
 

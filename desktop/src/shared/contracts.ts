@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { answerBlockSchema } from "./answer-catalog";
 
 export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
 export const orbStateSchema = z.enum(orbStates);
@@ -112,10 +113,32 @@ export const chatSourcePartSchema = z.object({
   url: z.string().url(),
   title: z.string().optional(),
 });
-export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema, chatSourcePartSchema]);
+/** A block that completed but failed validation: the renderer shows one line for it and the answer continues. */
+export const answerFallbackBlockSchema = z.object({ type: z.literal("fallback") }).strict();
+export type AnswerFallbackBlock = z.infer<typeof answerFallbackBlockSchema>;
+export const answerPartBlockSchema = z.union([answerBlockSchema, answerFallbackBlockSchema]);
+export type AnswerPartBlock = z.infer<typeof answerPartBlockSchema>;
+/**
+ * A `show_answer` tool call as an answer (ADR 0003). `blocks` holds only complete, valid blocks (plus fallbacks) while
+ * `streaming` is true. `outcomes` records what happened per block or row id ("Approved", "Chosen · ...") and is filled
+ * after the person acts; empty until then.
+ */
+export const chatAnswerPartSchema = z.object({
+  type: z.literal("answer"),
+  id: z.string().min(1),
+  toolCallId: z.string().min(1),
+  answerId: z.string().min(1),
+  title: z.string(),
+  question: z.string().default(""),
+  blocks: z.array(answerPartBlockSchema),
+  streaming: z.boolean(),
+  outcomes: z.record(z.string(), z.string()).default({}),
+});
+export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema, chatSourcePartSchema, chatAnswerPartSchema]);
 export type ChatMessagePart = z.infer<typeof chatMessagePartSchema>;
 export type ChatToolPart = z.infer<typeof chatToolPartSchema>;
 export type ChatSourcePart = z.infer<typeof chatSourcePartSchema>;
+export type ChatAnswerPart = z.infer<typeof chatAnswerPartSchema>;
 
 export const chatMessageSchema = z.object({
   id: z.string().min(1),

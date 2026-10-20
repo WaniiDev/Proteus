@@ -73,6 +73,20 @@ The agent answers with interface through one tool, `show_answer` (`src/bun/tools
 
 Composition rules (headline first and once, `sources` then `suggest` last, at most 10 blocks, one primary action, one `choice`, one `diff`) are checked when the call ends. The tool only acknowledges (`{ ok: true, shown: true }`); the UI reads the streamed input. On a composition failure the first result is `{ ok: false, retry: true, error }`; a second consecutive failure on the same thread returns `retry: false` and instructs the model to answer in prose, and a valid answer or that fallback resets the count. The person never sees a rejected answer. The agent instructions carry the ADR line that chooses between `show_answer` and prose.
 
+### Answer items in the snapshot
+
+`show_answer` is projected as an `answer` message part (`chatAnswerPartSchema` in `src/shared/contracts.ts`): `{ answerId, toolCallId, title, question, blocks, streaming, outcomes }`. `answerId` is the tool call id. `question` is the text of the user message that opened the turn (filled when messages are mapped from storage, empty on the live stream). `outcomes` is a record keyed by block or row id (`"Approved"`, `"Opened"`, `"Chosen · …"`, `"Not now · unchanged"`); it is empty now and is filled when answer actions land (WAN-530).
+
+While the call streams, `NativeStreamProjector` buffers the `tool-call-delta` input text per tool call and reads it with `parsePartialJson` (`src/bun/native/partial-json.ts`), so only closed nodes are ever read. `projectAnswerText` (`src/bun/native/answer-stream.ts`) then projects:
+
+- a block only once it is closed and passes `validateBlock`; no half-parsed block reaches the snapshot;
+- rows of `list`, `timeline`, `table` and `progress` items one at a time, once the block's own fields are closed and the block is valid with the rows received so far (a row that would break the block waits for the block to close);
+- a closed block that fails validation as `{ type: "fallback" }` (the renderer shows one line; later blocks continue).
+
+`tool-call` (complete input) re-projects the whole input and sets `streaming: false`; `finish`, `abort` and `error` also end streaming. A rejected result (`{ ok: false }`, a tool error or a failed result) removes the answer part and leaves an ordinary failed `show_answer` tool step, so the person never sees a rejected answer and the retry streams a new answer item.
+
+History: the stored tool call maps back to an answer item in `toolPart` (`runtime/message-mapping.ts`) with `projectAnswerInput`, which validates each block the same way, from the unsanitized stored input (sanitizing truncates nested rows). A reload therefore yields the same blocks as the finished stream; a stored rejection reloads as the failed tool step.
+
 ## Providers
 
 OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with each conversation; the most recently chosen combination seeds new conversations without changing existing ones. There is no silent fallback to OpenRouter.
