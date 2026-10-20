@@ -519,7 +519,6 @@ input { font-family: var(--font-body); }
 .step-name { font-size: 14px; color: var(--muted); line-height: 1.45; transition: color .3s; }
 .wb-step.active .step-name { color: var(--ink); font-weight: 500; }
 .wb-step.done .step-name { color: var(--body-strong); }
-.step-note { display: block; font-size: 12px; color: var(--muted-soft); margin-top: 1px; }
 
 .wb-evidence { border-top: 1px solid var(--hairline-soft); }
 .wb-surface { border: 1px solid var(--hairline-soft); border-radius: var(--app-r-lg); padding: var(--s-sm) var(--s-base); background: var(--canvas-soft); }
