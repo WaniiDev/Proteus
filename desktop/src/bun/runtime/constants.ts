@@ -4,6 +4,7 @@ import type { AppModelSelection } from "../providers/model-preferences";
 
 export const AGENT_ID = "proteus-text-agent";
 export const RESOURCE_ID = "local-user";
+export const THREAD_PIN_METADATA_KEY = "proteus.pin.v1";
 export const THREAD_METADATA_KEY = "proteus.ui.v2";
 // Legacy pre-v2 data migration (kept 2026-10-19): remove once no install can still hold pre-v2 data.
 export const LEGACY_THREAD_METADATA_KEY = "proteus.workbench.v1";

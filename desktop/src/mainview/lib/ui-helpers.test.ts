@@ -5,6 +5,8 @@ import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, gro
 const now = new Date("2026-08-03T12:00:00.000Z");
 const thread = (id: string, title: string, updatedAt: string): ThreadSummary => ({
   id,
+  pinned: false,
+  pinnedAt: null,
   title,
   createdAt: updatedAt,
   updatedAt,

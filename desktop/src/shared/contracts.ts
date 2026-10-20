@@ -262,6 +262,8 @@ export const threadSummarySchema = z.object({
   activity: z.enum(["idle", "running", "waiting", "complete", "interrupted", "error"]).default("idle"),
   attention: z.number().int().nonnegative().default(0),
   workspace: workspaceScopeSummarySchema.default({ binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" }),
+  pinned: z.boolean().default(false),
+  pinnedAt: z.string().nullable().default(null),
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
@@ -466,6 +468,10 @@ export const proteusRpcSchema = {
       },
       "threads.rename": {
         params: {} as { threadId: string; title: string },
+        response: {} as { accepted: boolean },
+      },
+      "threads.pin": {
+        params: {} as { threadId: string; pinned: boolean },
         response: {} as { accepted: boolean },
       },
       "threads.delete": {

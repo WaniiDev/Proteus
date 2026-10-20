@@ -11,7 +11,7 @@ import { NativeThreadRepository } from "../native/native-thread-repository";
 import { NativeAgentDriver } from "../native/native-agent-driver";
 import type { ProjectRegistryStorage } from "../workspace/project-registry";
 import { DEFAULT_MODEL_SELECTION, LEGACY_THREAD_METADATA_KEY, RESOURCE_ID, THREAD_METADATA_KEY } from "./constants";
-import { emptyTokenUsage, mapThread } from "./message-mapping";
+import { compareThreads, emptyTokenUsage, mapThread } from "./message-mapping";
 import type { MastraMessage, PersistedThreadState } from "./types";
 import { makeRuntimeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
@@ -289,7 +289,7 @@ export class ThreadService {
         const activity = this.ctx.threadActivity.get(summary.id);
         return activity ? { ...summary, ...activity } : summary;
       })
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort(compareThreads);
     this.ctx.publish({ threads });
   }
 
@@ -319,7 +319,7 @@ export class ThreadService {
         const activity = this.ctx.threadActivity.get(summary.id);
         return activity ? { ...summary, ...activity } : summary;
       })
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort(compareThreads);
     if (threads.length === 0) {
       threads = [mapThread(await this.threadRepo.create("New chat", {
         [THREAD_METADATA_KEY]: {
@@ -485,6 +485,17 @@ export class ThreadService {
     const nextTitle = title.trim().slice(0, 80);
     if (!nextTitle) throw new Error("Conversation title cannot be empty");
     await this.threadRepo.rename(threadId, nextTitle);
+    await this.syncThreadState();
+  }
+
+  async pinThread(threadId: string, pinned: boolean): Promise<void> {
+    await this.ctx.ensureInitialized();
+    const current = await this.threadRepo.get(threadId);
+    if (!current) throw new Error("Conversation not found");
+    const already = mapThread(current);
+    // Re-pinning keeps the original pinnedAt, so a repeated request does not reorder the group.
+    if (already.pinned === pinned) return;
+    await this.threadRepo.setPinned(threadId, pinned ? new Date().toISOString() : null);
     await this.syncThreadState();
   }
 

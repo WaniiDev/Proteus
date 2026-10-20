@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { chatMessagePartSchema, openRouterModelIdSchema, pendingInteractionSchema, providerAuthSchema, providerModelSchema, proteusRpcSchema, runtimeSnapshotSchema } from "./contracts";
+import { describe, expect, it, test } from "bun:test";
+import { chatMessagePartSchema, openRouterModelIdSchema, pendingInteractionSchema, providerAuthSchema, providerModelSchema, proteusRpcSchema, runtimeSnapshotSchema, threadSummarySchema } from "./contracts";
 
 describe("OpenRouter contracts", () => {
   it("preserves valid provider source URL parts", () => {
@@ -102,5 +102,21 @@ describe("provider-neutral model contracts", () => {
     expect(Object.hasOwn(requests, "providers.auth.submit")).toBe(true);
     expect(Object.hasOwn(requests, "threads.workspace.select")).toBe(true);
     expect(Object.hasOwn(requests, "credentials.connect")).toBe(false);
+  });
+});
+
+describe("thread pin contract (WAN-513)", () => {
+  const base = { id: "t1", title: "T", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+
+  test("a summary without pin fields parses as unpinned", () => {
+    const parsed = threadSummarySchema.parse(base);
+    expect(parsed.pinned).toBe(false);
+    expect(parsed.pinnedAt).toBeNull();
+  });
+
+  test("a summary with pin fields keeps them", () => {
+    const parsed = threadSummarySchema.parse({ ...base, pinned: true, pinnedAt: "2026-02-01T00:00:00.000Z" });
+    expect(parsed.pinned).toBe(true);
+    expect(parsed.pinnedAt).toBe("2026-02-01T00:00:00.000Z");
   });
 });
