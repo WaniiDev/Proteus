@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { surge } from "./surge";
 
 type Call = { keyframes: unknown[]; options: { duration: number; delay?: number } };
@@ -15,6 +15,16 @@ function fake(rect = { left: 0, top: 0, width: 100, height: 100 }) {
 }
 
 describe("surge", () => {
+  // The lens ripple is scheduled for the half-way point; keep it from firing in other test files.
+  const realSetTimeout = globalThis.setTimeout;
+  const scheduled: number[] = [];
+  beforeEach(() => {
+    (globalThis as any).setTimeout = (_fn: unknown, ms: number) => void scheduled.push(ms);
+  });
+  afterEach(() => {
+    globalThis.setTimeout = realSetTimeout;
+  });
+
   it("animates focus, glow, two rings and the stage over 2.2s", () => {
     const layer = fake();
     const stage = fake();
@@ -23,6 +33,7 @@ describe("surge", () => {
     expect(layer.calls.slice(2).map((c) => c.options.delay)).toEqual([1100, 1240]);
     expect(stage.calls).toHaveLength(1);
     expect(stage.calls[0].options.duration).toBe(2200);
+    expect(scheduled).toEqual([1100]);
   });
 
   it("does nothing without a layer or origin", () => {
