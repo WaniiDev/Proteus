@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ThreadSummary } from "../../shared/contracts";
-import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime } from "./ui-helpers";
+import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupSessions, groupThreads, relativeTime } from "./ui-helpers";
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 const thread = (id: string, title: string, updatedAt: string): ThreadSummary => ({
@@ -130,5 +130,13 @@ describe("conversation helpers", () => {
     ]);
     expect(items[0]).toMatchObject({ type: "assistant", parts: [{ type: "text", text: "Answer" }, { type: "source-url", title: "Updated title" }] });
     expect(groupAssistantPartRuns([{ type: "text", id: "text", text: "Answer" }, source])).toEqual([{ type: "text", part: { type: "text", id: "text", text: "Answer" } }]);
+  });
+});
+
+describe("sidebar groups", () => {
+  it("puts pinned first, then Today and Earlier", () => {
+    const pinned = { ...thread("p", "Pinned", "2026-06-01T12:00:00.000Z"), pinned: true, pinnedAt: "2026-08-01T00:00:00.000Z" };
+    const groups = groupSessions([thread("old", "Old", "2026-07-20T12:00:00.000Z"), pinned, thread("new", "New", "2026-08-03T11:30:00.000Z")], now);
+    expect(groups.map((g) => [g.name, g.threads.map((t) => t.id)])).toEqual([["Pinned", ["p"]], ["Today", ["new"]], ["Earlier", ["old"]]]);
   });
 });

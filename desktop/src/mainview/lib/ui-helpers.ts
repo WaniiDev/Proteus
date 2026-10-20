@@ -102,6 +102,23 @@ export function groupThreads(threads: ThreadSummary[], query = "", now = new Dat
   })).filter((group) => group.threads.length > 0);
 }
 
+export type SessionGroupName = "Pinned" | "Today" | "Earlier";
+export type SessionGroup = { name: SessionGroupName; threads: ThreadSummary[] };
+
+// The sidebar groups: pinned first (most recently pinned on top), then Today and Earlier by last activity.
+export function groupSessions(threads: ThreadSummary[], now = new Date()): SessionGroup[] {
+  const today = startOfToday(now);
+  const recent = (left: ThreadSummary, right: ThreadSummary) => right.updatedAt.localeCompare(left.updatedAt);
+  const pinned = threads.filter((thread) => thread.pinned).sort((left, right) => (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "") || recent(left, right));
+  const rest = threads.filter((thread) => !thread.pinned).sort(recent);
+  const isToday = (thread: ThreadSummary) => { const t = new Date(thread.updatedAt).getTime(); return !Number.isFinite(t) || t >= today; };
+  return ([
+    { name: "Pinned", threads: pinned },
+    { name: "Today", threads: rest.filter(isToday) },
+    { name: "Earlier", threads: rest.filter((thread) => !isToday(thread)) },
+  ] as SessionGroup[]).filter((group) => group.threads.length > 0);
+}
+
 export function relativeTime(value: string, now = new Date()): string {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "";
