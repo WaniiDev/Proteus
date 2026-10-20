@@ -9,6 +9,7 @@ type ProviderSettingsProps = {
   setApiKey: (value: string) => void;
   onConnect: (event: FormEvent<HTMLFormElement>) => void;
   onDisconnect: (providerId: ProviderId) => void;
+  onConnectAnthropic: (apiKey: string) => void;
   onStartCodexAuth: (mode: "browser" | "device") => void;
   onSubmitCodexAuth: (value: string) => void;
   onCancelCodexAuth: () => void;
@@ -27,6 +28,11 @@ const PROVIDER_COPY: Record<ProviderId, { eyebrow: string; description: string; 
     description: "Connect a ChatGPT Plus or Pro account through secure OAuth.",
     credential: "OAuth",
   },
+  anthropic: {
+    eyebrow: "Claude API",
+    description: "Use an Anthropic API key to reach Claude models directly.",
+    credential: "API key",
+  },
 };
 
 function connectionLabel(provider: ProviderStatus): string {
@@ -36,8 +42,9 @@ function connectionLabel(provider: ProviderStatus): string {
   return "Not connected";
 }
 
-export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider }: ProviderSettingsProps) {
+export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDisconnect, onConnectAnthropic, onStartCodexAuth, onSubmitCodexAuth, onCancelCodexAuth, onRefresh, onSelectProvider }: ProviderSettingsProps) {
   const [authorizationCode, setAuthorizationCode] = useState("");
+  const [anthropicKey, setAnthropicKey] = useState("");
   const connectedCount = snapshot.providers.filter((provider) => provider.verified).length;
 
   return (
@@ -93,6 +100,15 @@ export function ProviderSettings({ snapshot, apiKey, setApiKey, onConnect, onDis
                       <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.credential.configured ? "Enter a replacement key" : "sk-or-v1-…"} autoComplete="off" aria-label="OpenRouter API key" />
                       <button className="btn-primary sm" type="submit" disabled={!apiKey.trim() || snapshot.status === "validating-key"}>{snapshot.status === "validating-key" ? "Checking…" : snapshot.credential.configured ? "Replace" : "Connect"}</button>
                     </form>
+                  ) : provider.id === "anthropic" ? (
+                    <>
+                      <form className="provider-key-form" onSubmit={(event) => { event.preventDefault(); onConnectAnthropic(anthropicKey); setAnthropicKey(""); }}>
+                        <KeyRound size={17} aria-hidden="true" />
+                        <input type="password" value={anthropicKey} onChange={(event) => setAnthropicKey(event.target.value)} placeholder={provider.configured ? "Enter a replacement key" : "sk-ant-…"} autoComplete="off" aria-label="Anthropic API key" />
+                        <button className="btn-primary sm" type="submit" disabled={!anthropicKey.trim() || isChecking}>{isChecking ? "Checking…" : provider.configured ? "Replace" : "Connect"}</button>
+                      </form>
+                      {provider.detail && !provider.verified && <p className="provider-key-detail" role="status">{provider.detail}</p>}
+                    </>
                   ) : (
                     <div className="provider-oauth-controls">
                       <p>{provider.detail ?? (provider.verified ? "Connected with ChatGPT OAuth." : "Connect ChatGPT to load the Codex model catalog.")}</p>

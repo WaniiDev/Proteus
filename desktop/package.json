@@ -15,7 +15,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.82",
     "@ai-sdk/openai": "4.0.96",
+    "@anthropic-ai/sdk": "0.135.0",
     "@mastra/ai-sdk": "1.11.1",
     "@mastra/code-sdk": "1.14.0",
     "@mastra/core": "1.78.0",
