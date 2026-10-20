@@ -14,7 +14,10 @@ export const ANSWER_INTENTS = ["open", "reply", "approve", "choose", "skip"] as 
 export type AnswerIntent = (typeof ANSWER_INTENTS)[number];
 
 const MARKUP_PATTERNS: RegExp[] = [
-  /<\/?[A-Za-z!?][^>]*>/, // HTML tags, comments, doctype
+  /<\/[A-Za-z][A-Za-z0-9-]*\s*>/, // closing tag
+  /<[A-Za-z][A-Za-z0-9-]*\s*\/?>/, // bare tag: <b>, <br/> ("x<y and y>z" is text)
+  /<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*)*\s+[A-Za-z_:][\w:.-]*\s*=[^<>]*>/, // tag with an attribute
+  /<[!?][^>]*>/, // comments, doctype, processing instructions
   /!?\[[^\]]*\]\([^)]*\)/, // Markdown links and images
   /\[[^\]]+\]\s*\[[^\]]*\]/, // Markdown reference links
   /\b[a-z][a-z0-9+.-]*:\/\//i, // any scheme:// URL
@@ -25,8 +28,8 @@ const MARKUP_PATTERNS: RegExp[] = [
   /(?<![\w*])\*\*[^*\s][^*]*\*\*(?![\w*])/, // bold pair (a lone "**kwargs" is text)
   /(?<![\w/.])__[^_\s][^_]*__(?![\w.])/, // bold pair (src/__init__.py is text)
   /~~[^~\s][^~]*~~/, // strike pair
-  /^\s{0,3}#{1,6}\s/m, // headings
-  /&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i, // HTML entities
+  /^[ \t]{0,3}#{1,6}[ \t]+\p{L}/mu, // headings ("# 1 priority is hiring" is text)
+  /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]{1,31});/i, // HTML entities ("AT&T; Verizon" is text)
 ];
 
 /** True when the text contains markup, HTML, Markdown or a link. */
@@ -34,14 +37,37 @@ export function containsMarkup(text: string): boolean {
   return MARKUP_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+/** Bidi controls (U+202A-202E, U+2066-2069) and zero-width characters (U+200B-200D, U+FEFF): they make text read differently from what it is. */
+const HIDDEN_CHARS = /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\uFEFF]/;
+/** C0 controls (tab excluded), DEL and line breaks. */
+const CONTROL_CHARS = /[\u0000-\u0008\u000A-\u001F\u007F]/;
+const HIDDEN_MESSAGE = "No bidirectional or zero-width characters.";
+
 const PLAIN_MESSAGE = "Plain text only: no markup, HTML, Markdown or links.";
-/** A plain-text string: trimmed, non-empty, no markup, no links. */
+/** A plain-text string: trimmed, non-empty, no markup, no links, no hidden characters. */
 const plain = (max?: number) => {
   const trimmed = z.string().trim().min(1);
-  return (max ? trimmed.max(max) : trimmed).refine((value) => !containsMarkup(value), { message: PLAIN_MESSAGE });
+  return (max ? trimmed.max(max) : trimmed)
+    .refine((value) => !containsMarkup(value), { message: PLAIN_MESSAGE })
+    .refine((value) => !HIDDEN_CHARS.test(value), { message: HIDDEN_MESSAGE });
 };
-/** Literal text (diff file and lines): shown escaped, so it may hold code, markup characters and blank lines. */
-const literal = z.string();
+/** One line of a diff: shown escaped, so it may hold code and markup characters (and be blank, and hold a tab), but no hidden or control characters. */
+const literalLine = z.string()
+  .refine((value) => !HIDDEN_CHARS.test(value), { message: HIDDEN_MESSAGE })
+  .refine((value) => !CONTROL_CHARS.test(value) && !value.includes("\r"), { message: "A line holds no control characters or line breaks." });
+
+const VCS_DIRS = new Set([".git", ".hg", ".svn"]);
+/**
+ * A workspace-relative path that is exactly what it looks like: no absolute or drive paths, no `.`/`..`/empty segments,
+ * no backslashes, nothing that changes under normalisation, no VCS metadata (`.git`, `.hg`, `.svn`) anywhere.
+ */
+export function isSafeDiffPath(file: string): boolean {
+  if (!file || file !== file.trim() || file !== file.normalize("NFC")) return false;
+  if (file.startsWith("/") || file.includes("\\") || /^[A-Za-z]:/.test(file)) return false;
+  if (HIDDEN_CHARS.test(file) || CONTROL_CHARS.test(file) || file.includes("\t") || file.includes("\r")) return false;
+  return file.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".." && !/[. ]$/.test(segment) && !VCS_DIRS.has(segment.toLowerCase()));
+}
+const diffPath = z.string().min(1).refine(isSafeDiffPath, { message: "A diff file is a plain relative workspace path." });
 
 export const tenthsSchema = z.number().int().min(0).max(10);
 
@@ -152,9 +178,9 @@ export const diffBlockSchema = z.object({
   type: z.literal("diff"),
   id: plain(),
   label: plain(),
-  file: literal.min(1),
+  file: diffPath,
   where: plain().optional(),
-  lines: z.array(z.object({ n: plain().optional(), text: literal, del: z.boolean().optional(), ins: z.boolean().optional() }).strict()).min(1).max(12),
+  lines: z.array(z.object({ n: plain().optional(), text: literalLine, del: z.boolean().optional(), ins: z.boolean().optional() }).strict()).min(1).max(12),
   act: z.object({ label: plain(), done: plain(), skipDone: plain() }).strict(),
 }).strict();
 

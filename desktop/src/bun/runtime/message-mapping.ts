@@ -1,5 +1,5 @@
 import type { ChatAnswerPart, ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
-import { answerPart, answerRejected, projectAnswerInput, SHOW_ANSWER_NAME } from "../native/answer-stream";
+import { answerConfirmed, answerPart, answerRejected, projectAnswerInput, SHOW_ANSWER_NAME } from "../native/answer-stream";
 import { isDeclinedToolResult } from "../tools/tool-decision";
 import { toolResultError } from "../tools/tool-result-error";
 import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY, THREAD_PIN_METADATA_KEY } from "./constants";
@@ -124,7 +124,7 @@ export function toolPart(part: unknown, messageId: string, index: number): ChatT
     // A rejected, failed or cancelled answer leaves nothing for the person to see (no answer, no tool step).
     if (answerRejected(output) || isError || declined || status === "cancelled") return null;
     // Stored answers keep their full input (sanitizing would truncate nested rows) and rebuild the same blocks as the stream.
-    return answerPart({ id: `${messageId}:answer:${toolCallId}`, toolCallId, projection: projectAnswerInput(input), streaming: status === "streaming_input" });
+    return answerPart({ id: `${messageId}:answer:${toolCallId}`, toolCallId, projection: projectAnswerInput(input), streaming: status === "streaming_input", confirmed: answerConfirmed(output) });
   }
   const safeInput = input === undefined ? undefined : sanitizeToolDetail(input);
   const safeOutput = output === undefined ? undefined : sanitizeToolDetail(output);

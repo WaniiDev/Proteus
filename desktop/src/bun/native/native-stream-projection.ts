@@ -1,7 +1,7 @@
 import type { ChatMessage, ChatMessagePart, ChatToolPart } from "../../shared/contracts";
 import { toolResultError } from "../tools/tool-result-error";
 import { extractSafeErrorMessage } from "../core/error-message";
-import { answerPart, answerRejected, projectAnswerInput, projectAnswerText, SHOW_ANSWER_NAME } from "./answer-stream";
+import { answerConfirmed, answerPart, answerRejected, projectAnswerInput, projectAnswerText, SHOW_ANSWER_NAME } from "./answer-stream";
 
 export type NativeAgentChunk = {
   type: string;
@@ -104,6 +104,9 @@ export class NativeStreamProjector {
         // Rejected composition or failed call: the person sees neither the answer nor a tool step; the retry streams a new answer.
         this.answerInput.delete(key);
         if (answerIndex >= 0) parts.splice(answerIndex, 1);
+      } else if (chunk.type === "tool-result" && answerIndex >= 0 && answerConfirmed(payload.result)) {
+        const current = parts[answerIndex];
+        if (current?.type === "answer") parts[answerIndex] = { ...current, confirmed: true };
       }
       // show_answer is never a tool step: the answer part is its only projection.
       answerHandled = true;

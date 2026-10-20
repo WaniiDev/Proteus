@@ -133,6 +133,8 @@ export const chatAnswerPartSchema = z.object({
   blocks: z.array(answerPartBlockSchema),
   streaming: z.boolean(),
   outcomes: z.record(z.string(), z.string()).default({}),
+  /** True once the `show_answer` call has an ok result (shown: true); only a confirmed answer can be acted on. */
+  confirmed: z.boolean().optional(),
 });
 export const ANSWER_INTENT_REFUSAL_CODES = ["refused", "already-done", "stale", "failed"] as const;
 /**

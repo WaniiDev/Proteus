@@ -73,6 +73,18 @@ describe("block markup and roles", () => {
     expect(out).toContain('aria-label="Approve the edit to docs/plan.md"');
   });
 
+  it("diff head shows the whole path, wrapped, with the full text as title and label", () => {
+    const file = "packages/some/very/deep/directory/structure/that/keeps/going/and/going/final-file-name.config.ts";
+    const diff = { type: "diff", id: "d", label: "Edit", file, lines: [{ n: "1", text: "x", ins: true }], act: { label: "Apply", done: "Applied", skipDone: "Skipped" } };
+    const head = html(makeAnswer([{ type: "headline", text: "H" }, diff] as never)).match(/<span class="gen-diff-file"[^>]*>.*?<\/span>/)?.[0] ?? "";
+    expect(head).toContain(`title="${file}"`);
+    expect(head).toContain(`aria-label="${file}"`);
+    expect(head.replace(/<[^>]+>/g, "")).toBe(file);
+    expect(head).toContain("<wbr/>");
+    expect(head).not.toContain("<strong");
+    expect(head).not.toContain("style=");
+  });
+
   it("quote, sources, suggest", () => {
     expect(out).toContain('<figure class="gen-quote"><p>Keep Friday light.</p><cite>notes.md</cite></figure>');
     expect(out).toContain('<div class="gen-sources"><span>From</span><span class="gen-source">notes.md</span>');
