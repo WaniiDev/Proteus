@@ -5,9 +5,11 @@ import { useDom } from "../test/dom";
 import type { RuntimeSnapshot } from "../../shared/contracts";
 
 const calls: string[] = [];
+let skillList: Array<{ name: string; description: string; path: string; source: string; conflict: boolean }> = [];
 mock.module("../lib/bridge", () => ({
   rpc: { request: {
     "memory.get": async () => ({ scopes: [] }),
+    "workspace.skills": async () => { calls.push("skills"); return skillList; },
     "projects.attach": async () => { calls.push("attach"); },
     "projects.open": async () => { calls.push("open"); },
     "projects.reconnect": async () => { calls.push("reconnect"); },
@@ -23,7 +25,7 @@ const longName = "A very long project name ".repeat(8).trim();
 const longPath = "/home/user/" + "deeply/nested/".repeat(12) + "folder";
 const project = (id: string, name: string, availability: "ready" | "missing", rootPath = `/home/${id}`) => ({ id, name, rootPath, availability, createdAt: iso, updatedAt: iso, lastOpenedAt: iso });
 const thread = (id: string, projectId: string) => ({ id, pinned: false, pinnedAt: null, title: `Chat ${id}`, createdAt: iso, updatedAt: iso, activity: "idle" as const, attention: 0, workspace: { binding: { kind: "project" as const, projectId }, label: projectId, availability: "ready" as const } });
-const snapshot = (projects: ReturnType<typeof project>[], threads: ReturnType<typeof thread>[] = []) => ({ projects, threads, activeRun: null }) as unknown as RuntimeSnapshot;
+const snapshot = (projects: ReturnType<typeof project>[], threads: ReturnType<typeof thread>[] = [], activeProjectId?: string) => ({ projects, threads, activeRun: null, activeWorkspace: activeProjectId ? { binding: { kind: "project", projectId: activeProjectId }, label: activeProjectId, availability: "ready" } : { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" } }) as unknown as RuntimeSnapshot;
 const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 
 async function mount(snap: RuntimeSnapshot, handlers: Partial<Record<"onCreateChat" | "onSelectThread" | "onOpenMemory", (id: string) => void>> = {}) {
@@ -121,5 +123,29 @@ describe("ProjectsView", () => {
     expect(view).toContain("onOpenMemory(selected.id)");
     expect(app).toContain('createChat({ kind: "project", projectId }');
     expect(app).toContain('setSettingsSection("memory")');
+  });
+
+  test("a project page lists its skills as List rows when a chat in it is active", async () => {
+    skillList = [{ name: "review", description: "Review a diff", path: "/home/p1/.agents/skills/review", source: "project", conflict: true }, { name: "plan", description: "Plan work", path: "/home/p1/.agents/skills/plan", source: "project", conflict: false }];
+    calls.length = 0;
+    const { host, done } = await mount(snapshot([project("p1", "Alpha", "ready")], [], "p1"));
+    await click(host.querySelector("button.list-row"));
+    await wait(0);
+    const label = byText(host, ".list-label", "Skills");
+    expect(label).toBeDefined();
+    expect(calls).toContain("skills");
+    expect(host.textContent).toContain("Review a diff");
+    expect(host.textContent).toContain("Conflict");
+    await done();
+  });
+
+  test("a project page explains how to see skills when no chat in it is active, without calling the workspace", async () => {
+    calls.length = 0;
+    const { host, done } = await mount(snapshot([project("p1", "Alpha", "ready")]));
+    await click(host.querySelector("button.list-row"));
+    await wait(0);
+    expect(host.textContent).toContain("Open a chat here to list this folder’s skills.");
+    expect(calls).not.toContain("skills");
+    await done();
   });
 });

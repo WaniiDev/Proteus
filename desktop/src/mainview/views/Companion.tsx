@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { PanelRight } from "lucide-react";
 import type { ChatEvent, InteractionResponseResult, OrbState, RuntimeSnapshot } from "../../shared/contracts";
 import { ORB_STATES } from "../orb/orb-spec";
 import { rpc } from "../lib/bridge";
 import { groupConversationItems } from "../lib/ui-helpers";
-import { ContextPane, type ContextPaneTab } from "../components/ContextPane";
+import { ConversationMenu } from "../components/ConversationMenu";
 import { selectedProviderCanChat, type QueuedDraft } from "../lib/composer-ui";
 import { Composer } from "../components/Composer";
 import { Icon } from "../components/Icon";
@@ -32,15 +31,9 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
   const [dockOrbAnchor, setDockOrbAnchor] = useState<HTMLDivElement | null>(null);
   const heroOrbAnchorRef = useCallback((element: HTMLDivElement | null) => setHeroOrbAnchor(element), []);
   const dockOrbAnchorRef = useCallback((element: HTMLDivElement | null) => setDockOrbAnchor(element), []);
-  const contextToggleRef = useRef<HTMLButtonElement>(null);
-  const [contextOpenByThread, setContextOpenByThread] = useState<Map<string, boolean>>(() => new Map());
-  const [contextTabByThread, setContextTabByThread] = useState<Map<string, ContextPaneTab>>(() => new Map());
   const [dockedThreads, setDockedThreads] = useState<Set<string>>(() => new Set());
   const lastMessage = snapshot.messages[snapshot.messages.length - 1];
   const { threadRef, showLatest, jumpLatest } = useSmartScroll(`${snapshot.activeThreadId ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.text.length ?? 0}:${snapshot.interactions.length}`);
-  const contextOpen = !!snapshot.activeThreadId && contextOpenByThread.get(snapshot.activeThreadId) === true;
-  const contextTab = snapshot.activeThreadId ? contextTabByThread.get(snapshot.activeThreadId) ?? "activity" : "activity";
-  const workbenchAttention = snapshot.workbench.pendingInteractions.filter((item) => item.status === "pending" || item.status === "resolving").length;
   useEffect(() => {
     onOrbState(state);
   }, [onOrbState, state]);
@@ -48,26 +41,12 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
     if (!snapshot.activeThreadId || (!snapshot.messages.length && !snapshot.activeRun)) return;
     setDockedThreads((current) => (current.has(snapshot.activeThreadId as string) ? current : new Set(current).add(snapshot.activeThreadId as string)));
   }, [snapshot.activeRun, snapshot.messages.length, snapshot.activeThreadId]);
-  useEffect(() => {
-    if (!contextOpen) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (snapshot.activeThreadId) setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-      requestAnimationFrame(() => contextToggleRef.current?.focus());
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [contextOpen, snapshot.activeThreadId]);
   const docked = !!snapshot.activeThreadId && (snapshot.messages.length > 0 || !!snapshot.activeRun || dockedThreads.has(snapshot.activeThreadId));
   const animateDock = !!snapshot.activeThreadId && runningForSelected && !dockedThreads.has(snapshot.activeThreadId);
   const lastErrorMessage = [...snapshot.messages].reverse().find((message) => message.status === "error");
   const retryTarget = snapshot.retryMessageId ?? lastErrorMessage?.id;
   const conversationItems = useMemo(() => groupConversationItems(snapshot.messages), [snapshot.messages]);
   const pendingToolIds = useMemo(() => new Set(snapshot.interactions.map((item) => item.toolCallId)), [snapshot.interactions]);
-  const jumpToInteraction = (id: string) => {
-    document.getElementById(`interaction-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  };
   return (
     <section className="view active companion-view">
       <div className="chat-titlebar window-drag-region electrobun-webkit-app-region-drag">
@@ -77,11 +56,11 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
             <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
           </div>
         </div>
-        <button ref={contextToggleRef} type="button" className={`workbench-toggle electrobun-webkit-app-region-no-drag${contextOpen ? " active" : ""}`} aria-label={contextOpen ? "Close context" : "Open context"} aria-expanded={contextOpen} aria-controls="conversation-context" disabled={!snapshot.activeThreadId} onClick={() => { if (!snapshot.activeThreadId) return; setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, !contextOpen)); }}><PanelRight size={16} /><span>Context</span>{workbenchAttention > 0 && <b>{workbenchAttention}</b>}</button>
+        <ConversationMenu snapshot={snapshot} />
       </div>
       <PersistentOrbSurface state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} heroAnchor={heroOrbAnchor} dockAnchor={dockOrbAnchor} />
       <div className="text-chat-layout">
-        <div className={`companion-grid ${contextOpen ? "context-present" : "context-absent"}`}>
+        <div className="companion-grid">
           <div className="stage">
             {runningElsewhere && <div className="other-run-note">Another conversation is running. You can browse this chat while it finishes.</div>}
             {!docked && <OrbPresence state={state} anchorRef={heroOrbAnchorRef} />}
@@ -174,25 +153,6 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
               onReasoningSelect={(reasoningEffort) => rpc.request["models.reasoning.select"]({ reasoningEffort }).then((result) => result.accepted)}
             />
           </div>
-          {contextOpen && (
-            <button
-              type="button"
-              className="context-backdrop"
-              aria-label="Close context pane"
-              onClick={() => {
-                if (!snapshot.activeThreadId) return;
-                setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-                requestAnimationFrame(() => contextToggleRef.current?.focus());
-              }}
-            />
-          )}
-          {contextOpen && <ContextPane snapshot={snapshot} tab={contextTab} onTabChange={(tab) => {
-            if (snapshot.activeThreadId) setContextTabByThread((current) => new Map(current).set(snapshot.activeThreadId as string, tab));
-          }} onJump={jumpToInteraction} onClose={() => {
-            if (!snapshot.activeThreadId) return;
-            setContextOpenByThread((current) => new Map(current).set(snapshot.activeThreadId as string, false));
-            requestAnimationFrame(() => contextToggleRef.current?.focus());
-          }} />}
         </div>
       </div>
     </section>
