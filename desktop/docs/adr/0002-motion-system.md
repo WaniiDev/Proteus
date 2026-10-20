@@ -18,6 +18,7 @@ Everything around the orb follows one rule: **no surface appears, disappears or 
 - **Selections glide.** Segmented controls use one sliding thumb; Day ↔ Night eases every colour together for one beat; the thread scrolls smoothly.
 - **Pages switch in two beats too.** A destination's own switches (Settings tabs, Memory spaces) move the segmented thumb at once, then the shown content fades up over 160ms before the next rises in on a stagger.
 - **Rows grow and fold.** A row that needs a form grows open below itself the way the Island grows (height only, 520ms, its own line still, content kept mounted so it can fold shut). A removed row fades and folds its height away over 220ms, so the rows below close the gap instead of jumping.
+- **Scrollbars wake and sleep.** Our own scrollbar (a 6px ink pill, no track) is hidden at rest, shows while its area is hovered, focused or scrolling, and fades out in two steps (180ms at half strength, then gone). It appears in one step because `::-webkit-scrollbar` parts can't transition, and it is shown by a `data-scrollbar` mark rather than `:hover`, which Chromium does not repaint.
 - **Springs only for what the person caused**; reduced motion resolves everything at once.
 
 ## Liquid transformations
