@@ -7,6 +7,10 @@ import { approveLabel, askCode, askSentence, askTitle } from "../../../lib/ask-c
 import { markdownComponents } from "../../MarkdownCode";
 import { AskActions, interactionVariant } from "./AskPrimitives";
 
+/** Commands run through Mastra's LocalSandbox with isolation "none": the approval says so (HANDOFF, mastra-runtime.md). */
+export const HOST_EXECUTION_NOTE = "On Windows this runs on your machine without a sandbox.";
+const HOST_EXECUTION_TOOLS = new Set(["mastra_workspace_execute_command"]);
+
 export type AskHandlers = {
   onRespond: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>;
   /** The fingerprint travels with the decision: the runtime refuses an approval for a request that changed. */
@@ -118,9 +122,9 @@ export function AskBody({ interaction, onRespond, onApproval, onResubmit, onDism
       {!failed && !isPlan && !isApproval && hasOptions && otherSelected && <input ref={fieldRef} autoFocus disabled={resolving} className="island-field" aria-label="Your own answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your own answer…" />}
       {!failed && !isPlan && !isApproval && !hasOptions && <textarea ref={fieldRef} disabled={resolving} className="island-field" aria-label={interaction.question ?? interaction.title} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Type your answer…" rows={2} />}
       {!failed && isPlan && <textarea disabled={resolving} className="island-field" aria-label="Optional feedback or requested changes" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Optional feedback or requested changes" rows={2} />}
+      {isApproval && !failed && HOST_EXECUTION_TOOLS.has(interaction.toolName ?? "") && <p className="island-note">{HOST_EXECUTION_NOTE}</p>}
       {(localError || interaction.error) && !failed && <p className="island-note">{localError ?? interaction.error?.message}</p>}
       {failed && localError && <p className="island-note">{localError}</p>}
-      {resolving && submissionUi.kicker && <p className="island-note">{submissionUi.kicker}</p>}
       <AskActions
         variant={variant}
         disabled={resolving}

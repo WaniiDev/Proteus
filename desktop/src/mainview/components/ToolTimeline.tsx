@@ -60,8 +60,15 @@ function markFor(status: ChatToolPart["status"]): string {
   }
 }
 
-// Running and done share one grid cell, so "Reading" fades into "Read" without the row changing size.
-function Verb({ tool, activity }: DescribedTool) {
+/** A tool still "running" in a list that is no longer live was cut off: it reads as stopped, not as a spinner that never ends. */
+function isStopped(tool: ChatToolPart, live: boolean): boolean {
+  return !live && (tool.status === "streaming_input" || tool.status === "running");
+}
+
+// Running and done swap in one cell sized to the visible verb; the leaving one overlays it and fades, so "Read docs/plan.md" has no gap.
+function Verb({ tool, activity, stopped, waiting }: DescribedTool & { stopped: boolean; waiting: boolean }) {
+  if (stopped) return <span className="step-verb">{activity.verbs.ongoing}</span>;
+  if (waiting) return <span className="step-verb">{activity.action.replace(/^Waiting (?:for approval )?to /, "").replace(/^\w/, (letter) => letter.toLocaleUpperCase())}</span>;
   const swaps = tool.status === "streaming_input" || tool.status === "running" || tool.status === "completed";
   if (!swaps) return <span className="step-verb">{activity.action}</span>;
   const done = tool.status === "completed";
@@ -73,31 +80,40 @@ function Verb({ tool, activity }: DescribedTool) {
   );
 }
 
-function Steps({ tools }: { tools: DescribedTool[] }) {
+function Steps({ tools, live }: { tools: DescribedTool[]; live: boolean }) {
   return (
     <>
-      {tools.map(({ tool, activity }) => (
-        <div className={`step step-${tool.status}`} key={tool.toolCallId}>
-          <span className={`step-mark ${markFor(tool.status)}`} role="img" aria-label={activity.statusLabel} />
-          <span className="step-copy">
-            <Verb tool={tool} activity={activity} />
-            {activity.target && (
-              <>
-                {" "}
-                <code className="step-target" title={activity.fullTarget ?? activity.target}>{activity.target}</code>
-              </>
-            )}
-            {activity.outcome && <span className="step-note"> · {activity.outcome}</span>}
-          </span>
-        </div>
-      ))}
+      {tools.map(({ tool, activity }) => {
+        const stopped = isStopped(tool, live);
+        const waiting = tool.status === "waiting";
+        const note = stopped ? "stopped" : waiting ? "waiting for you" : activity.outcome;
+        return (
+          <div className={`step step-${stopped ? "cancelled" : tool.status}`} key={tool.toolCallId}>
+            <span className={`step-mark ${stopped ? "no" : markFor(tool.status)}`} role="img" aria-label={stopped ? "Stopped" : activity.statusLabel} />
+            <span className="step-copy">
+              <Verb tool={tool} activity={activity} stopped={stopped} waiting={waiting} />
+              {activity.target && (
+                <>
+                  {" "}
+                  <code className="step-target" title={activity.fullTarget ?? activity.target}>{activity.target}</code>
+                </>
+              )}
+              {note && <span className="step-note"> · {note}</span>}
+            </span>
+          </div>
+        );
+      })}
     </>
   );
 }
 
+/** The tools whose card lives in the Island's body and is recorded as a resolved line afterwards; they never appear as steps. */
+const ASK_TOOLS = new Set(["ask_user", "submit_plan"]);
+
 export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: ChatToolPart[]; live: boolean; pendingIds: Set<string>; tasks?: WorkbenchTask[] }) {
   const [open, setOpen] = useState(false);
-  const visible = tools.filter((tool) => !pendingIds.has(tool.toolCallId));
+  // An approval that is waiting stays in the list as its own row ("Edit docs/plan.md · waiting for you"); questions and plans live in the Island only.
+  const visible = tools.filter((tool) => !(pendingIds.has(tool.toolCallId) && ASK_TOOLS.has(tool.name)));
   if (!visible.length) return null;
 
   const described = describeTools(visible, tasks);
@@ -122,7 +138,7 @@ export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: C
           <span className="step-group-copy">{summary}</span>
         </button>
       )}
-      {expanded && <Steps tools={described} />}
+      {expanded && <Steps tools={described} live={live} />}
     </section>
   );
 }

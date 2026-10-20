@@ -7,19 +7,10 @@ export function interactionSubmissionUi(kind: PendingInteraction["kind"], status
   const resolving = status === "resolving" || activeAction !== null;
   const isPlan = kind === "submit_plan";
   const isApproval = kind === "tool_approval";
+  // The pressed button (spinner + participle) is the only busy signal; there is no extra line.
   return {
     resolving,
-    kicker:
-      activeAction === "approve"
-        ? isPlan ? "Approving plan…" : isApproval ? "Approving tool…" : "Sending response…"
-        : activeAction === "reject"
-          ? isPlan ? "Sending requested changes…" : isApproval ? "Declining tool…" : "Sending response…"
-          : activeAction === "answer"
-            ? "Sending answer…"
-            : status === "resolving"
-              ? isApproval ? "Applying tool decision…" : "Sending response…"
-              : null,
-    approveLabel: activeAction === "approve" ? "Approving…" : isPlan ? "Approve plan" : isApproval ? (approveLabel ?? "Approve") : "Send answer",
-    rejectLabel: activeAction === "reject" ? (isPlan ? "Sending changes…" : "Declining…") : isPlan ? "Request changes" : isApproval ? "Decline" : "Cancel",
+    approveLabel: activeAction === "approve" ? "Approving…" : activeAction === "answer" ? "Answering…" : isPlan ? "Approve plan" : isApproval ? (approveLabel ?? "Approve") : "Answer",
+    rejectLabel: activeAction === "reject" ? (isPlan ? "Sending changes…" : "Declining…") : isPlan ? "Request changes" : isApproval ? "Decline" : "",
   };
 }

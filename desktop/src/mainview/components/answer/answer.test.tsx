@@ -122,7 +122,7 @@ describe("streaming and outcomes", () => {
 describe("AnswerCard", () => {
   it("is the thread card with the same blocks", () => {
     const o = renderToStaticMarkup(<AnswerCard answer={makeAnswer(fullBlocks)} />);
-    expect(o).toContain('<section class="gen-card" aria-label="Your week">');
+    expect(o).toContain('<section class="gen-card enter" aria-label="Your week">');
     expect(o).toContain("Answer · Your week");
     expect(o).toContain('<h2 class="gen-headline">');
     expect(o).toContain('class="gen-table cols-2"');

@@ -109,15 +109,32 @@ describe("Island variants", () => {
     await t.done();
   });
 
-  test("the Island is the one live region and the ask kicker is announced there", async () => {
+  test("live regions are the status slots and the announcement only; the body is never live", async () => {
     const t = await mount();
-    expect(t.qa("[aria-live]")).toHaveLength(1);
-    expect(t.q(".island").getAttribute("aria-live")).toBe("polite");
-    expect(t.qa('[role="status"], [role="alert"], [aria-live]:not(.island)')).toHaveLength(0);
+    const live = () => t.qa("[aria-live]").filter((el) => el.getAttribute("aria-live") !== "off");
+    expect(t.q(".island").hasAttribute("aria-live")).toBe(false);
+    expect(live().map((el) => el.className)).toEqual(["island-status", "island-status", "island-status", "sr-only"]);
+    expect(t.q(".island-body").getAttribute("aria-live")).toBe("off");
+    expect(t.q(".island-body").closest("[aria-live]:not(.island-body)")).toBeNull();
+    expect(t.qa('[role="status"], [role="alert"]')).toHaveLength(0);
     await t.render({ mode: "ask", end: "stop", askKind: "Approval" });
-    // Send hides while an ask is open, but the run can still be stopped.
-    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
+    // Both Send and Stop fade out while an ask is open: the ask answers from its body.
+    expect(t.qa(".island-end > [data-on='true']")).toHaveLength(0);
     expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Needs you · ApprovalYour call. Nothing moves without you."]);
+    expect(t.visibleStatus()[0]!.getAttribute("aria-live")).toBe("polite");
+    await t.done();
+  });
+
+  test("a streamed answer is announced as Answering then Answer ready, never block by block", async () => {
+    const body = (text: string) => <div className="gen-block"><p>{text}</p></div>;
+    const t = await mount({ mode: "answer", open: true, answerLabel: "Speaking", answerLine: "What needs my attention?", announcement: "Answering", body: body("one") });
+    const announced = () => t.qa("[aria-live]").filter((el) => el.getAttribute("aria-live") !== "off" && el.getAttribute("aria-hidden") !== "true").map((el) => el.textContent);
+    expect(announced()).toEqual(["Answering"]);
+    await t.render({ mode: "answer", open: true, answerLabel: "Speaking", answerLine: "What needs my attention?", announcement: "Answering", body: <>{body("one")}{body("two")}</> });
+    expect(announced()).toEqual(["Answering"]);
+    expect(t.q(".island-body").closest("[aria-live]:not(.island-body)")).toBeNull();
+    await t.render({ mode: "answer", open: true, answerLabel: "Answer", answerLine: "What needs my attention?", announcement: "Answer ready", body: body("two") });
+    expect(announced()).toEqual(["Answer ready"]);
     await t.done();
   });
 
@@ -136,6 +153,31 @@ describe("Island variants", () => {
     await t.done();
   });
 
+  test("sending a follow-up during a run hands the slot back to the status, not the input", async () => {
+    const t = await mount({ mode: "status", end: "stop", status: { label: "Working", line: "Reading notes/plan.md" } });
+    await act(async () => { t.visibleStatus()[0]!.click(); });
+    expect(t.q(".island-input").getAttribute("data-on")).toBe("true");
+    // The draft makes the composer a queue; Enter sends it and the field empties while the run goes on.
+    await t.render({ mode: "input", end: "send", sendLabel: "Queue message", sendDisabled: false, input: "next" });
+    await act(async () => { t.q<HTMLFormElement>(".island-row").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    await t.render({ mode: "status", end: "stop", input: "", sendDisabled: true, status: { label: "Working", line: "Reading notes/plan.md" } });
+    expect(t.q(".island-input").getAttribute("data-on")).toBe("false");
+    expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Working Reading notes/plan.md"]);
+    expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Stop"]);
+    await t.done();
+  });
+
+  test("a new run starts on the status even if the input was engaged during the last one", async () => {
+    const t = await mount({ mode: "status", end: "stop" });
+    await act(async () => { t.visibleStatus()[0]!.click(); });
+    expect(t.q(".island-input").getAttribute("data-on")).toBe("true");
+    await t.render({ mode: "input", end: "send" });
+    await t.render({ mode: "status", end: "stop" });
+    expect(t.q(".island-input").getAttribute("data-on")).toBe("false");
+    expect(t.visibleStatus()).toHaveLength(1);
+    await t.done();
+  });
+
   test("the status is a tab stop during a run, and focusing it engages the input", async () => {
     const t = await mount({ mode: "status", end: "stop", status: { label: "Working", line: "Thinking…" } });
     expect(t.visibleStatus()[0]!.getAttribute("tabindex")).toBe("0");
@@ -144,14 +186,14 @@ describe("Island variants", () => {
     await t.done();
   });
 
-  test("answer mode shows the label and question, ends with Done, and announces through the one live region", async () => {
+  test("answer mode shows the label and question, ends with Done, and announces through the sr-only live region", async () => {
     let done = 0;
     const t = await mount({ mode: "answer", answerLabel: "Speaking", answerLine: "What needs my attention?", announcement: "Answering", onDone: () => { done += 1; } });
     expect(t.visibleStatus().map((el) => el.textContent)).toEqual(["Speaking What needs my attention?"]);
     expect(t.qa(".island-end > [data-on='true']").map((el) => el.textContent)).toEqual(["Done"]);
     expect((t.q(".island-input") as HTMLTextAreaElement).disabled).toBe(true);
     expect(t.q(".island > .sr-only").textContent).toBe("Answering");
-    expect(t.qa("[aria-live]")).toHaveLength(1);
+    expect(t.q(".island > .sr-only").getAttribute("aria-live")).toBe("polite");
     await act(async () => { t.qa(".island-end .btn").find((el) => el.textContent === "Done")!.click(); });
     expect(done).toBe(1);
     await t.render({ mode: "answer", answerLabel: "Answer", answerLine: "What needs my attention?" });

@@ -81,14 +81,15 @@ describe("one live region", () => {
     const t = await mount({ ...withSteps, continuation: { threadId: snapshot.activeThreadId!, toolCallId: "t3", phase: "slow" } as never });
     expect(t.host.querySelector(".continuation-notice")).toBeTruthy();
     expect(t.host.querySelector(".steps")).toBeTruthy();
-    expect(t.host.querySelectorAll(".island[aria-live]")).toHaveLength(1);
+    expect(t.host.querySelectorAll(".island > [aria-live]:not(.island-body)")).toHaveLength(1);
+    expect(t.host.querySelector(".island-body")!.getAttribute("aria-live")).toBe("off");
     expect(regions(t.host)).toEqual([]);
   });
 
-  test("Stop stays reachable while an ask is open", async () => {
+  test("Stop fades out while an ask is open; the ask answers from its body", async () => {
     const t = await mount(buildFixture("ask"));
     const on = [...t.host.querySelectorAll(".island-end > [data-on='true']")].map((el) => el.textContent);
-    expect(on).toEqual(["Stop"]);
+    expect(on).toEqual([]);
   });
 });
 
@@ -132,7 +133,11 @@ describe("answers in the Island", () => {
     expect(t.thread().querySelectorAll(".gen-card")).toHaveLength(1);
     const done = [...t.host.querySelectorAll<HTMLButtonElement>(".island-end .btn")].find((b) => b.textContent === "Done")!;
     await act(async () => { done.click(); });
+    // The card waits for the body's exit, then rises in.
+    expect(t.thread().querySelectorAll(".gen-card")).toHaveLength(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); });
     expect(t.thread().querySelectorAll(".gen-card")).toHaveLength(2);
+    expect(t.thread().querySelectorAll(".gen-card.enter")).toHaveLength(2);
     expect(t.q(".island")!.classList.contains("is-open")).toBe(false);
     expect(t.q(".island-input")!.getAttribute("data-on")).toBe("true");
     expect(document.activeElement).toBe(t.q(".island-input"));
@@ -144,6 +149,7 @@ describe("answers in the Island", () => {
     expect(t.thread().querySelectorAll(".gen-card")).toHaveLength(1);
     await act(async () => { t.q<HTMLButtonElement>(".island-body .gen-chip")!.click(); });
     expect(asked).toHaveLength(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); });
     expect(t.thread().querySelectorAll(".gen-card")).toHaveLength(2);
     expect(t.q(".island")!.classList.contains("is-open")).toBe(false);
   });

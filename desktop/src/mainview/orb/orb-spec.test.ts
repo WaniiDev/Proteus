@@ -104,7 +104,7 @@ describe("orb visual contract", () => {
     expect(source).toContain("docked ? dockAnchor : heroAnchor");
     expect(source).toContain('anchor.closest<HTMLElement>(".companion-view")');
     expect(source).toContain("measureOrbPlacement(anchor.getBoundingClientRect(), companion.getBoundingClientRect())");
-    expect(source).toContain("advanceOrbPlacement(current, target");
+    expect(source).toContain("stepOrbPlacement(placementRef.current, target");
     expect(source).toContain("requestAnimationFrame(placeSurface)");
     expect(source).not.toContain('querySelector<HTMLElement>(".orb-float")');
   });

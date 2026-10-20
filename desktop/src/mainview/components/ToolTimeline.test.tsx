@@ -37,7 +37,7 @@ describe("ToolTimeline as a StepList", () => {
   });
 
   it("maps every status to a mark", () => {
-    const mark = (status: ChatToolPart["status"]) => render([tool("x", "mastra_workspace_read_file", status, { path: "a.ts" })]).match(/step-mark ([a-z ]+?)"/)?.[1];
+    const mark = (status: ChatToolPart["status"]) => render([tool("x", "mastra_workspace_read_file", status, { path: "a.ts" })], true).match(/step-mark ([a-z ]+?)"/)?.[1];
     expect(mark("running")).toBe("run");
     expect(mark("streaming_input")).toBe("run");
     expect(mark("completed")).toBe("done");
@@ -48,7 +48,7 @@ describe("ToolTimeline as a StepList", () => {
   });
 
   it("uses the present participle while running and the past tense when done, in one cell", () => {
-    const running = render([tool("x", "mastra_workspace_read_file", "running", { path: "a.ts" })]);
+    const running = render([tool("x", "mastra_workspace_read_file", "running", { path: "a.ts" })], true);
     const done = render([tool("x", "mastra_workspace_read_file", "completed", { path: "a.ts" })]);
     expect(running).toContain('<span data-on="true">Reading</span><span data-on="false" aria-hidden="true">Read</span>');
     expect(done).toContain('<span data-on="false" aria-hidden="true">Reading</span><span data-on="true">Read</span>');
@@ -69,11 +69,38 @@ describe("ToolTimeline as a StepList", () => {
     expect(html).toContain("…");
   });
 
-  it("keeps interaction tools out of the list while their card is pending", () => {
+  it("keeps question and plan tools out of the list while their card is pending", () => {
     const html = render([tool("question", "ask_user", "waiting", { question: "Which design?" }), tool("work", "task_update", "completed", { id: "t", content: "Review the design" })], true, ["question"]);
     expect(html).not.toContain("Which design?");
     expect(html).toContain("Review the design");
     expect(render([tool("q", "ask_user", "waiting", {})], true, ["q"])).toBe("");
+    expect(render([tool("p", "submit_plan", "waiting", {})], true, ["p"])).toBe("");
+  });
+
+  it("keeps a pending approval as a waiting row: \"Edit docs/plan.md · waiting for you\"", () => {
+    const html = render([tool("e", "mastra_workspace_edit_file", "waiting", { path: "docs/plan.md", old_string: "a", new_string: "b" })], true, ["e"]);
+    expect(html).toContain("step-mark wait");
+    expect(html).toContain('<span class="step-verb">Edit</span>');
+    expect(html).toContain("docs/plan.md");
+    expect(html).toContain("<span class=\"step-note\"> · waiting for you</span>");
+    expect(html).not.toContain("Waiting for approval");
+  });
+
+  it("sizes the verb cell to the visible verb: the leaving one is overlaid, not reserved", () => {
+    const html = render([tool("x", "mastra_workspace_read_file", "completed", { path: "docs/plan.md" })]);
+    expect(html).toContain('class="step-verb step-verb-swap"');
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.step-verb-swap > span\[data-on="false"\]\s*\{[^}]*position:\s*absolute/);
+    expect(css).not.toMatch(/\.step-verb-swap\s*\{[^}]*inline-grid/);
+  });
+
+  it("shows running and streaming tools of a finished (stopped or interrupted) turn as no + stopped", () => {
+    const html = render([tool("a", "mastra_workspace_read_file", "running", { path: "a.ts" }), tool("b", "mastra_workspace_read_file", "streaming_input", { path: "b.ts" })], false);
+    expect(html.match(/step-mark no"/g)).toHaveLength(2);
+    expect(html.match(/ · stopped/g)).toHaveLength(2);
+    expect(html).not.toContain("step-mark run");
+    expect(html).toContain('aria-label="Stopped"');
+    expect(render([tool("a", "mastra_workspace_read_file", "running", { path: "a.ts" })], true)).toContain("step-mark run");
   });
 
   it("keeps three or fewer calls, and non-repetitive runs, inline", () => {

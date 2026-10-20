@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
 import type { OrbState } from "../../shared/contracts";
-import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform, type OrbPlacement } from "../orb/orb-motion";
+import { measureOrbPlacement, stepOrbPlacement, orbPlacementTransform, type OrbPlacement } from "../orb/orb-motion";
 import { Orb, type OrbHandle } from "./Orb";
 
 export function PersistentOrbSurface({ state, docked, animateDock, pulseVersion, orbRef, heroAnchor, dockAnchor }: { state: OrbState; docked: boolean; animateDock: boolean; pulseVersion: number; orbRef: MutableRefObject<OrbHandle | null>; heroAnchor: HTMLDivElement | null; dockAnchor: HTMLDivElement | null }) {
@@ -15,15 +15,17 @@ export function PersistentOrbSurface({ state, docked, animateDock, pulseVersion,
     if (!companion) return undefined;
     let frameId = 0;
     let previousTime = performance.now();
+    // Each new anchor starts a flight; the follower runs only until it lands, then the orb tracks the anchor exactly.
+    let settled = false;
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const placeSurface = (time: number) => {
       const target = measureOrbPlacement(anchor.getBoundingClientRect(), companion.getBoundingClientRect());
       const surface = surfaceRef.current;
       if (target && surface) {
-        const current = placementRef.current;
-        const next = current ? advanceOrbPlacement(current, target, time - previousTime, reducedMotion) : target;
-        placementRef.current = next;
-        surface.style.transform = orbPlacementTransform(next);
+        const step = stepOrbPlacement(placementRef.current, target, time - previousTime, settled, reducedMotion);
+        settled = step.settled;
+        placementRef.current = step.placement;
+        surface.style.transform = orbPlacementTransform(step.placement);
         surface.style.opacity = "1";
       }
       previousTime = time;
