@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { ChatAnswerPart, ChatEvent, InteractionResponseResult, OrbState, RuntimeSnapshot } from "../../shared/contracts";
+import type { ChatAnswerPart, ChatEvent, InteractionResponseResult, OrbState, RuntimeSnapshot, ThreadSummary } from "../../shared/contracts";
 import { ORB_STATES } from "../orb/orb-spec";
 import { rpc } from "../lib/bridge";
 import { askQueue } from "../lib/ask-copy";
@@ -23,7 +23,7 @@ import { AskBody } from "../components/island/asks/AskBody";
 import { StoppedNote } from "../components/ResolvedLine";
 import { QueuedMessageBubble } from "../components/QueuedMessageBubble";
 
-export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onProviders, onModels, onProjects, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onIntent, onFollowUp }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onProviders?: () => void; onModels?: () => void; onProjects?: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean, fingerprint: string) => Promise<InteractionResponseResult>; /** An action inside an answer. The intent RPC is wired by the host. */ onIntent?: (event: AnswerIntentEvent) => void; onFollowUp?: (text: string) => void }) {
+export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts, transportError, onTransportRetry, onSend, onAbort, onSettings, onProviders, onModels, onProjects, onOrbState, onRetry, onContinue, onInteraction, onInteractionDismiss, onToolApproval, onIntent, onFollowUp, onRename, onPin, onDeleteRequest }: { snapshot: RuntimeSnapshot; activeTitle: string; input: string; setInput: (value: string) => void; queuedDrafts: QueuedDraft[]; transportError: string | null; onTransportRetry: () => void; onSend: (event: FormEvent<HTMLFormElement>) => void; onAbort: () => void; onSettings: () => void; onProviders?: () => void; onModels?: () => void; onProjects?: () => void; onOrbState: (state: OrbState) => void; onRetry: (messageId: string) => void; onContinue: (messageId: string) => void; onInteraction: (toolCallId: string, response: unknown) => Promise<InteractionResponseResult>; onInteractionDismiss: (toolCallId: string) => Promise<InteractionResponseResult>; onToolApproval: (toolCallId: string, approved: boolean, fingerprint: string) => Promise<InteractionResponseResult>; /** An action inside an answer. The intent RPC is wired by the host. */ onIntent?: (event: AnswerIntentEvent) => unknown; onFollowUp?: (text: string) => void; /** The header menu's conversation actions, the same handlers the sidebar gets. */ onRename?: (threadId: string, title: string) => void; onPin?: (threadId: string, pinned: boolean) => void; onDeleteRequest?: (thread: ThreadSummary) => void }) {
   const runningForSelected = snapshot.activeRun?.status === "running" && snapshot.activeRun.threadId === snapshot.activeThreadId;
   const runningElsewhere = snapshot.activeRun?.status === "running" && !runningForSelected;
   const selectedModel = snapshot.models.find((model) => model.id === snapshot.selectedModelId);
@@ -77,6 +77,11 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
     settleAnswer();
     onFollowUp?.(text);
   };
+  // An approved action pulses the orb and sends the wave, like an Island approval.
+  const handleIntent = async (event: AnswerIntentEvent) => {
+    const approved = await onIntent?.(event);
+    if (approved === true && event.intent === "approve") { islandRef.current?.wave(); orbRef.current?.pulse(); }
+  };
   const handleSend = (event: FormEvent<HTMLFormElement>) => {
     settleAnswer();
     onSend(event);
@@ -84,7 +89,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
   const body: ReactNode = asks[0]
     ? <AskBody key={asks[0].id} interaction={asks[0]} onRespond={onInteraction} onApproval={onToolApproval} onDismiss={onInteractionDismiss} onApproved={() => { islandRef.current?.wave(); orbRef.current?.pulse(); }} onResubmit={(messageId) => rpc.request["chat.retry"]({ messageId }).then((result) => result.accepted).catch(() => false)} />
     : liveAnswer
-      ? <AnswerBody key={liveAnswer.answerId} answer={liveAnswer} onAnnounce={setAnnouncement} onIntent={onIntent} onFollowUp={handleFollowUp} />
+      ? <AnswerBody key={liveAnswer.answerId} answer={liveAnswer} onAnnounce={setAnnouncement} onIntent={handleIntent} onFollowUp={handleFollowUp} />
       : null;
   // The body fades out before the Island settles, so keep the last one in place for the exit.
   const lastBody = useRef<ReactNode>(null);
@@ -112,7 +117,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
             <div className="chat-title-meta"><span className="orb-state-inline">{ORB_STATES[state].label}</span><span aria-hidden="true">·</span><span className={`workspace-badge ${snapshot.activeWorkspace.availability}`}>{snapshot.activeWorkspace.label}</span></div>
           </div>
         </div>
-        <ConversationMenu snapshot={snapshot} />
+        <ConversationMenu snapshot={snapshot} onRename={onRename} onPin={onPin} onDeleteRequest={onDeleteRequest} />
       </div>
       <PersistentOrbSurface state={state} docked={docked} animateDock={animateDock} pulseVersion={pulseVersion} orbRef={orbRef} heroAnchor={heroOrbAnchor} dockAnchor={dockOrbAnchor} />
       <div className="text-chat-layout">
@@ -138,7 +143,7 @@ export function Companion({ snapshot, activeTitle, input, setInput, queuedDrafts
                     <MessageActions message={item.message} />
                   </div>
                 ) : (
-                  <AssistantTurn key={item.id} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} openAnswerId={liveAnswer?.answerId ?? null} onIntent={onIntent} onFollowUp={handleFollowUp} />
+                  <AssistantTurn key={item.id} messages={item.messages} parts={item.parts} pendingIds={pendingToolIds} tasks={snapshot.workbench.tasks} onRetry={onRetry} onContinue={onContinue} openAnswerId={liveAnswer?.answerId ?? null} onIntent={handleIntent} onFollowUp={handleFollowUp} />
                 ),
               )}
               {queuedDrafts.map((draft) => <QueuedMessageBubble key={draft.id} draft={draft} />)}

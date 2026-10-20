@@ -604,3 +604,6 @@ body { overflow: hidden; }
 .picker-slider { padding: 0 8px; }
 .picker-hint-below { margin-top: 4px; }
 .companion-view .stage > .thread { padding-bottom: var(--island-clearance); }
+/* An answer action in flight: the same ring as .btn .spinner, for the .gen-act pill. */
+.gen-act-spin { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: p-spin .7s linear infinite; }
+.conversation-rename { display: grid; gap: 12px; }

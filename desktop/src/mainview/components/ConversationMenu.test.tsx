@@ -28,16 +28,19 @@ function snapshot(over: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
     providers: [{ id: "openrouter", name: "OpenRouter" }],
     models: [{ id: "openrouter/auto", providerId: "openrouter", name: "Auto Router" }],
     activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
-    activeThreadId: "thread-1", activeRun: { runId: "run-live", threadId: "thread-1", status: "running" },
+    activeThreadId: "thread-1", threads: [{ id: "thread-1", title: "Weekly plan", pinned: false }],
+    messages: [{ role: "user", text: "Hello" }, { role: "assistant", text: "Hi there" }],
+    activeRun: { runId: "run-live", threadId: "thread-1", status: "running" },
     workbench: { status: "waiting", tokenUsage: { promptTokens: 1234, completionTokens: 8, totalTokens: 1242 } },
     ...over,
   } as unknown as RuntimeSnapshot;
 }
 
-async function mount(snap: RuntimeSnapshot) {
+type Handlers = { onRename?: (id: string, title: string) => void; onPin?: (id: string, pinned: boolean) => void; onDeleteRequest?: (thread: unknown) => void };
+async function mount(snap: RuntimeSnapshot, handlers: Handlers = {}) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<ConversationMenu snapshot={snap} />));
+  await act(async () => root.render(<ConversationMenu snapshot={snap} {...(handlers as object)} />));
   return { host, done: async () => { await act(async () => root.unmount()); host.remove(); } };
 }
 const trigger = () => document.querySelector<HTMLButtonElement>('button[aria-label="Conversation actions"]')!;
@@ -55,12 +58,62 @@ const key = (k: string) => act(async () => { document.activeElement!.dispatchEve
 const dialog = () => document.querySelector('[role="dialog"]');
 
 describe("ConversationMenu", () => {
-  test("is a header actions button whose menu holds Files, Search and Details", async () => {
+  test("is a header actions button whose menu holds Files, Search, Details and the conversation's own actions", async () => {
     const { done } = await mount(snapshot());
     expect(trigger().getAttribute("aria-haspopup")).toBe("menu");
     await openMenu();
     const items = Array.from(document.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent);
-    expect(items).toEqual(["Files in this conversation", "Search this conversation", "Details"]);
+    expect(items).toEqual(["Files in this conversation", "Search this conversation", "Details", "Rename", "Pin to top", "Copy transcript", "Delete…"]);
+    await done();
+  });
+
+  test("Pin to top and Unpin call the sidebar's handler with the next state", async () => {
+    const pins: Array<[string, boolean]> = [];
+    const first = await mount(snapshot(), { onPin: (id, pinned) => pins.push([id, pinned]) });
+    await openMenu(); await choose("Pin to top");
+    await first.done();
+    const second = await mount(snapshot({ threads: [{ id: "thread-1", title: "Weekly plan", pinned: true }] as RuntimeSnapshot["threads"] }), { onPin: (id, pinned) => pins.push([id, pinned]) });
+    await openMenu();
+    expect(Array.from(document.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent)).toContain("Unpin");
+    await choose("Unpin");
+    expect(pins).toEqual([["thread-1", true], ["thread-1", false]]);
+    await second.done();
+  });
+
+  test("Copy transcript writes the same transcript text the sidebar copies", async () => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { written.push(text); } } });
+    const { done } = await mount(snapshot());
+    await openMenu(); await choose("Copy transcript");
+    expect(written).toEqual(["You: Hello\n\nProteus: Hi there"]);
+    await done();
+  });
+
+  test("Delete asks the host to confirm for the active conversation", async () => {
+    const asked: unknown[] = [];
+    const { done } = await mount(snapshot(), { onDeleteRequest: (thread) => asked.push(thread) });
+    await openMenu(); await choose("Delete…");
+    expect(asked).toEqual([{ id: "thread-1", title: "Weekly plan", pinned: false }]);
+    await done();
+  });
+
+  test("Rename opens a small field, saves the trimmed title, and keeps Save off for an empty or unchanged name", async () => {
+    const renamed: Array<[string, string]> = [];
+    const { done } = await mount(snapshot(), { onRename: (id, title) => renamed.push([id, title]) });
+    await openMenu(); await choose("Rename");
+    expect(dialog()!.querySelector("h2")?.textContent).toBe("Rename conversation");
+    const field = dialog()!.querySelector<HTMLInputElement>("input")!;
+    const save = () => Array.from(dialog()!.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === "Save")!;
+    expect(field.value).toBe("Weekly plan");
+    expect(save().disabled).toBe(true);
+    await typeInto(field, "   ");
+    expect(save().disabled).toBe(true);
+    await typeInto(field, "  Renamed  ");
+    expect(save().disabled).toBe(false);
+    await act(async () => save().click());
+    await wait(200);
+    expect(renamed).toEqual([["thread-1", "Renamed"]]);
+    expect(dialog()).toBeNull();
     await done();
   });
 

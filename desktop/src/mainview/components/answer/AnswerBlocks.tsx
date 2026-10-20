@@ -2,6 +2,7 @@ import { Check, FileWarning, TrendingUp } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import type { AnswerRow } from "../../../shared/answer-catalog";
 import type { AnswerPartBlock } from "../../../shared/contracts";
+import { useIntentState } from "./intent-state";
 import type { AnswerContext } from "./types";
 
 type Of<T extends AnswerPartBlock["type"]> = Extract<AnswerPartBlock, { type: T }>;
@@ -13,6 +14,14 @@ const join = (...parts: Array<string | false | undefined>) => parts.filter(Boole
 
 function Head({ label, count }: { label: string; count?: string }) {
   return <div className="gen-head"><span>{label}</span>{count !== undefined && <span>{count}</span>}</div>;
+}
+
+function Pending({ label }: { label: string }) {
+  return <><span className="gen-act-spin" aria-hidden="true" />{label}</>;
+}
+
+function Note({ children }: { children: string | undefined }) {
+  return children ? <span className="field-error" role="alert">{children}</span> : null;
 }
 
 function Done({ children }: { children: ReactNode }) {
@@ -48,13 +57,17 @@ function Stats({ block }: BlockProps<"stats">) {
 
 /** A row or timeline action: a button naming its row, or the outcome once acted. */
 function RowAction({ row, ctx }: { row: AnswerRow; ctx: AnswerContext }) {
+  const { pending, note } = useIntentState(ctx.answerId, row.id);
   const outcome = ctx.outcomes[row.id];
   if (outcome) return <Done>{outcome}</Done>;
   if (!row.act) return null;
   const { act } = row;
   return (
-    <button type="button" className={join("gen-act", act.primary && "primary")} aria-label={`${act.label}: ${row.title}`}
-      onClick={() => ctx.onIntent?.({ answerId: ctx.answerId, rowId: row.id, intent: act.intent })}>{act.label}</button>
+    <>
+      <Note>{note}</Note>
+      <button type="button" className={join("gen-act", act.primary && "primary")} aria-label={`${act.label}: ${row.title}`} aria-busy={pending || undefined} disabled={pending}
+        onClick={() => ctx.onIntent?.({ answerId: ctx.answerId, rowId: row.id, intent: act.intent })}>{pending ? <Pending label={act.label} /> : act.label}</button>
+    </>
   );
 }
 
@@ -150,6 +163,7 @@ const CHOICE_KEYS = ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", 
 function Choice({ block, ctx }: BlockProps<"choice">) {
   const outcome = ctx.outcomes[block.id];
   const done = outcome !== undefined;
+  const { pending, note } = useIntentState(ctx.answerId, block.id);
   const [picked, setPicked] = useState<string | undefined>();
   const group = useRef<HTMLDivElement>(null);
   const focusIndex = useRef<number | null>(null);
@@ -184,7 +198,7 @@ function Choice({ block, ctx }: BlockProps<"choice">) {
       <div className="gen-options" role="radiogroup" aria-label={block.label} ref={group} onKeyDown={onKeyDown}>
         {block.options.map((option, index) => (
           <button type="button" className="gen-option" role="radio" key={option.id} aria-checked={checked === option.id}
-            tabIndex={(checked ? checked === option.id : index === 0) ? 0 : -1} disabled={done} onClick={() => setPicked(option.id)}>
+            tabIndex={(checked ? checked === option.id : index === 0) ? 0 : -1} disabled={done || pending} onClick={() => setPicked(option.id)}>
             <span className="gen-radio" aria-hidden="true" />
             <span className="gen-option-title">{option.title}</span>
             <span className="gen-option-sub">{option.sub ?? ""}</span>
@@ -194,8 +208,11 @@ function Choice({ block, ctx }: BlockProps<"choice">) {
       </div>
       <div className="gen-choice-foot">
         {done ? <Done>{outcome}</Done> : (
-          <button type="button" className="gen-act primary" disabled={!chosen} aria-label={chosen ? `${block.confirm.label}: ${chosen.title}` : block.confirm.label}
-            onClick={() => chosen && ctx.onIntent?.({ answerId: ctx.answerId, blockId: block.id, intent: "choose", value: chosen.id })}>{block.confirm.label}</button>
+          <>
+            <Note>{note}</Note>
+            <button type="button" className="gen-act primary" disabled={!chosen || pending} aria-busy={pending || undefined} aria-label={chosen ? `${block.confirm.label}: ${chosen.title}` : block.confirm.label}
+              onClick={() => chosen && ctx.onIntent?.({ answerId: ctx.answerId, blockId: block.id, intent: "choose", value: chosen.id })}>{pending ? <Pending label={block.confirm.label} /> : block.confirm.label}</button>
+          </>
         )}
       </div>
     </div>
@@ -204,6 +221,9 @@ function Choice({ block, ctx }: BlockProps<"choice">) {
 
 function Diff({ block, ctx }: BlockProps<"diff">) {
   const outcome = ctx.outcomes[block.id];
+  const { pending, note } = useIntentState(ctx.answerId, block.id);
+  const [asked, setAsked] = useState<"approve" | "skip">("approve");
+  const fire = (intent: "approve" | "skip") => { setAsked(intent); ctx.onIntent?.({ answerId: ctx.answerId, blockId: block.id, intent }); };
   return (
     <div className="gen-block">
       <Head label={block.label} />
@@ -219,10 +239,11 @@ function Diff({ block, ctx }: BlockProps<"diff">) {
         <div className="gen-diff-foot">
           {outcome !== undefined ? <Done>{outcome}</Done> : (
             <>
-              <button type="button" className="gen-act" aria-label={`Not now: leave ${block.file} unchanged`}
-                onClick={() => ctx.onIntent?.({ answerId: ctx.answerId, blockId: block.id, intent: "skip" })}>Not now</button>
-              <button type="button" className="gen-act primary" aria-label={`${block.act.label} the edit to ${block.file}`}
-                onClick={() => ctx.onIntent?.({ answerId: ctx.answerId, blockId: block.id, intent: "approve" })}>{block.act.label}</button>
+              <Note>{note}</Note>
+              <button type="button" className="gen-act" aria-label={`Not now: leave ${block.file} unchanged`} disabled={pending} aria-busy={(pending && asked === "skip") || undefined}
+                onClick={() => fire("skip")}>{pending && asked === "skip" ? <Pending label="Not now" /> : "Not now"}</button>
+              <button type="button" className="gen-act primary" aria-label={`${block.act.label} the edit to ${block.file}`} disabled={pending} aria-busy={(pending && asked === "approve") || undefined}
+                onClick={() => fire("approve")}>{pending && asked === "approve" ? <Pending label={block.act.label} /> : block.act.label}</button>
             </>
           )}
         </div>

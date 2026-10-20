@@ -11,7 +11,7 @@ import { markdownComponents } from "./MarkdownCode";
 import { WebSearchedSources } from "./WebSearchedSources";
 import { ResolvedLine, StoppedNote } from "./ResolvedLine";
 
-export function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue, openAnswerId = null, onIntent, onFollowUp }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void; /** The answer still open in the Island; it settles into the thread as a card once dismissed. */ openAnswerId?: string | null; onIntent?: (event: AnswerIntentEvent) => void; onFollowUp?: (text: string) => void }) {
+export function AssistantTurn({ messages, parts, pendingIds, tasks, onRetry, onContinue, openAnswerId = null, onIntent, onFollowUp }: { messages: ChatMessage[]; parts: ChatMessage["parts"]; pendingIds: Set<string>; tasks: WorkbenchTask[]; onRetry: (id: string) => void; onContinue: (id: string) => void; /** The answer still open in the Island; it settles into the thread as a card once dismissed. */ openAnswerId?: string | null; onIntent?: (event: AnswerIntentEvent) => unknown; onFollowUp?: (text: string) => void }) {
   const terminal = messages.at(-1)!;
   const runs = groupAssistantPartRuns(parts);
   const sources = [...new Map(parts.filter((part): part is Extract<ChatMessage["parts"][number], { type: "source-url" }> => part.type === "source-url").map((source) => [source.url, source])).values()];

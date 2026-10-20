@@ -17,7 +17,8 @@ export interface AnswerContext {
   answerId: string;
   /** What happened per block or row id ("Approved", "Chosen · ..."). */
   outcomes: Readonly<Record<string, string>>;
-  onIntent?: (event: AnswerIntentEvent) => void;
+  /** A host that resolves `true` after an approve was recorded makes the Island pulse the orb. */
+  onIntent?: (event: AnswerIntentEvent) => unknown;
   /** A suggest chip was chosen: the host asks that question next. */
   onFollowUp?: (text: string) => void;
 }

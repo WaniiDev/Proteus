@@ -5,7 +5,7 @@ import type { AnswerContext, AnswerIntentEvent } from "./types";
 
 export interface AnswerViewProps {
   answer: ChatAnswerPart;
-  onIntent?: (event: AnswerIntentEvent) => void;
+  onIntent?: (event: AnswerIntentEvent) => unknown;
   onFollowUp?: (text: string) => void;
 }
 

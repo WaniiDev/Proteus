@@ -148,6 +148,22 @@ describe("answers in the Island", () => {
     expect(t.q(".island")!.classList.contains("is-open")).toBe(false);
   });
 
+  test("a recorded approve sends the Island wave; a refused one and other intents do not", async () => {
+    const base = settled();
+    const last = base.messages.at(-1)!;
+    const diff = { type: "diff" as const, id: "d9", label: "Proposed edit", file: "docs/plan.md", lines: [{ text: "old", del: true }, { text: "new", ins: true }], act: { label: "Approve", done: "Approved · edited", skipDone: "Not now · unchanged" } };
+    const withDiff = { ...base, messages: [...base.messages.slice(0, -1), { ...last, parts: last.parts.map((part) => (part.type === "answer" ? { ...part, blocks: [...part.blocks, diff] } : part)) }] };
+    const t = await mount(withDiff, { onIntent: async (event: { intent: string }) => event.intent === "approve" });
+    const span = t.q<HTMLElement>(".island-wave")!;
+    let waves = 0;
+    span.animate = (() => { waves += 1; return {} as Animation; }) as typeof span.animate;
+    const bodyActs = () => [...t.host.querySelectorAll<HTMLButtonElement>(".island-body .gen-act")];
+    await act(async () => { bodyActs().find((b) => b.textContent === "Not now")!.click(); });
+    expect(waves).toBe(0);
+    await act(async () => { bodyActs().find((b) => b.textContent === "Approve")!.click(); });
+    expect(waves).toBe(1);
+  });
+
   test("actions inside the answer reach the host's onIntent", async () => {
     const events: unknown[] = [];
     const t = await mount(settled(), { onIntent: (event: unknown) => events.push(event) });
