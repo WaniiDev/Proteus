@@ -20,6 +20,7 @@ import { createWorkingTools } from "../tools/working-tools";
 import { createCompatibleWorkspaceTools } from "../workspace/workspace-tool-compat";
 import { WorkspaceRegistry } from "../workspace/workspace-registry";
 import { compatibleAskUserTool } from "../tools/compatible-ask-user-tool";
+import { createShowAnswerTool } from "../tools/show-answer-tool";
 import { ScopedMemoryManager } from "../memory/scoped-memory";
 import { createMemoryTools } from "../memory/memory-tools";
 import { DEFAULT_MODEL_ID } from "../../shared/constants";
@@ -57,6 +58,7 @@ export function createProteusAgent({ ctx, vault, codexCredentialStore, workspace
       diagnostics.record({ source: "runtime", type: "tool_call_integrity_violation", payload: violation });
     };
     const workingTools = createWorkingTools();
+    const showAnswerTool = createShowAnswerTool();
     const memoryTools = createMemoryTools(scopedMemory);
     // MastraCode registers OpenAI's concrete provider tool for Codex models.
     // The generic webSearchTool placeholder cannot infer `openai.responses`
@@ -83,6 +85,7 @@ export function createProteusAgent({ ctx, vault, codexCredentialStore, workspace
       tools: async ({ requestContext }) => ({
         ask_user: compatibleAskUserTool,
         submit_plan: submitPlanTool,
+        show_answer: showAnswerTool,
         web_search: ctx.snapshot.selectedProviderId === "codex"
           ? codexTools.webSearch()
           : openRouterTools.webSearch({ engine: "auto", maxResults: 5 }),

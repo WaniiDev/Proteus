@@ -67,6 +67,12 @@ Plan Markdown is hydrated from the contained plan filesystem. Repeated suspensio
 
 Historical rendering removes only artifacts emitted by the retired task-loop guard when an identical successful call already exists in the same turn. Genuine native task errors remain visible.
 
+## Generative answers (`show_answer`)
+
+The agent answers with interface through one tool, `show_answer` (`src/bun/tools/show-answer-tool.ts`), registered in `runtime/agent-factory.ts`. Its input schema is the catalog v2 zod schema in `src/shared/answer-catalog.ts` (`{ v: 2, title, blocks }`, strict, every ADR 0003 block limit and a plain-text rule on every string), shared with the renderer along with `validateBlock` and `validateAnswer`. A block that breaks its limits fails the tool input validation, so Mastra returns the schema error to the model.
+
+Composition rules (headline first and once, `sources` then `suggest` last, at most 10 blocks, one primary action, one `choice`, one `diff`) are checked when the call ends. The tool only acknowledges (`{ ok: true, shown: true }`); the UI reads the streamed input. On a composition failure the first result is `{ ok: false, retry: true, error }`; a second consecutive failure on the same thread returns `retry: false` and instructs the model to answer in prose, and a valid answer or that fallback resets the count. The person never sees a rejected answer. The agent instructions carry the ADR line that chooses between `show_answer` and prose.
+
 ## Providers
 
 OpenRouter and Codex are alternative primary model providers. The chosen provider, model, and reasoning effort are persisted with each conversation; the most recently chosen combination seeds new conversations without changing existing ones. There is no silent fallback to OpenRouter.
