@@ -1,6 +1,6 @@
 import { runtimeSnapshotSchema, type RuntimeSnapshot } from "../src/shared/contracts";
 
-export const scenarios = ["empty", "thread", "running", "ask", "settings", "projects", "long", "answer"] as const;
+export const scenarios = ["empty", "thread", "running", "ask", "settings", "settings-rejected", "settings-checking", "settings-device", "projects", "long", "answer"] as const;
 export type Scenario = (typeof scenarios)[number];
 
 const NOW = Date.now();
@@ -48,7 +48,7 @@ const base = {
 
 const thread = (id: string, title: string, minutesAgo: number, extra: Partial<RuntimeSnapshot["threads"][number]> = {}) => ({
   id, title, createdAt: iso(minutesAgo + 5), updatedAt: iso(minutesAgo), activity: "idle" as const, attention: 0,
-  workspace: { binding: { kind: "app" as const }, label: "Proteus workspace", availability: "ready" as const }, ...extra,
+  workspace: { binding: { kind: "app" as const }, label: "Proteus workspace", availability: "ready" as const }, pinned: false, pinnedAt: null, ...extra,
 });
 
 const user = (id: string, text: string, minutesAgo: number): RuntimeSnapshot["messages"][number] => ({
@@ -158,6 +158,26 @@ export function buildFixture(scenario: Scenario): RuntimeSnapshot {
     case "settings":
       return parse({
         providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "needs-configuration", detail: "Sign in with your ChatGPT account" }],
+        threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
+      });
+    case "settings-rejected":
+      return parse({
+        status: "needs-key", credential: { configured: true, verified: false },
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: true, verified: false, availability: "needs-configuration" }, providers[1]!],
+        error: { code: "invalid-credential", message: "OpenRouter rejected that key. Check it and try again.", retryable: false },
+        threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
+      });
+    case "settings-checking":
+      return parse({
+        status: "validating-key", credential: { configured: false, verified: false },
+        providers: [{ id: "openrouter", name: "OpenRouter", configured: false, verified: false, availability: "needs-configuration" }, providers[1]!],
+        threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
+      });
+    case "settings-device":
+      return parse({
+        providers: [providers[0]!, { id: "codex", name: "Codex", configured: false, verified: false, availability: "checking" }],
+        providerAuth: { providerId: "codex", mode: "device", status: "waiting", url: "https://auth.example.com/device", instructions: "Open the page and enter this code.", code: "QX7K-4MPD" },
+        selectedProviderId: "codex", selectedModelId: "codex/gpt-codex",
         threads: [thread("th1", "Weekly plan", 11)], activeThreadId: "th1", messages: threadMessages(),
       });
     case "projects": {

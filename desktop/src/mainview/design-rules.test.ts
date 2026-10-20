@@ -26,7 +26,7 @@ type Rule = "colour" | "z-index" | "scrollbar" | "style" | "outline";
 type Counts = Partial<Record<Rule, number>>;
 
 const BASELINE: Record<string, Counts> = {
-  "index.css": { colour: 206, "z-index": 15 },
+  "index.css": { colour: 122, "z-index": 15 },
   "proteus.css": { colour: 81, "z-index": 8 },
 };
 

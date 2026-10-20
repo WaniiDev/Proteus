@@ -1,0 +1,85 @@
+import { describe, expect, mock, test } from "bun:test";
+import { act, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
+import { buildFixture } from "../../../preview/fixtures";
+import { useDom } from "../test/dom";
+import type { SettingsSection } from "./SettingsView";
+
+// The Memory and Developer tabs reach the Electrobun bridge, which does not load under bun test.
+mock.module("../lib/bridge", () => ({ rpc: { request: new Proxy({}, { get: () => async () => new Promise(() => undefined) }) } }));
+const { SettingsView } = await import("./SettingsView");
+
+useDom();
+
+const noop = () => undefined;
+const props = (section: SettingsSection) => ({
+  snapshot: buildFixture("settings"), section, onSection: noop, apiKey: "", setApiKey: noop, onConnect: noop, onDisconnect: noop,
+  onStartCodexAuth: noop, onSubmitCodexAuth: noop, onCancelCodexAuth: noop, onRefresh: noop, onSelectProvider: noop, onSelectModel: noop, onSelectReasoning: noop,
+});
+
+describe("SettingsView", () => {
+  test("renders the page head and five tabs with the current one selected", () => {
+    const html = renderToStaticMarkup(<SettingsView {...props("providers")} />);
+    expect(html).toContain('<h1 class="heading">Settings</h1>');
+    expect(html).toContain("seg-n-5 seg-at-0");
+    for (const label of ["Providers", "Models", "Memory", "Appearance", "Developer"]) expect(html).toContain(`>${label}</button>`);
+    expect(html).toContain('role="tabpanel"');
+    expect(html).toContain("Provider · 1 of 2 connected");
+  });
+
+  test("Models: a select, a radio list with the chosen model checked, and the thinking row", () => {
+    const html = renderToStaticMarkup(<SettingsView {...props("models")} />);
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain("Reasoning effort");
+    expect(html).toContain('type="range"');
+  });
+
+  test("Models: a model without adjustable thinking says so", () => {
+    const snapshot = buildFixture("settings");
+    const other = { ...snapshot, selectedModelId: "openrouter/google/gemini-flash" as const };
+    const html = renderToStaticMarkup(<SettingsView {...props("models")} snapshot={other} />);
+    expect(html).toContain("This model doesn’t offer adjustable thinking.");
+    expect(html).not.toContain('type="range"');
+  });
+
+  test("Appearance: System, Day and Night, wired to the theme choice", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => root.render(<SettingsView {...props("appearance")} />));
+    const tabs = Array.from(host.querySelectorAll<HTMLElement>('[aria-label="Theme"] [role="tab"]'));
+    expect(tabs.map((t) => t.textContent)).toEqual(["System", "Day", "Night"]);
+    expect(tabs[0]!.getAttribute("aria-selected")).toBe("true");
+    await act(async () => tabs[2]!.click());
+    expect(host.querySelector('[aria-label="Theme"]')!.className).toContain("seg-at-2");
+    await act(async () => tabs[0]!.click());
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  test("switching tabs: the thumb moves at once, the old body fades, then the next rises in", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    document.body.append(host);
+    function Harness() {
+      const [section, setSection] = useState<SettingsSection>("providers");
+      return <SettingsView {...props(section)} section={section} onSection={setSection} />;
+    }
+    const root = createRoot(host);
+    await act(async () => root.render(<Harness />));
+    const tab = (name: string) => Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((t) => t.textContent === name)!;
+    await act(async () => tab("Appearance").click());
+    expect(host.querySelector(".segmented")!.className).toContain("seg-at-3");
+    expect(host.querySelector(".settings-body")!.className).toContain("is-leaving");
+    expect(host.textContent).toContain("Provider · ");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(host.querySelector(".settings-body")!.className).not.toContain("is-leaving");
+    expect(host.textContent).toContain("Theme");
+    expect(host.textContent).not.toContain("Provider · ");
+    await act(async () => root.unmount());
+    host.remove();
+  });
+});
