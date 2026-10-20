@@ -1,0 +1,19 @@
+/* The View Transitions path of useViewSwap, in the same two beats as the .view.is-leaving fallback (motion.md, Views):
+   the current stage fades up 4px over dur-exit, then the next rises 8px over dur-reveal. Only the stage is named, so the
+   sidebar and the ambient field stay put, and the root keeps no UA cross-fade. */
+.app-stage > .view { view-transition-name: stage; }
+
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; }
+
+::view-transition-group(stage) { animation-duration: 0s; }
+::view-transition-old(stage) { animation: p-vt-leave var(--dur-exit) var(--ease-in) both; }
+::view-transition-new(stage) { animation: p-vt-rise var(--dur-reveal) var(--ease-out) var(--dur-exit) both; }
+
+@keyframes p-vt-leave { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-4px); } }
+@keyframes p-vt-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(stage), ::view-transition-new(stage) { animation: none; }
+}

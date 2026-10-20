@@ -1,10 +1,11 @@
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary } from "../../shared/contracts";
+import type { ChatAnswerPart, ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary } from "../../shared/contracts";
 
 type ChatTextPart = Extract<ChatMessagePart, { type: "text" }>;
 
 export type AssistantPartRun =
   | { type: "text"; part: ChatTextPart }
-  | { type: "tools"; tools: ChatToolPart[] };
+  | { type: "tools"; tools: ChatToolPart[] }
+  | { type: "answer"; part: ChatAnswerPart };
 
 export type ConversationItem =
   | { type: "user"; message: ChatMessage }
@@ -23,6 +24,10 @@ export function groupAssistantPartRuns(parts: ChatMessagePart[]): AssistantPartR
       continue;
     }
     if (part.type === "source-url") continue;
+    if (part.type === "answer") {
+      runs.push({ type: "answer", part });
+      continue;
+    }
     const previous = runs.at(-1);
     if (previous?.type === "tools") previous.tools.push(part);
     else runs.push({ type: "tools", tools: [part] });
@@ -56,6 +61,12 @@ export function groupConversationItems(messages: ChatMessage[]): ConversationIte
       }
       if (part.type === "source-url") {
         const index = group.parts.findIndex((item) => item.type === "source-url" && item.url === part.url);
+        if (index >= 0) group.parts[index] = part;
+        else group.parts.push(part);
+        continue;
+      }
+      if (part.type === "answer") {
+        const index = group.parts.findIndex((item) => item.type === "answer" && item.answerId === part.answerId);
         if (index >= 0) group.parts[index] = part;
         else group.parts.push(part);
         continue;
@@ -102,18 +113,45 @@ export function groupThreads(threads: ThreadSummary[], query = "", now = new Dat
   })).filter((group) => group.threads.length > 0);
 }
 
+export type SessionGroupName = "Pinned" | "Today" | "Earlier";
+export type SessionGroup = { name: SessionGroupName; threads: ThreadSummary[] };
+
+// The sidebar groups: pinned first (most recently pinned on top), then Today and Earlier by last activity.
+export function groupSessions(threads: ThreadSummary[], now = new Date()): SessionGroup[] {
+  const today = startOfToday(now);
+  const recent = (left: ThreadSummary, right: ThreadSummary) => right.updatedAt.localeCompare(left.updatedAt);
+  const pinned = threads.filter((thread) => thread.pinned).sort((left, right) => (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "") || recent(left, right));
+  const rest = threads.filter((thread) => !thread.pinned).sort(recent);
+  const isToday = (thread: ThreadSummary) => { const t = new Date(thread.updatedAt).getTime(); return !Number.isFinite(t) || t >= today; };
+  return ([
+    { name: "Pinned", threads: pinned },
+    { name: "Today", threads: rest.filter(isToday) },
+    { name: "Earlier", threads: rest.filter((thread) => !isToday(thread)) },
+  ] as SessionGroup[]).filter((group) => group.threads.length > 0);
+}
+
+// Times stay short (DS README): now, 4m, 3h, 2d, 1w, 2mo, 1y.
 export function relativeTime(value: string, now = new Date()): string {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "";
   const seconds = Math.max(0, Math.floor((now.getTime() - timestamp) / 1000));
+  const days = Math.floor(seconds / (24 * 60 * 60));
   if (seconds < 60) return "now";
   if (seconds < 60 * 60) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 24 * 60 * 60) return `${Math.floor(seconds / (60 * 60))}h`;
-  if (seconds < 7 * 24 * 60 * 60) return `${Math.floor(seconds / (24 * 60 * 60))}d`;
-  return new Date(timestamp).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  if (days < 7) return `${days}d`;
+  if (days < 30) return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+
+/** "today" for the current calendar day, otherwise "Sep 2" (with the year when it is not this year). */
+export function shortDate(value: string, now = new Date()): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  if (date.toDateString() === now.toDateString()) return "today";
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
 export function goalFromMessages(messages: ChatMessage[], fallback = "Current work"): string {

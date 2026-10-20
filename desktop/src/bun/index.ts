@@ -1,7 +1,8 @@
 import { BrowserView, BrowserWindow, GlobalShortcut, Screen, Tray, Updater, app } from "electrobun/bun";
-import { runtimeSnapshotDecodeReportSchema, type ProviderId, type ProviderModelId, type ProteusRPCSchema } from "../shared/contracts";
+import { runtimeSnapshotDecodeReportSchema, type AnswerIntentParams, type ProviderId, type ProviderModelId, type ProteusRPCSchema } from "../shared/contracts";
 import { encodeRuntimeSnapshot } from "../shared/runtime-snapshot-codec";
 import { TextRuntime } from "./runtime";
+import { pinParamsSchema } from "./runtime/pin-params";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
@@ -117,6 +118,10 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
       "threads.switch": async ({ threadId }) => accepted(() => runtime.switchThread(threadId)),
       "threads.select": async ({ threadId }) => accepted(() => runtime.selectThread(threadId)),
       "threads.rename": async ({ threadId, title }) => accepted(() => runtime.renameThread(threadId, title)),
+      "threads.pin": async (params: unknown) => {
+        const parsed = pinParamsSchema.safeParse(params);
+        return parsed.success ? accepted(() => runtime.pinThread(parsed.data.threadId, parsed.data.pinned)) : { accepted: false };
+      },
       "threads.delete": async ({ threadId }) => accepted(() => runtime.deleteThread(threadId)),
       "chat.send": async ({ text, clientMessageId }) => {
         try {
@@ -172,6 +177,14 @@ const rpc = BrowserView.defineRPC<ProteusRPCSchema>({
         } catch (error) {
           runtime.reportError(error);
           return { accepted: false, code: "resume-failed" as const, message: "The tool approval could not be processed.", retryable: true };
+        }
+      },
+      "chat.answer.intent": async (params: AnswerIntentParams) => {
+        try {
+          return await runtime.runAnswerIntent(params);
+        } catch (error) {
+          runtime.reportError(error);
+          return { accepted: false as const, code: "failed" as const, message: "That action could not be completed." };
         }
       },
       "chat.abort": async () => {

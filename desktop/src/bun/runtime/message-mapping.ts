@@ -1,7 +1,8 @@
-import type { ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
+import type { ChatAnswerPart, ChatMessage, ChatMessagePart, ChatToolPart, ThreadSummary, TokenUsage, WorkbenchState } from "../../shared/contracts";
+import { answerConfirmed, answerPart, answerRejected, projectAnswerInput, SHOW_ANSWER_NAME } from "../native/answer-stream";
 import { isDeclinedToolResult } from "../tools/tool-decision";
 import { toolResultError } from "../tools/tool-result-error";
-import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY } from "./constants";
+import { LEGACY_THREAD_METADATA_KEY, THREAD_METADATA_KEY, THREAD_PIN_METADATA_KEY } from "./constants";
 import type { MastraMessage, PersistedThreadState } from "./types";
 
 export function isoDate(value: Date | string | number | undefined): string {
@@ -85,7 +86,7 @@ export function detailSummary(value: unknown): string | undefined {
   return undefined;
 }
 
-export function toolPart(part: unknown, messageId: string, index: number): ChatToolPart | null {
+export function toolPart(part: unknown, messageId: string, index: number): ChatToolPart | ChatAnswerPart | null {
   if (!part || typeof part !== "object") return null;
   const record = part as Record<string, unknown>;
   let name: unknown;
@@ -119,6 +120,12 @@ export function toolPart(part: unknown, messageId: string, index: number): ChatT
   const declined = isDeclinedToolResult({ state: rawStatus, approval, output });
   const status: ChatToolPart["status"] = declined ? "declined" : isError ? "error" : /result|output-available|complete|success/.test(statusText) ? "completed" : /approval|suspend|waiting/.test(statusText) ? "waiting" : /cancel/.test(statusText) ? "cancelled" : /partial|input-stream/.test(statusText) ? "streaming_input" : "running";
   const toolCallId = typeof callId === "string" && callId ? callId : `${messageId}:tool:${index}`;
+  if (name === SHOW_ANSWER_NAME) {
+    // A rejected, failed or cancelled answer leaves nothing for the person to see (no answer, no tool step).
+    if (answerRejected(output) || isError || declined || status === "cancelled") return null;
+    // Stored answers keep their full input (sanitizing would truncate nested rows) and rebuild the same blocks as the stream.
+    return answerPart({ id: `${messageId}:answer:${toolCallId}`, toolCallId, projection: projectAnswerInput(input), streaming: status === "streaming_input", confirmed: answerConfirmed(output) });
+  }
   const safeInput = input === undefined ? undefined : sanitizeToolDetail(input);
   const safeOutput = output === undefined ? undefined : sanitizeToolDetail(output);
   return {
@@ -177,6 +184,10 @@ export function mapThread(thread: { id: string; title?: string | null; createdAt
   const binding = rawState && typeof rawState === "object" && !Array.isArray(rawState) && "workspaceBinding" in rawState
     ? (rawState as PersistedThreadState).workspaceBinding ?? { kind: "app" as const }
     : { kind: "app" as const };
+  const rawPin = thread.metadata?.[THREAD_PIN_METADATA_KEY];
+  const pinnedAt = rawPin && typeof rawPin === "object" && typeof (rawPin as { pinnedAt?: unknown }).pinnedAt === "string"
+    ? (rawPin as { pinnedAt: string }).pinnedAt
+    : null;
   return {
     id: thread.id,
     title: thread.title?.trim() || "New chat",
@@ -185,7 +196,16 @@ export function mapThread(thread: { id: string; title?: string | null; createdAt
     activity: "idle",
     attention: 0,
     workspace: { binding, label: binding.kind === "app" ? "Proteus workspace" : "Project", availability: "ready" },
+    pinned: pinnedAt !== null,
+    pinnedAt,
   };
+}
+
+/** Pinned threads first by pinnedAt descending, then the rest by updatedAt descending. */
+export function compareThreads(left: ThreadSummary, right: ThreadSummary): number {
+  if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+  if (left.pinned) return (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
+  return right.updatedAt.localeCompare(left.updatedAt);
 }
 
 export function emptyTokenUsage(): TokenUsage {
@@ -200,4 +220,13 @@ export function emptyWorkbench(): WorkbenchState {
     queuedFollowUpCount: 0,
     tokenUsage: emptyTokenUsage(),
   };
+}
+
+/** Merge the recorded answer outcomes (thread metadata, keyed by answerId) into the answer parts; messages without one are untouched. */
+export function applyAnswerOutcomes(messages: ChatMessage[], recorded: Record<string, Record<string, string>> | undefined): ChatMessage[] {
+  if (!recorded || Object.keys(recorded).length === 0) return messages;
+  return messages.map((message) => {
+    if (!message.parts.some((part) => part.type === "answer" && recorded[part.answerId])) return message;
+    return { ...message, parts: message.parts.map((part) => (part.type === "answer" && recorded[part.answerId] ? { ...part, outcomes: { ...part.outcomes, ...recorded[part.answerId] } } : part)) };
+  });
 }

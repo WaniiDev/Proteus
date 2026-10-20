@@ -1,5 +1,7 @@
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import type { ChatToolPart, WorkbenchTask } from "../../shared/contracts";
-import { describeToolActivity, pluralizeCount, rawToolActivity, type ToolActivityDescriptor } from "../lib/tool-activity";
+import { describeToolActivity, pluralizeCount, type ToolActivityDescriptor } from "../lib/tool-activity";
 
 const INLINE_TOOL_LIMIT = 3;
 const COLLAPSED_GROUP_LIMIT = 3;
@@ -41,103 +43,102 @@ export function shouldCollapseToolCalls(tools: ChatToolPart[], tasks: WorkbenchT
   return groupRepeatedToolCalls(tools, tasks).some((group) => group.count > 1);
 }
 
-function RawToolDetails({ tool }: { tool: ChatToolPart }) {
-  return (
-    <details className="tool-raw-disclosure">
-      <summary>Raw details</summary>
-      <pre>{JSON.stringify(rawToolActivity(tool), null, 2)}</pre>
-    </details>
-  );
+function markFor(status: ChatToolPart["status"]): string {
+  switch (status) {
+    case "streaming_input":
+    case "running":
+      return "run";
+    case "completed":
+      return "done";
+    case "waiting":
+      return "wait";
+    case "error":
+      return "no error";
+    case "declined":
+    case "cancelled":
+      return "no";
+  }
 }
 
-function ToolRows({ tools }: { tools: DescribedTool[] }) {
-  return (
-    <div className="tool-list">
-      {tools.map(({ tool, activity }) => (
-        <details className={`tool-row-disclosure tool-${tool.status}`} key={tool.toolCallId}>
-          <summary className="tool-row" aria-label={`${activity.title}. ${activity.statusLabel}`}>
-            <span className="tool-status-dot" aria-hidden="true" />
-            <span className="tool-row-copy">
-              <span className="tool-row-title">
-                <span className="tool-action">{activity.action}</span>
-                {activity.target && (
-                  <code className="tool-target" title={activity.fullTarget ?? activity.target}>{activity.target}</code>
-                )}
-              </span>
-              {activity.outcome && <small>{activity.outcome}</small>}
-            </span>
-          </summary>
-          <div className="tool-row-details">
-            {activity.details.length > 0 && (
-              <dl>
-                {activity.details.map((item) => (
-                  <div key={`${tool.toolCallId}:${item.label}`}>
-                    <dt>{item.label}</dt>
-                    <dd className={item.mono ? "mono" : undefined}>{item.value}</dd>
-                  </div>
-                ))}
-                {activity.outcome && (
-                  <div>
-                    <dt>Result</dt>
-                    <dd>{activity.outcome}</dd>
-                  </div>
-                )}
-              </dl>
-            )}
-            <RawToolDetails tool={tool} />
-          </div>
-        </details>
-      ))}
-    </div>
-  );
+/** A tool still "running" in a list that is no longer live was cut off: it reads as stopped, not as a spinner that never ends. */
+function isStopped(tool: ChatToolPart, live: boolean): boolean {
+  return !live && (tool.status === "streaming_input" || tool.status === "running");
 }
 
-function TimelineHeading({ live, count }: { live: boolean; count: number }) {
+// Running and done swap in one cell sized to the visible verb; the leaving one overlays it and fades, so "Read docs/plan.md" has no gap.
+function Verb({ tool, activity, stopped, waiting }: DescribedTool & { stopped: boolean; waiting: boolean }) {
+  if (stopped) return <span className="step-verb">{activity.verbs.ongoing}</span>;
+  if (waiting) return <span className="step-verb">{activity.action.replace(/^Waiting (?:for approval )?to /, "").replace(/^\w/, (letter) => letter.toLocaleUpperCase())}</span>;
+  const swaps = tool.status === "streaming_input" || tool.status === "running" || tool.status === "completed";
+  if (!swaps) return <span className="step-verb">{activity.action}</span>;
+  const done = tool.status === "completed";
   return (
-    <span className="tool-timeline-head">
-      <span>{live ? "Using tools" : "Tools used"}</span>
-      <small>{count}</small>
+    <span className="step-verb step-verb-swap">
+      <span data-on={!done} aria-hidden={done || undefined}>{activity.verbs.ongoing}</span>
+      <span data-on={done} aria-hidden={!done || undefined}>{activity.verbs.past}</span>
     </span>
   );
 }
 
+function Steps({ tools, live }: { tools: DescribedTool[]; live: boolean }) {
+  return (
+    <>
+      {tools.map(({ tool, activity }) => {
+        const stopped = isStopped(tool, live);
+        const waiting = tool.status === "waiting";
+        const note = stopped ? "stopped" : waiting ? "waiting for you" : activity.outcome;
+        return (
+          <div className={`step step-${stopped ? "cancelled" : tool.status}`} key={tool.toolCallId}>
+            <span className={`step-mark ${stopped ? "no" : markFor(tool.status)}`} role="img" aria-label={stopped ? "Stopped" : activity.statusLabel} />
+            <span className="step-copy">
+              <Verb tool={tool} activity={activity} stopped={stopped} waiting={waiting} />
+              {activity.target && (
+                <>
+                  {" "}
+                  <code className="step-target" title={activity.fullTarget ?? activity.target}>{activity.target}</code>
+                </>
+              )}
+              {note && <span className="step-note"> · {note}</span>}
+            </span>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** The tools whose card lives in the Island's body and is recorded as a resolved line afterwards; they never appear as steps. */
+const ASK_TOOLS = new Set(["ask_user", "submit_plan"]);
+
 export function ToolTimeline({ tools, live, pendingIds, tasks = [] }: { tools: ChatToolPart[]; live: boolean; pendingIds: Set<string>; tasks?: WorkbenchTask[] }) {
-  const visible = tools.filter((tool) => !pendingIds.has(tool.toolCallId));
+  const [open, setOpen] = useState(false);
+  // An approval that is waiting stays in the list as its own row ("Edit docs/plan.md · waiting for you"); questions and plans live in the Island only.
+  const visible = tools.filter((tool) => !(pendingIds.has(tool.toolCallId) && ASK_TOOLS.has(tool.name)));
   if (!visible.length) return null;
 
   const described = describeTools(visible, tasks);
   const groups = groupRepeatedToolCalls(visible, tasks);
   const summaryGroups = groups.slice(0, COLLAPSED_GROUP_LIMIT);
   const remainingGroupCount = groups.length - summaryGroups.length;
-  const collapsible = shouldCollapseToolCalls(visible, tasks);
   const requiresAttention = visible.some((tool) => tool.status !== "completed");
+  // A live list is never collapsed, and neither is one that still needs the person.
+  const collapsible = shouldCollapseToolCalls(visible, tasks) && !live && !requiresAttention;
+  const expanded = !collapsible || open;
+
+  const summary = [
+    ...summaryGroups.map((group) => `${group.label} ${group.count} ${pluralizeCount(group.countNoun, group.count)}`),
+    ...(remainingGroupCount > 0 ? [`+${remainingGroupCount} more`] : []),
+  ].join(" · ");
 
   return (
-    <section
-      className={`tool-timeline${live ? " tool-timeline-live" : ""}`}
-      aria-label={live ? "Tool activity" : "Tools used"}
-      aria-live={live ? "polite" : "off"}
-      aria-relevant="additions text"
-    >
-      {collapsible ? (
-        <details className="tool-timeline-disclosure" open={live || requiresAttention || undefined}>
-          <summary>
-            <TimelineHeading live={live} count={visible.length} />
-            <span className="tool-group-summary">
-              {summaryGroups.map((group) => (
-                <span className="tool-group-label" key={group.key}>
-                  {group.label} {group.count} {pluralizeCount(group.countNoun, group.count)}
-                </span>
-              ))}
-              {remainingGroupCount > 0 && <span className="tool-group-label tool-group-overflow">+{remainingGroupCount} more</span>}
-            </span>
-            <span className="tool-disclosure-chevron" aria-hidden="true" />
-          </summary>
-          <ToolRows tools={described} />
-        </details>
-      ) : (
-        <ToolRows tools={described} />
+    <section className="steps" aria-label="Steps">
+      {collapsible && (
+        <button type="button" className="step-group" aria-expanded={expanded} onClick={() => setOpen((value) => !value)}>
+          <ChevronRight className="step-group-chevron" size={14} aria-hidden="true" />
+          <span className="step-group-copy">{summary}</span>
+        </button>
       )}
+      {expanded && <Steps tools={described} live={live} />}
     </section>
   );
 }

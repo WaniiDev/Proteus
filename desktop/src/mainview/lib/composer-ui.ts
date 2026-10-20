@@ -1,4 +1,8 @@
-import type { ChatMessage, RuntimeSnapshot } from "../../shared/contracts";
+import type { ChatMessage, ChatToolPart, OrbState, PendingInteraction, ReasoningEffort, RuntimeSnapshot } from "../../shared/contracts";
+import { ORB_STATES } from "../orb/orb-spec";
+import { askQueue, askWhat } from "./ask-copy";
+import { effortName, levelIndex, meterStep, nearestLevel, orderedLevels } from "./effort";
+import { describeToolActivity } from "./tool-activity";
 
 export type ComposerAction = "send" | "queue" | "stop";
 
@@ -25,10 +29,6 @@ export function composerAction(running: boolean, hasDraft: boolean): ComposerAct
 
 export function shouldSubmitComposerKey(input: { key: string; shiftKey: boolean; isComposing: boolean }): boolean {
   return input.key === "Enter" && !input.shiftKey && !input.isComposing;
-}
-
-export function composerLineCount(value: string): number {
-  return Math.max(1, value.split(/\r\n|\r|\n/).length);
 }
 
 export function canChooseComposerWorkspace(snapshot: RuntimeSnapshot, queuedDraftCount: number): boolean {
@@ -61,4 +61,137 @@ export function reconcileQueuedDrafts(drafts: QueuedDraft[], messages: ChatMessa
   });
   const sendingCount = Math.max(0, remaining.length - queuedCount);
   return remaining.map((draft, index) => ({ ...draft, state: index < sendingCount ? "sending" : "queued" }));
+}
+
+export type IslandMode = "input" | "status" | "ask" | "answer";
+export type IslandEnd = "send" | "stop";
+export type IslandStatus = { label: string; line: string };
+
+export type IslandView = {
+  mode: IslandMode;
+  end: IslandEnd;
+  sendLabel: string;
+  sendDisabled: boolean;
+  placeholder: string;
+  inputDisabled: boolean;
+  status: IslandStatus;
+  askKind: string;
+  answerLabel: string;
+  answerLine: string;
+};
+
+export function openAsks(snapshot: RuntimeSnapshot): PendingInteraction[] {
+  return askQueue(snapshot.interactions, snapshot.activeThreadId);
+}
+
+/** The kicker's subject, with the place in the queue once there is more than one: "Edit file · 1 of 3". */
+export function askKickerSubject(asks: PendingInteraction[]): string {
+  if (!asks[0]) return "";
+  return asks.length > 1 ? `${askWhat(asks[0])} · 1 of ${asks.length}` : askWhat(asks[0]);
+}
+
+const NEUTRAL_ORB_STATES = new Set<OrbState>(["idle", "away", "done", "interrupted", "error", "recovery"]);
+
+/** The live status line: the orb state's word in bold, the step in progress after it. */
+export function islandStatus(snapshot: RuntimeSnapshot, orbState: OrbState, queuedDraftCount = 0): IslandStatus {
+  const label = NEUTRAL_ORB_STATES.has(orbState) ? "Working" : ORB_STATES[orbState].label;
+  const tools = snapshot.messages.flatMap((message) => message.parts).filter((part): part is ChatToolPart => part.type === "tool" && (part.status === "running" || part.status === "streaming_input"));
+  const activeTool = tools[tools.length - 1];
+  let line = "Thinking…";
+  if (activeTool) line = describeToolActivity(activeTool, { tasks: snapshot.workbench.tasks }).title;
+  else if (snapshot.messages.some((message) => message.status === "streaming")) line = "Writing the answer…";
+  const queued = Math.max(snapshot.workbench.queuedFollowUpCount, queuedDraftCount);
+  return { label, line: queued > 0 ? `${line} · ${queued} queued` : line };
+}
+
+export function islandPlaceholder(snapshot: RuntimeSnapshot, canChat: boolean, runningElsewhere: boolean, providerName: string): string {
+  if (runningElsewhere) return "Another conversation is running…";
+  if (!canChat) return `Connect ${providerName} in Settings to chat`;
+  return snapshot.messages.length === 0 && snapshot.activeRun === null ? "Ask Proteus anything" : "Ask a follow-up…";
+}
+
+/** Which Island variants are on. Every variant stays mounted; this only says which one is visible. */
+export function deriveIsland(args: { snapshot: RuntimeSnapshot; orbState: OrbState; input: string; canChat: boolean; runningForSelected: boolean; runningElsewhere: boolean; providerName: string; queuedDraftCount: number; answer?: { streaming: boolean; question: string } | null }): IslandView {
+  const { snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount, answer = null } = args;
+  const hasDraft = input.trim().length > 0;
+  const action = composerAction(runningForSelected, hasDraft);
+  const asks = openAsks(snapshot);
+  const mode: IslandMode = asks.length > 0 ? "ask" : answer ? "answer" : action === "stop" ? "status" : "input";
+  return {
+    mode,
+    end: action === "stop" ? "stop" : "send",
+    sendLabel: action === "queue" ? "Queue message" : "Send",
+    sendDisabled: !canChat || !hasDraft,
+    placeholder: islandPlaceholder(snapshot, canChat, runningElsewhere, providerName),
+    inputDisabled: !canChat,
+    status: islandStatus(snapshot, orbState, queuedDraftCount),
+    askKind: askKickerSubject(asks),
+    answerLabel: answer?.streaming ? "Speaking" : "Answer",
+    answerLine: answer?.question ?? "",
+  };
+}
+
+export const PROJECT_LOCKED_TITLE = "Fixed once a conversation starts";
+
+export type ContextChipsView = {
+  /** No conversation yet, so there is nothing to bind a project to. */
+  showProject: boolean;
+  projectLocked: boolean;
+  projectLabel: string;
+  projectAria: string;
+  projectTitle: string;
+  modelLocked: boolean;
+  modelTitle: string;
+  /** The selected model's provider isn't connected: the chip is a warning that opens Settings. */
+  needsConnect: boolean;
+  providerId: string;
+  providerName: string;
+  modelName: string;
+  modelAria: string;
+  /** The selected model's thinking levels in order; empty means no effort part. */
+  levels: ReasoningEffort[];
+  effort: ReasoningEffort | null;
+  effortLabel: string;
+  effortAria: string;
+  /** Bars lit in the chip meter (0-4). */
+  meter: number;
+  atTop: boolean;
+};
+
+/** Everything the two context chips say and whether they can be used. Pure so the states are testable without a DOM. */
+export function deriveContextChips(args: { snapshot: RuntimeSnapshot; queuedDraftCount: number; runningElsewhere: boolean; askOpen: boolean; effortOverride?: ReasoningEffort | null }): ContextChipsView {
+  const { snapshot, queuedDraftCount, runningElsewhere, askOpen, effortOverride } = args;
+  const model = snapshot.models.find((candidate) => candidate.id === snapshot.selectedModelId);
+  const providerId = model?.providerId ?? snapshot.selectedProviderId;
+  const provider = snapshot.providers.find((candidate) => candidate.id === providerId);
+  const providerName = provider?.name ?? "Provider";
+  const modelName = model?.name ?? "Choose model";
+  const needsConnect = !provider?.verified || provider.availability !== "ready";
+  const projectLocked = !canChooseComposerWorkspace(snapshot, queuedDraftCount);
+  const modelLocked = askOpen || snapshot.activeRun !== null || runningElsewhere;
+  const levels = orderedLevels(model?.reasoningOptions);
+  const effort = nearestLevel(levels, effortOverride ?? snapshot.selectedReasoningEffort);
+  const index = levelIndex(levels, effort);
+  const effortLabel = effort ? effortName(effort) : "";
+  const label = snapshot.activeWorkspace.label;
+  return {
+    showProject: snapshot.activeThreadId !== null,
+    projectLocked,
+    projectLabel: label,
+    projectAria: `Working in ${label}. ${projectLocked ? "Fixed for this conversation." : "Change project."}`,
+    projectTitle: projectLocked ? PROJECT_LOCKED_TITLE : "Choose where Proteus works",
+    modelLocked,
+    modelTitle: askOpen ? "Answer Proteus first" : runningElsewhere || snapshot.activeRun !== null ? "Available when the run finishes" : needsConnect ? "Connect a provider to chat" : "Model and thinking",
+    needsConnect,
+    providerId,
+    providerName,
+    modelName,
+    modelAria: needsConnect ? `${providerName} is not connected. Open Settings.` : `Model ${modelName}${effort ? `, ${effortLabel.toLowerCase()} thinking` : ""}. Change model.`,
+    levels,
+    effort,
+    effortLabel,
+    effortAria: `Thinking ${effortLabel.toLowerCase()}. Change thinking.`,
+    meter: meterStep(levels.length, index),
+    atTop: levels.length > 1 && index === levels.length - 1,
+  };
 }

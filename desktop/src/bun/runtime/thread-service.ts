@@ -11,7 +11,7 @@ import { NativeThreadRepository } from "../native/native-thread-repository";
 import { NativeAgentDriver } from "../native/native-agent-driver";
 import type { ProjectRegistryStorage } from "../workspace/project-registry";
 import { DEFAULT_MODEL_SELECTION, LEGACY_THREAD_METADATA_KEY, RESOURCE_ID, THREAD_METADATA_KEY } from "./constants";
-import { emptyTokenUsage, mapThread } from "./message-mapping";
+import { compareThreads, emptyTokenUsage, mapThread } from "./message-mapping";
 import type { MastraMessage, PersistedThreadState } from "./types";
 import { makeRuntimeError } from "../core/runtime-error-mapping";
 import type { RuntimeContext } from "./context";
@@ -183,24 +183,27 @@ export class ThreadService {
         const startedAt = performance.now();
         this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "start", threadId, durationMs: startedAt - queuedAt });
         try {
-          const memoryStore = await this.storage.getStore("memory");
-          const thread = await memoryStore?.getThreadById({
-            threadId,
-            resourceId: RESOURCE_ID,
-          });
-          if (failOnError && (!thread || !memoryStore)) throw new Error("Conversation metadata storage is unavailable");
-          if (thread && memoryStore) {
-            const { [LEGACY_THREAD_METADATA_KEY]: _legacy, ...metadata } = thread.metadata ?? {};
-            await memoryStore.updateThread({
-              id: threadId,
-              title: thread.title ?? "New chat",
-              metadata: {
-                ...metadata,
-                [THREAD_METADATA_KEY]: next,
-              },
+          // LibSQL reads, merges and writes without a lock, so this write joins the repository's per-thread queue with pin and rename.
+          await this.threadRepo.exclusive(threadId, async () => {
+            const memoryStore = await this.storage.getStore("memory");
+            const thread = await memoryStore?.getThreadById({
+              threadId,
+              resourceId: RESOURCE_ID,
             });
-          }
-          if (thread && memoryStore) this.savedState.set(threadId, next);
+            if (failOnError && (!thread || !memoryStore)) throw new Error("Conversation metadata storage is unavailable");
+            if (thread && memoryStore) {
+              // Write only the key this path owns: the store merges metadata shallowly, so a concurrent pin is never overwritten.
+              // The legacy key can only be cleared by an explicit null; mapThread and loadThreadState treat null as absent.
+              await memoryStore.updateThread({
+                id: threadId,
+                metadata: {
+                  [THREAD_METADATA_KEY]: next,
+                  ...(thread.metadata && LEGACY_THREAD_METADATA_KEY in thread.metadata ? { [LEGACY_THREAD_METADATA_KEY]: null } : {}),
+                },
+              });
+            }
+            if (thread && memoryStore) this.savedState.set(threadId, next);
+          });
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "end", threadId, durationMs: performance.now() - startedAt });
         } catch (error) {
           this.diagnostics.record({ source: "storage", type: "thread_state_write", phase: "error", threadId, durationMs: performance.now() - startedAt, payload: error });
@@ -289,7 +292,7 @@ export class ThreadService {
         const activity = this.ctx.threadActivity.get(summary.id);
         return activity ? { ...summary, ...activity } : summary;
       })
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort(compareThreads);
     this.ctx.publish({ threads });
   }
 
@@ -319,7 +322,7 @@ export class ThreadService {
         const activity = this.ctx.threadActivity.get(summary.id);
         return activity ? { ...summary, ...activity } : summary;
       })
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort(compareThreads);
     if (threads.length === 0) {
       threads = [mapThread(await this.threadRepo.create("New chat", {
         [THREAD_METADATA_KEY]: {
@@ -488,6 +491,17 @@ export class ThreadService {
     await this.syncThreadState();
   }
 
+  async pinThread(threadId: string, pinned: boolean): Promise<void> {
+    await this.ctx.ensureInitialized();
+    const current = await this.threadRepo.get(threadId);
+    if (!current) throw new Error("Conversation not found");
+    const already = mapThread(current);
+    // Re-pinning keeps the original pinnedAt, so a repeated request does not reorder the group.
+    if (already.pinned === pinned) return;
+    await this.threadRepo.setPinned(threadId, pinned ? new Date().toISOString() : null);
+    await this.syncThreadState();
+  }
+
   async deleteThread(threadId: string): Promise<void> {
     await this.ctx.ensureInitialized();
     if (this.ctx.startingRun || this.ctx.runId) throw makeRuntimeError("busy");
@@ -495,7 +509,7 @@ export class ThreadService {
     this.forgetThread(threadId);
     this.taskToolPolicy.reset(threadId);
     this.nativeDriver.dispose(threadId);
-    const remaining = (await this.threadRepo.list()).map(mapThread).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const remaining = (await this.threadRepo.list()).map(mapThread).sort(compareThreads);
     if (this.ctx.selectedThreadId === threadId || !this.ctx.selectedThreadId) {
       const next = remaining[0] ?? mapThread(await this.threadRepo.create("New chat", {
         [THREAD_METADATA_KEY]: {

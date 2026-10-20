@@ -1,0 +1,26 @@
+/* Markdown elements the design system's .reply does not style yet (lists, quotes, tables,
+   inline code, links, rules, code overflow). Token-only; to upstream into the DS Message
+   component, after which this file is deleted. Never restyles a DS class itself: every rule
+   hangs off .reply descendants. */
+.reply { min-width: 0; overflow-wrap: anywhere; }
+.reply > * { min-width: 0; }
+.reply strong { color: var(--ink); font-weight: 600; }
+.reply a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); transition: text-decoration-color var(--dur-hover) var(--ease-out); }
+.reply a:hover { text-decoration-color: var(--ink); }
+.reply h1, .reply h2, .reply h3, .reply h4 { margin: 8px 0 0; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.4; }
+.reply ul, .reply ol { margin: 0; padding-left: 22px; }
+.reply li { padding-left: 2px; }
+.reply li + li { margin-top: 4px; }
+.reply li > ul, .reply li > ol { margin-top: 4px; }
+.reply li::marker { color: var(--muted); }
+.reply blockquote { margin: 0; padding: 2px 0 2px 14px; border-left: 2px solid var(--line-strong); color: var(--muted); }
+.reply hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
+.reply :not(pre) > code { padding: 1px 6px; border-radius: var(--r-sm); background: var(--surface-sunk); color: var(--ink); font: 0.88em/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.reply pre.reply-line { margin: 0; padding: 12px 14px; max-width: 100%; overflow-x: auto; border-radius: var(--r-lg); background: var(--surface-sunk); color: var(--ink); font: 12.5px/1.6 var(--font-mono); white-space: pre; overflow-wrap: normal; }
+.reply pre.reply-line code { padding: 0; background: none; color: inherit; font: inherit; white-space: inherit; }
+.reply table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
+.reply th, .reply td { padding: 7px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.reply th { color: var(--ink); font-weight: 600; white-space: nowrap; }
+
+/* Markdown inside the Island (a plan under review): the same .reply rules, read on the dark glass by remapping the tokens they use. */
+.island .reply { --ink: var(--on-island); --body: var(--on-island-soft); --muted: var(--on-island-muted); --line: var(--island-line); --line-strong: var(--island-line); --surface-sunk: var(--island-raised); font-size: 14px; line-height: 1.55; }

@@ -1,4 +1,8 @@
 export const ORB_SURFACE_SIZE = 220;
+/** --dur-fly: the budget for the hero-to-Island flight. */
+export const ORB_FLY_MS = 640;
+/** The follower snaps onto its anchor once every edge is within this many px (scale counted against the 220px surface). */
+export const ORB_SETTLE_PX = 2;
 
 export type OrbPlacement = {
   x: number;
@@ -19,17 +23,44 @@ export function measureOrbPlacement(anchor: RectLike, container: Pick<DOMRect, "
   };
 }
 
+/**
+ * Exponential approach rate per second: the follower is 1 - e^(-9t) (ADR 0002 keeps it unchanged). A gap g settles in
+ * ln(g / ORB_SETTLE_PX) / 9, so hero-to-dock gaps up to about 640px land inside ORB_FLY_MS; taller windows take up to ~770ms.
+ */
+const ORB_RATE = 9;
+
 /** Frame-rate-independent smoothing without overshoot or transition restarts. */
 export function advanceOrbPlacement(current: OrbPlacement, target: OrbPlacement, elapsedMs: number, reducedMotion = false): OrbPlacement {
   if (reducedMotion) return target;
   const elapsedSeconds = Math.min(Math.max(elapsedMs, 0) / 1_000, 0.05);
-  const blend = 1 - Math.exp(-9 * elapsedSeconds);
-  return {
+  const blend = 1 - Math.exp(-ORB_RATE * elapsedSeconds);
+  const next = {
     x: current.x + (target.x - current.x) * blend,
     y: current.y + (target.y - current.y) * blend,
     scaleX: current.scaleX + (target.scaleX - current.scaleX) * blend,
     scaleY: current.scaleY + (target.scaleY - current.scaleY) * blend,
   };
+  return orbPlacementGap(next, target) <= ORB_SETTLE_PX ? target : next;
+}
+
+/**
+ * One frame of the orb's placement. The follower only carries the orb across a hero <-> dock transition; once it has landed
+ * (`settled`) the orb rides its anchor exactly every frame, so an Island that grows or shrinks never leaves it behind.
+ */
+export function stepOrbPlacement(current: OrbPlacement | null, target: OrbPlacement, elapsedMs: number, settled: boolean, reducedMotion = false): { placement: OrbPlacement; settled: boolean } {
+  if (settled || !current || reducedMotion) return { placement: target, settled: true };
+  const placement = advanceOrbPlacement(current, target, elapsedMs);
+  return { placement, settled: placement === target };
+}
+
+/** The largest remaining edge in px between a placement and its target. */
+export function orbPlacementGap(placement: OrbPlacement, target: OrbPlacement): number {
+  return Math.max(
+    Math.abs(target.x - placement.x),
+    Math.abs(target.y - placement.y),
+    Math.abs(target.scaleX - placement.scaleX) * ORB_SURFACE_SIZE,
+    Math.abs(target.scaleY - placement.scaleY) * ORB_SURFACE_SIZE,
+  );
 }
 
 export function orbPlacementTransform(placement: OrbPlacement): string {

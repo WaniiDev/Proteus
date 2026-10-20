@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { answerBlockSchema, type AnswerIntent } from "./answer-catalog";
 
-export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
+export const orbStates = ["idle", "summoned", "away", "listening", "thinking", "focusing", "working", "remembering", "drafting", "verifying", "waiting", "speaking", "done", "interrupted", "error", "recovery"] as const;
 export const orbStateSchema = z.enum(orbStates);
 export type OrbState = z.infer<typeof orbStateSchema>;
 
@@ -113,10 +114,45 @@ export const chatSourcePartSchema = z.object({
   url: z.string().url(),
   title: z.string().optional(),
 });
-export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema, chatSourcePartSchema]);
+/** A block that completed but failed validation: the renderer shows one line for it and the answer continues. */
+export const answerFallbackBlockSchema = z.object({ type: z.literal("fallback") }).strict();
+export type AnswerFallbackBlock = z.infer<typeof answerFallbackBlockSchema>;
+export const answerPartBlockSchema = z.union([answerBlockSchema, answerFallbackBlockSchema]);
+export type AnswerPartBlock = z.infer<typeof answerPartBlockSchema>;
+/**
+ * A `show_answer` tool call as an answer (ADR 0003). `blocks` holds only complete, valid blocks (plus fallbacks) while
+ * `streaming` is true. `outcomes` records what happened per block or row id ("Approved", "Chosen · ...") and is filled
+ * after the person acts; empty until then.
+ */
+export const chatAnswerPartSchema = z.object({
+  type: z.literal("answer"),
+  id: z.string().min(1),
+  toolCallId: z.string().min(1),
+  answerId: z.string().min(1),
+  title: z.string(),
+  question: z.string().default(""),
+  blocks: z.array(answerPartBlockSchema),
+  streaming: z.boolean(),
+  outcomes: z.record(z.string(), z.string()).default({}),
+  /** True once the `show_answer` call has an ok result (shown: true); only a confirmed answer can be acted on. */
+  confirmed: z.boolean().optional(),
+});
+export const ANSWER_INTENT_REFUSAL_CODES = ["refused", "already-done", "stale", "failed"] as const;
+/**
+ * Result of `chat.answer.intent` (ADR 0003 > Intents and safety). `outcome` is what is recorded on the row or block;
+ * `draft` (reply) is text for the composer, `open` (open) is a workspace-relative file the renderer should show.
+ * A refusal records nothing, so the person can try again unless the code is `already-done`.
+ */
+export type AnswerIntentResult =
+  | { accepted: true; outcome: string; draft?: string; open?: { path: string } }
+  | { accepted: false; code: (typeof ANSWER_INTENT_REFUSAL_CODES)[number]; message: string };
+export type AnswerIntentParams = { threadId: string; answerId: string; blockId?: string; rowId?: string; intent: AnswerIntent; optionId?: string };
+
+export const chatMessagePartSchema = z.discriminatedUnion("type", [chatTextPartSchema, chatToolPartSchema, chatSourcePartSchema, chatAnswerPartSchema]);
 export type ChatMessagePart = z.infer<typeof chatMessagePartSchema>;
 export type ChatToolPart = z.infer<typeof chatToolPartSchema>;
 export type ChatSourcePart = z.infer<typeof chatSourcePartSchema>;
+export type ChatAnswerPart = z.infer<typeof chatAnswerPartSchema>;
 
 export const chatMessageSchema = z.object({
   id: z.string().min(1),
@@ -263,6 +299,8 @@ export const threadSummarySchema = z.object({
   activity: z.enum(["idle", "running", "waiting", "complete", "interrupted", "error"]).default("idle"),
   attention: z.number().int().nonnegative().default(0),
   workspace: workspaceScopeSummarySchema.default({ binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" }),
+  pinned: z.boolean().default(false),
+  pinnedAt: z.string().nullable().default(null),
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
@@ -469,6 +507,10 @@ export const proteusRpcSchema = {
         params: {} as { threadId: string; title: string },
         response: {} as { accepted: boolean },
       },
+      "threads.pin": {
+        params: {} as { threadId: string; pinned: boolean },
+        response: {} as { accepted: boolean },
+      },
       "threads.delete": {
         params: {} as { threadId: string },
         response: {} as { accepted: boolean },
@@ -496,6 +538,10 @@ export const proteusRpcSchema = {
       "chat.tool-approval.respond": {
         params: {} as { toolCallId: string; approved: boolean; fingerprint: string },
         response: {} as InteractionResponseResult,
+      },
+      "chat.answer.intent": {
+        params: {} as AnswerIntentParams,
+        response: {} as AnswerIntentResult,
       },
       "chat.abort": {
         params: undefined as undefined,

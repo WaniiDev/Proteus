@@ -10,6 +10,8 @@ export type ToolActivityDetail = {
 
 export type ToolActivityDescriptor = {
   action: string;
+  /** Present participle and past tense of the verb, for the running-to-done cross-fade. */
+  verbs: { ongoing: string; past: string };
   target?: string;
   fullTarget?: string;
   title: string;
@@ -216,6 +218,7 @@ function descriptor(
   const title = [action, target].filter(Boolean).join(" ");
   return {
     action,
+    verbs: { ongoing: forms.ongoing, past: forms.past },
     ...(target ? { target } : {}),
     ...(options.fullTarget ? { fullTarget: options.fullTarget } : {}),
     title,

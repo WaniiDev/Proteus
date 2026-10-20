@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { orbStates } from "../../shared/contracts";
-import { ORB_CAMERA_DISTANCE, ORB_INITIAL_FX } from "./orb3d";
+import { ORB_CAMERA_DISTANCE, ORB_CANVAS_BLEED, ORB_INITIAL_FX, orbCameraDistance } from "./orb3d";
 import { ORB_STATES } from "./orb-spec";
 
 describe("orb visual contract", () => {
@@ -30,6 +30,12 @@ describe("orb visual contract", () => {
     expect(ORB_STATES.error).toMatchObject({ amp: 0.08, speed: 0.30, freq: 1.90, scale: 0.94, voice: 0, a: "#e8b8c4", b: "#d6d3d1" });
   });
 
+  it("has sixteen states, with focusing as a moment between thinking and working", () => {
+    expect(orbStates).toHaveLength(16);
+    expect(orbStates.indexOf("focusing")).toBe(orbStates.indexOf("thinking") + 1);
+    expect(ORB_STATES.focusing).toMatchObject({ label: "Focusing", amp: 0.24, speed: 0.35, freq: 2.10, scale: 0.94, voice: 0, a: "#c8b8e0", b: "#f4c5a8" });
+  });
+
   it("keeps every state palette pair unique", () => {
     const pairs = orbStates.map((state) => `${ORB_STATES[state].a}:${ORB_STATES[state].b}`);
     expect(new Set(pairs).size).toBe(orbStates.length);
@@ -51,12 +57,13 @@ describe("orb visual contract", () => {
     expect(css).toContain(".orb-float { transition: none !important; }");
   });
 
-  it("keeps one prototype-sized surface across hero and header anchors", async () => {
+  it("keeps one prototype-sized surface across the hero and the Island's orb slot", async () => {
     const css = await Bun.file(new URL("../index.css", import.meta.url)).text();
 
     expect(css).toContain(".persistent-orb-surface");
     expect(css).toContain("width: 220px");
-    expect(css).toContain(".orb-presence-docked .orb-anchor { width: 76px; height: 76px; }");
+    expect(css).toMatch(/\.island-orb-slot\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
+    expect(css).not.toContain("orb-presence-docked");
   });
 
   it("matches the prototype fallback geometry", async () => {
@@ -69,6 +76,17 @@ describe("orb visual contract", () => {
   it("matches the prototype camera and initial liquid values", () => {
     expect(ORB_CAMERA_DISTANCE).toBe(3.15);
     expect(ORB_INITIAL_FX).toMatchObject({ amp: 0.14, speed: 0.45, freq: 1.15 });
+  });
+
+  it("lets the canvas bleed past the orb box without changing the orb's size", async () => {
+    // Silhouette radius as a fraction of the orb box's half-size, for a unit sphere at distance z, FOV 42deg,
+    // drawn on a canvas `bleed` times the box.
+    const silhouette = (z: number, bleed: number) => (Math.tan(Math.asin(1 / z)) / Math.tan((21 * Math.PI) / 180)) * bleed;
+    expect(ORB_CANVAS_BLEED).toBeGreaterThanOrEqual(2);
+    expect(silhouette(orbCameraDistance(), ORB_CANVAS_BLEED)).toBeCloseTo(silhouette(ORB_CAMERA_DISTANCE, 1), 6);
+
+    const css = await Bun.file(new URL("../proteus.css", import.meta.url)).text();
+    expect(css).toMatch(/\.orb-canvas\s*\{[^}]*inset:\s*-50%;[^}]*width:\s*200%;[^}]*height:\s*200%;[^}]*pointer-events:\s*none;/s);
   });
 
   it("exposes whether the live renderer is WebGL or the CSS fallback", async () => {
@@ -86,7 +104,7 @@ describe("orb visual contract", () => {
     expect(source).toContain("docked ? dockAnchor : heroAnchor");
     expect(source).toContain('anchor.closest<HTMLElement>(".companion-view")');
     expect(source).toContain("measureOrbPlacement(anchor.getBoundingClientRect(), companion.getBoundingClientRect())");
-    expect(source).toContain("advanceOrbPlacement(current, target");
+    expect(source).toContain("stepOrbPlacement(placementRef.current, target");
     expect(source).toContain("requestAnimationFrame(placeSurface)");
     expect(source).not.toContain('querySelector<HTMLElement>(".orb-float")');
   });

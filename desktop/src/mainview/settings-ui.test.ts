@@ -2,47 +2,71 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const appSource = readFileSync(join(import.meta.dir, "views/SettingsView.tsx"), "utf8") + readFileSync(join(import.meta.dir, "components/DiagnosticsPanel.tsx"), "utf8");
-const shellSource = readFileSync(join(import.meta.dir, "App.tsx"), "utf8");
-const providerSource = readFileSync(join(import.meta.dir, "components/ProviderSettings.tsx"), "utf8");
-const cssSource = readFileSync(join(import.meta.dir, "index.css"), "utf8");
+const read = (path: string) => readFileSync(join(import.meta.dir, path), "utf8");
+const view = read("views/SettingsView.tsx");
+const diagnostics = read("components/DiagnosticsPanel.tsx");
+const providers = read("components/ProviderSettings.tsx");
+const shell = read("App.tsx");
+const css = read("index.css") + read("proteus.css") + read("sidebar.css");
 
-describe("Settings provider and model UI", () => {
-  it("uses tabbed provider/model sections and a custom model list", () => {
-    expect(appSource).toContain('className="settings-tabs"');
-    expect(appSource).toContain("Diagnostics and exports");
-    expect(appSource).toContain('className="settings-layout"');
-    expect(appSource).toContain('Runtime diagnostics');
-    expect(appSource).toContain("Models & thinking");
-    expect(appSource).toContain("<ProviderSettings");
-    expect(appSource).toContain('className="model-card-list"');
-    expect(appSource).toContain('src={PROVIDER_LOGOS[provider.id]}');
-    expect(cssSource).toContain(".provider-switch img { width: 20px; height: 20px");
-    expect(providerSource).toContain('className="provider-settings__list"');
-    expect(providerSource).toContain('className={`provider-connection ${isCurrent ? "current" : ""}`}');
-    expect(providerSource).toContain("Credentials stay in Windows Credential Manager");
-    expect(cssSource).toContain(".provider-connection { position: relative;");
-    expect(cssSource).toContain(".provider-code-form { grid-template-columns: minmax(0,1fr) auto; }");
-    expect(cssSource).toContain(".provider-state.checking svg { animation: none !important; }");
-    expect(cssSource).not.toContain(".provider-card {");
-    expect(appSource).toContain("Selection applies to the current conversation and becomes the default for new chats.");
-    expect(appSource).not.toContain('id="model-select"');
+describe("Settings page", () => {
+  it("is a Page with a 24px head and a Segmented for its four tabs", () => {
+    expect(view).toContain('className="page settings-page"');
+    expect(view).toContain('className="heading">Settings</h1>');
+    expect(view).not.toContain("PageHeader");
+    expect(view).toContain("<Segmented");
+    for (const label of ["Providers", "Models", "Appearance", "Developer"]) expect(view).toContain(`label: "${label}"`);
+    expect(view).not.toContain('label: "Memory"');
+    expect(view).toContain('role="tabpanel"');
+    expect(view).toContain("<ProviderSettings");
+    expect(view).toContain("<DiagnosticsPanel />");
   });
 
-  it("renders only advertised reasoning choices and keeps provider connections responsive", () => {
-    expect(appSource).toContain("selected.reasoningOptions.map");
-    expect(shellSource).toContain('rpc.request["models.reasoning.select"]');
-    expect(cssSource).toContain(".reasoning-options");
-    expect(cssSource).toContain(".model-card-list { grid-template-columns: 1fr; }");
-    expect(cssSource).toContain("grid-template-columns: 210px minmax(0, 1fr)");
+  it("lists models as a radio group with a check, and thinking as the EffortSlider", () => {
+    expect(view).toContain('role="radiogroup"');
+    expect(view).toContain('role="radio"');
+    expect(view).toContain("row-check");
+    expect(view).toContain("<EffortSlider");
+    expect(view).toContain("NO_ADJUSTABLE_THINKING");
+    expect(view).toContain("<ProviderSelect");
+    expect(shell).toContain('rpc.request["models.reasoning.select"]');
+    expect(shell).toContain('rpc.request["models.refresh"]');
   });
 
-  it("offers upstream ChatGPT OAuth browser, device, manual, and cancel controls", () => {
-    expect(providerSource).toContain("Connect in browser");
-    expect(providerSource).toContain("Use device code");
-    expect(providerSource).toContain("Paste callback URL or code");
-    expect(shellSource).toContain('rpc.request["providers.auth.cancel"]');
-    expect(providerSource).not.toContain("Native ACP");
-    expect(providerSource).toContain('!provider.verified && snapshot.providerAuth?.providerId === "codex"');
+  it("wires Appearance to the theme hook", () => {
+    expect(view).toContain("useTheme()");
+    expect(view).toContain('label: "Night"');
+  });
+
+  it("explains in the heading or a list note, never a banner", () => {
+    for (const source of [view, providers, diagnostics]) {
+      expect(source).not.toContain("runtime-alert");
+      expect(source).not.toContain('className="notice');
+      expect(source).not.toContain("card settings-card");
+    }
+    expect(providers).toContain("list-note");
+  });
+
+  it("offers ChatGPT sign-in, device code, manual code and cancel, and the Credential Manager note", () => {
+    expect(providers).toContain("Sign in");
+    expect(providers).toContain("Use a device code");
+    expect(providers).toContain("Paste your key · sk-or-v1-…");
+    expect(providers).toContain("Sign in with ChatGPT to load the Codex models.");
+    expect(providers).toContain("Paste callback URL or code");
+    expect(providers).toContain("Credentials stay in Windows Credential Manager");
+    expect(shell).toContain('rpc.request["providers.auth.cancel"]');
+    expect(providers).not.toContain("Native ACP");
+  });
+
+  it("puts Developer in List rows: a Switch, event rows and one danger row", () => {
+    expect(diagnostics).toContain("list-row switch");
+    expect(diagnostics).toContain("list-row event");
+    expect(diagnostics.match(/list-row danger/g)?.length).toBe(1);
+  });
+
+  it("ships none of the old settings, provider, model-card or diagnostics CSS", () => {
+    for (const legacy of ["settings-tabs", "settings-layout", "settings-card", "provider-connection", "provider-settings", "provider-switch", "model-card", "reasoning-options", "diagnostics-card", "diagnostic-source", "runtime-alert"]) {
+      expect(css).not.toContain(`.${legacy}`);
+    }
   });
 });

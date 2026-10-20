@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, normalize } from "node:path";
 import { RequestContext } from "@mastra/core/request-context";
+import { RUN_ID_CONTEXT_KEY } from "../tools/show-answer-tool";
 import { Utils } from "electrobun/bun";
 import type { ProjectSummary, WorkspaceBinding, WorkspaceBindingUpdateResult, WorkspaceScopeSummary } from "../../shared/contracts";
 import { NativeThreadRepository } from "../native/native-thread-repository";
@@ -66,6 +67,8 @@ export class WorkspaceService {
       : "";
     return new RequestContext([
       ["proteus-thread-id", threadId],
+      // One id per context build, i.e. per run start or resume; tools key per-turn counters on it.
+      [RUN_ID_CONTEXT_KEY, randomUUID()],
       ["proteus-workspace-root", rootPath],
       ["proteus-workspace-kind", binding.kind],
       ["proteus-memory-enabled", memoryEnabled],

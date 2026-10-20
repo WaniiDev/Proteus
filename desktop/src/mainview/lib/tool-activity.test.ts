@@ -33,6 +33,13 @@ describe("tool activity descriptions", () => {
     expect(describeToolActivity(tool("mastra_workspace_edit_file", "error", input, undefined, "Patch failed")).title).toBe("Failed to edit desktop/src/bun/runtime.ts");
   });
 
+  it("exposes both verb tenses regardless of status, for the cross-fade", () => {
+    for (const status of ["running", "completed"] as const) {
+      expect(describeToolActivity(tool("mastra_workspace_read_file", status, { path: "a.ts" })).verbs).toEqual({ ongoing: "Reading", past: "Read" });
+    }
+    expect(describeToolActivity(tool("task_update", "running", { content: "x", status: "completed" })).verbs).toEqual({ ongoing: "Completing", past: "Completed" });
+  });
+
   it("shows grep query and location with a compact result", () => {
     const activity = describeToolActivity(tool(
       "mastra_workspace_grep",

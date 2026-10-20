@@ -214,3 +214,58 @@ describe("selectThread load failure (WAN-502)", () => {
     expect(rt.ctx.selectedThreadId).toBe("B");
   });
 });
+
+describe("thread pinning (WAN-513)", () => {
+  function pinFixture() {
+    const f = fixture();
+    const meta = new Map<string, Record<string, unknown>>();
+    const row = (id: string, updatedAt: number) => ({ ...threadRow(id), updatedAt: new Date(updatedAt), metadata: meta.get(id) ?? {} });
+    f.rows.current = [] as never;
+    const refresh = () => { f.rows.current = [row("A", 3000), row("B", 2000), row("C", 1000)] as never; };
+    refresh();
+    Object.assign(f.rt.threads.threadRepo, {
+      get: async (id: string) => (f.rows.current as any[]).find((r) => r.id === id) ?? null,
+      list: async () => { refresh(); return f.rows.current; },
+      setPinned: async (id: string, pinnedAt: string | null) => {
+        if (pinnedAt) meta.set(id, { "proteus.pin.v1": { pinnedAt } }); else meta.delete(id);
+      },
+    });
+    f.select("A", { workspaceBinding: { kind: "app" } });
+    return f;
+  }
+  const ids = (rt: any) => rt.ctx.snapshot.threads.map((t: { id: string }) => t.id);
+
+  test("pin, unpin and ordering by pinnedAt descending", async () => {
+    const { rt } = pinFixture();
+    await rt.pinThread("C", true);
+    await new Promise((r) => setTimeout(r, 5));
+    await rt.pinThread("B", true);
+    expect(ids(rt)).toEqual(["B", "C", "A"]);
+    expect(rt.ctx.snapshot.threads[0].pinned).toBeTrue();
+    expect(rt.ctx.snapshot.threads[2].pinned).toBeFalse();
+    await rt.pinThread("B", false);
+    expect(ids(rt)).toEqual(["C", "A", "B"]);
+    expect(rt.ctx.snapshot.threads[2].pinnedAt).toBeNull();
+  });
+
+  test("repinning keeps the original pinnedAt and an unknown thread rejects", async () => {
+    const { rt } = pinFixture();
+    await rt.pinThread("C", true);
+    const first = rt.ctx.snapshot.threads[0].pinnedAt;
+    await new Promise((r) => setTimeout(r, 5));
+    await rt.pinThread("C", true);
+    expect(rt.ctx.snapshot.threads[0].pinnedAt).toBe(first);
+    rt.threads.threadRepo.get = async () => null;
+    await expect(rt.pinThread("zzz", true)).rejects.toThrow("Conversation not found");
+  });
+
+  test("deleting the selected thread selects the first thread in pinned-first order (WAN-513)", async () => {
+    const { rt, rows, select } = pinFixture();
+    select("A", { workspaceBinding: { kind: "app" } });
+    // C is the oldest but pinned, so it comes before the newer unpinned B.
+    await rt.pinThread("C", true);
+    rows.current = [] as never;
+    await rt.deleteThread("A");
+    expect(rt.ctx.selectedThreadId).toBe("C");
+  });
+});

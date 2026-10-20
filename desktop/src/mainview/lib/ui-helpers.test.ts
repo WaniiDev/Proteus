@@ -1,10 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import type { ThreadSummary } from "../../shared/contracts";
-import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupThreads, relativeTime } from "./ui-helpers";
+import { conversationGroupForDate, goalFromMessages, groupAssistantPartRuns, groupConversationItems, groupSessions, groupThreads, relativeTime, shortDate } from "./ui-helpers";
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 const thread = (id: string, title: string, updatedAt: string): ThreadSummary => ({
   id,
+  pinned: false,
+  pinnedAt: null,
   title,
   createdAt: updatedAt,
   updatedAt,
@@ -27,6 +29,23 @@ describe("conversation helpers", () => {
 
   it("formats relative timestamps and derives a local goal", () => {
     expect(relativeTime("2026-08-03T11:59:00.000Z", now)).toBe("1m");
+    expect(relativeTime("2026-08-03T11:59:50.000Z", now)).toBe("now");
+    expect(relativeTime("2026-08-03T08:30:00.000Z", now)).toBe("3h");
+    expect(relativeTime("2026-07-31T12:00:00.000Z", now)).toBe("3d");
+    expect(relativeTime("2026-07-25T12:00:00.000Z", now)).toBe("1w");
+    expect(relativeTime("2026-06-01T12:00:00.000Z", now)).toBe("2mo");
+    expect(relativeTime("2025-06-01T12:00:00.000Z", now)).toBe("1y");
+    expect(relativeTime("nope", now)).toBe("");
+  });
+
+  it("writes project dates as today or a short date", () => {
+    expect(shortDate("2026-08-03T01:00:00.000Z", now)).toBe("today");
+    expect(shortDate("2026-06-02T12:00:00.000Z", now)).toBe("Jun 2");
+    expect(shortDate("2025-09-02T12:00:00.000Z", now)).toBe("Sep 2, 2025");
+    expect(shortDate("nope", now)).toBe("");
+  });
+
+  it("derives a local goal", () => {
     expect(
       goalFromMessages([
         {
@@ -128,5 +147,32 @@ describe("conversation helpers", () => {
     ]);
     expect(items[0]).toMatchObject({ type: "assistant", parts: [{ type: "text", text: "Answer" }, { type: "source-url", title: "Updated title" }] });
     expect(groupAssistantPartRuns([{ type: "text", id: "text", text: "Answer" }, source])).toEqual([{ type: "text", part: { type: "text", id: "text", text: "Answer" } }]);
+  });
+});
+
+describe("answer parts", () => {
+  const answer = (streaming: boolean, blocks: number) => ({ type: "answer" as const, id: "a1:a", toolCallId: "a1", answerId: "a1", title: "Week", question: "", blocks: Array.from({ length: blocks }, () => ({ type: "text" as const, text: "x" })), streaming, outcomes: {} });
+  const turn = (id: string, parts: ReturnType<typeof answer>[]) => ({ id, role: "assistant" as const, text: "", status: "complete" as const, createdAt: now.toISOString(), turnId: "turn", parts });
+
+  it("keeps an answer in its place between text and tool runs", () => {
+    const tool = { type: "tool" as const, id: "t", toolCallId: "t", name: "read", label: "Read", status: "completed" as const };
+    const runs = groupAssistantPartRuns([tool, answer(false, 1), { type: "text", id: "x", text: "After" }]);
+    expect(runs.map((run) => run.type)).toEqual(["tools", "answer", "text"]);
+  });
+
+  it("replaces an answer by its id as it streams in, across messages of one turn", () => {
+    const items = groupConversationItems([turn("m1", [answer(true, 1)]), turn("m2", [answer(false, 3)])]);
+    const parts = (items[0] as { parts: Array<{ type: string; streaming?: boolean; blocks?: unknown[] }> }).parts;
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({ type: "answer", streaming: false });
+    expect(parts[0]!.blocks).toHaveLength(3);
+  });
+});
+
+describe("sidebar groups", () => {
+  it("puts pinned first, then Today and Earlier", () => {
+    const pinned = { ...thread("p", "Pinned", "2026-06-01T12:00:00.000Z"), pinned: true, pinnedAt: "2026-08-01T00:00:00.000Z" };
+    const groups = groupSessions([thread("old", "Old", "2026-07-20T12:00:00.000Z"), pinned, thread("new", "New", "2026-08-03T11:30:00.000Z")], now);
+    expect(groups.map((g) => [g.name, g.threads.map((t) => t.id)])).toEqual([["Pinned", ["p"]], ["Today", ["new"]], ["Earlier", ["old"]]]);
   });
 });
