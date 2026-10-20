@@ -19,11 +19,12 @@ const props = (section: SettingsSection) => ({
 });
 
 describe("SettingsView", () => {
-  test("renders the page head and five tabs with the current one selected", () => {
+  test("renders the page head and four tabs (Memory is its own page) with the current one selected", () => {
     const html = renderToStaticMarkup(<SettingsView {...props("providers")} />);
     expect(html).toContain('<h1 class="heading">Settings</h1>');
-    expect(html).toContain("seg-n-5 seg-at-0");
-    for (const label of ["Providers", "Models", "Memory", "Appearance", "Developer"]) expect(html).toContain(`>${label}</button>`);
+    expect(html).toContain("seg-n-4 seg-at-0");
+    for (const label of ["Providers", "Models", "Appearance", "Developer"]) expect(html).toContain(`>${label}</button>`);
+    expect(html).not.toContain(">Memory</button>");
     expect(html).toContain('role="tabpanel"');
     expect(html).toContain("Provider · 1 of 2 connected");
   });
@@ -34,6 +35,32 @@ describe("SettingsView", () => {
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain("Reasoning effort");
     expect(html).toContain('type="range"');
+  });
+
+  test("Models: row sub is note · mono id, no MODELS FROM label, Refresh stays reachable, effort sub points at the Island", () => {
+    const html = renderToStaticMarkup(<SettingsView {...props("models")} />);
+    expect(html).toContain('<span class="mono">');
+    expect(html).not.toContain("Models from");
+    expect(html).toContain("Refresh models");
+    expect(html).toContain("Each chat can change it from the Island.");
+    expect(html).not.toContain("Prompt —");
+    expect(html).not.toContain("Completion —");
+  });
+
+  test("Models: during a run the rows and the slider are disabled and the row sub gives the reason", () => {
+    const snapshot = buildFixture("settings");
+    const running = { ...snapshot, activeRun: { ...buildFixture("running").activeRun! } };
+    const html = renderToStaticMarkup(<SettingsView {...props("models")} snapshot={running} />);
+    const rows = html.match(/<button[^>]*role="radio"[^>]*>/g) ?? [];
+    expect(rows.length).toBeGreaterThan(1);
+    for (const row of rows) expect(row).toContain("disabled");
+    expect(html).toContain("model-row");
+    expect(html).toMatch(/<input[^>]*type="range"[^>]*disabled/);
+    expect(html).toContain("settings-effort is-locked");
+    expect(html).toContain("Locked until the current run finishes.");
+    expect(html).toContain("Models can change once the current run finishes.");
+    const idle = renderToStaticMarkup(<SettingsView {...props("models")} />);
+    expect(idle).not.toMatch(/<input[^>]*type="range"[^>]*disabled/);
   });
 
   test("Models: a model without adjustable thinking says so", () => {
@@ -72,7 +99,7 @@ describe("SettingsView", () => {
     await act(async () => root.render(<Harness />));
     const tab = (name: string) => Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((t) => t.textContent === name)!;
     await act(async () => tab("Appearance").click());
-    expect(host.querySelector(".segmented")!.className).toContain("seg-at-3");
+    expect(host.querySelector(".segmented")!.className).toContain("seg-at-2");
     expect(host.querySelector(".settings-body")!.className).toContain("is-leaving");
     expect(host.textContent).toContain("Provider · ");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });

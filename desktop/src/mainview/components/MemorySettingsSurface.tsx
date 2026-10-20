@@ -104,7 +104,6 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
           <span className="switch-track" aria-hidden="true" />
         </label>
       </div>
-      <p className="list-note">Nothing is learned silently. Every saved item stays visible, editable and removable, and existing chats are never changed.</p>
     </div>
 
     {error && <p className="field-error" role="alert">{error}</p>}
@@ -156,17 +155,16 @@ export function MemorySettingsSurface({ state, focusKey, busy, error, onSetEnabl
 
       {selected.entries.length > 0 && <div className="list-group">
         <div className="list"><button className="list-row danger" type="button" disabled={busy} onClick={() => setPendingRemoval({ kind: "scope" })}>Clear {name}</button></div>
-        <p className="list-note">Removes every saved item in this space. Other spaces stay as they are.</p>
       </div>}
     </>}
 
     {pendingRemoval && <Modal
-      title={pendingRemoval.kind === "entry" ? "Forget this?" : `Clear ${name}?`}
-      confirmLabel={pendingRemoval.kind === "entry" ? "Forget" : "Clear"}
+      title={pendingRemoval.kind === "entry" ? "Forget this?" : "Clear this space?"}
+      confirmLabel={pendingRemoval.kind === "entry" ? "Forget" : "Clear space"}
       onCancel={() => setPendingRemoval(null)}
       onConfirm={confirmRemoval}
     >
-      {pendingRemoval.kind === "entry" ? "It will no longer be used in future conversations." : "This removes every saved item in this space. Other spaces stay unchanged."}
+      {pendingRemoval.kind === "entry" ? "It will no longer be used in future conversations." : `Everything saved in ${name} will be forgotten. Other spaces are not affected.`}
     </Modal>}
   </div>;
 }

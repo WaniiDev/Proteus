@@ -10,12 +10,13 @@ const shell = read("App.tsx");
 const css = read("index.css") + read("proteus.css") + read("sidebar.css");
 
 describe("Settings page", () => {
-  it("is a Page with a 24px head and a Segmented for its five tabs", () => {
+  it("is a Page with a 24px head and a Segmented for its four tabs", () => {
     expect(view).toContain('className="page settings-page"');
     expect(view).toContain('className="heading">Settings</h1>');
     expect(view).not.toContain("PageHeader");
     expect(view).toContain("<Segmented");
-    for (const label of ["Providers", "Models", "Memory", "Appearance", "Developer"]) expect(view).toContain(`label: "${label}"`);
+    for (const label of ["Providers", "Models", "Appearance", "Developer"]) expect(view).toContain(`label: "${label}"`);
+    expect(view).not.toContain('label: "Memory"');
     expect(view).toContain('role="tabpanel"');
     expect(view).toContain("<ProviderSettings");
     expect(view).toContain("<DiagnosticsPanel />");
@@ -49,6 +50,8 @@ describe("Settings page", () => {
   it("offers ChatGPT sign-in, device code, manual code and cancel, and the Credential Manager note", () => {
     expect(providers).toContain("Sign in");
     expect(providers).toContain("Use a device code");
+    expect(providers).toContain("Paste your key · sk-or-v1-…");
+    expect(providers).toContain("Sign in with ChatGPT to load the Codex models.");
     expect(providers).toContain("Paste callback URL or code");
     expect(providers).toContain("Credentials stay in Windows Credential Manager");
     expect(shell).toContain('rpc.request["providers.auth.cancel"]');

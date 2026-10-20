@@ -23,7 +23,7 @@ const shots = (listArg ? listArg.split(",") : defaults).map((item) => {
 
 async function open(page, view) {
   if (!view) return;
-  if (view === "projects") await page.getByRole("button", { name: "Projects", exact: true }).click();
+  if (view === "projects" || view === "memory") await page.getByRole("button", { name: view === "memory" ? "Memory" : "Projects", exact: true }).click();
   else {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     if (view !== "providers") await page.getByRole("tab", { name: new RegExp(`^${view}`, "i") }).click();

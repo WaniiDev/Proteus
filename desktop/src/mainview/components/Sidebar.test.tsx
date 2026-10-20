@@ -46,10 +46,12 @@ describe("Sidebar markup", () => {
   });
 
   it("offers Projects, Memory and Settings with aria-current on the destination", () => {
-    const settings = renderToStaticMarkup(<Sidebar {...base} view="settings" settingsSection="memory" threads={[]} />);
-    expect(settings).toContain("Projects");
-    expect(settings).toMatch(/aria-current="page"[^>]*>(<svg[^>]*><\/svg>|<svg.*?<\/svg>)Memory/);
-    expect(settings).toContain("Your conversations will appear here.");
+    const memory = renderToStaticMarkup(<Sidebar {...base} view="memory" threads={[]} />);
+    expect(memory).toContain("Projects");
+    expect(memory).toMatch(/aria-current="page"[^>]*>(<svg[^>]*><\/svg>|<svg.*?<\/svg>)Memory/);
+    expect(memory.match(/aria-current="page"/g)?.length).toBe(1);
+    expect(memory).toContain("Your conversations will appear here.");
+    expect(renderToStaticMarkup(<Sidebar {...base} view="settings" threads={[]} />)).toMatch(/aria-current="page"[^>]*>(<svg[^>]*><\/svg>|<svg.*?<\/svg>)Settings/);
   });
 
   it("disables New chat with the reason while a response runs", () => {
