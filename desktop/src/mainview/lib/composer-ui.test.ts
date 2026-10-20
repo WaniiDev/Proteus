@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ChatMessage, RuntimeSnapshot } from "../../shared/contracts";
-import { canChooseComposerWorkspace, composerAction, composerLineCount, composerModelLabel, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
+import { canChooseComposerWorkspace, composerAction, composerModelLabel, deriveIsland, islandStatus, reconcileQueuedDrafts, selectedProviderCanChat, shouldSubmitComposerKey, type QueuedDraft } from "./composer-ui";
 
 const draft = (id: string, text = `Message ${id}`): QueuedDraft => ({ id, threadId: "thread-1", text, createdAt: `2026-08-04T00:00:0${id}.000Z`, state: "queued" });
 const user = (id: string, text: string, createdAt: string): ChatMessage => ({ id, role: "user", text, turnId: id, status: "complete", createdAt, parts: [{ type: "text", id: `${id}:text`, text }] });
@@ -42,13 +42,6 @@ describe("composer UI policy", () => {
     expect(shouldSubmitComposerKey({ key: "Enter", shiftKey: false, isComposing: false })).toBe(true);
     expect(shouldSubmitComposerKey({ key: "Enter", shiftKey: true, isComposing: false })).toBe(false);
     expect(shouldSubmitComposerKey({ key: "Enter", shiftKey: false, isComposing: true })).toBe(false);
-  });
-
-  it("maps explicit newlines directly to intrinsic textarea rows", () => {
-    expect(composerLineCount("")).toBe(1);
-    expect(composerLineCount("One line")).toBe(1);
-    expect(composerLineCount("One\nTwo\nThree\nFour")).toBe(4);
-    expect(composerLineCount("One\r\nTwo")).toBe(2);
   });
 
   it("shows project selection only for a truly empty idle conversation", () => {
@@ -103,9 +96,10 @@ describe("composer UI policy", () => {
     expect(composer).toContain("<span>{provider.name}</span>");
     expect(composer).not.toContain("model.description ?? model.rawId");
     expect(composer).not.toContain('<i className={provider.availability}');
-    expect(css).toContain(".composer-primary { position: absolute; top: 50%; right: 11px;");
-    expect(css).toContain("border-radius: 20px");
-    expect(css).toContain(".composer-controls { position: absolute; top: calc(100% + 8px); left: 4px");
+    expect(composer).toContain("<Island");
+    expect(css).not.toContain(".composer-primary");
+    expect(css).not.toContain(".composer-input");
+    expect(css).toContain(".composer-controls { min-width: 0;");
     expect(css).toContain(".composer-popover { position: absolute; bottom: calc(100% + 8px)");
     expect(css).toContain(".composer-model-popover { width: 560px; max-width: calc(100vw - 48px)");
     expect(css).not.toContain(".composer-provider-tabs i.ready");
@@ -119,5 +113,54 @@ describe("composer UI policy", () => {
 
   it("drops previews when the native session switches away", () => {
     expect(reconcileQueuedDrafts([draft("1")], [], "thread-2", 0)).toEqual([]);
+  });
+
+  describe("Island variants", () => {
+    const base = (): RuntimeSnapshot => ({
+      revision: 1, status: "ready", credential: { configured: true, verified: true }, providerAuth: null,
+      providers: [{ id: "codex", name: "Codex", configured: true, verified: true, availability: "ready" }],
+      models: [], selectedProviderId: "codex", selectedModelId: "codex/x", selectedReasoningEffort: null,
+      projects: [], activeWorkspace: { binding: { kind: "app" }, label: "Proteus workspace", availability: "ready" },
+      threads: [], activeThreadId: "thread-1", retryMessageId: null, messages: [], events: [], interactions: [],
+      workbench: { status: "idle", tasks: [], pendingInteractions: [], queuedFollowUpCount: 0, tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } },
+      activeRun: null, continuation: null, error: null,
+    } as unknown as RuntimeSnapshot);
+    const args = (snapshot: RuntimeSnapshot, overrides: Partial<Parameters<typeof deriveIsland>[0]> = {}) => ({ snapshot, orbState: "idle" as const, input: "", canChat: true, runningForSelected: false, runningElsewhere: false, providerName: "Codex", queuedDraftCount: 0, ...overrides });
+
+    it("shows the input with Send disabled until there is text", () => {
+      expect(deriveIsland(args(base()))).toMatchObject({ mode: "input", end: "send", sendDisabled: true, placeholder: "Ask Proteus anything" });
+      expect(deriveIsland(args(base(), { input: "hi" }))).toMatchObject({ mode: "input", sendDisabled: false, sendLabel: "Send" });
+    });
+
+    it("asks a follow-up once the conversation has messages and explains a disabled input", () => {
+      const snapshot = base();
+      snapshot.messages = [user("1", "Hello", "2026-08-04T00:00:01.000Z")];
+      expect(deriveIsland(args(snapshot)).placeholder).toBe("Ask a follow-up…");
+      expect(deriveIsland(args(snapshot, { canChat: false })).placeholder).toBe("Configure Codex in Settings to chat");
+      expect(deriveIsland(args(snapshot, { canChat: false, runningElsewhere: true })).placeholder).toBe("Another conversation is running…");
+    });
+
+    it("switches to status and Stop while a run is going, naming the live step and the queue", () => {
+      const snapshot = base();
+      snapshot.activeRun = { runId: "run-1", threadId: "thread-1", status: "running" };
+      snapshot.workbench.queuedFollowUpCount = 2;
+      const view = deriveIsland(args(snapshot, { runningForSelected: true, orbState: "thinking" }));
+      expect(view).toMatchObject({ mode: "status", end: "stop", status: { label: "Thinking", line: "Thinking… · 2 queued" } });
+      expect(islandStatus(snapshot, "idle").label).toBe("Working");
+    });
+
+    it("keeps the input for a draft typed during a run and labels Send as a queue action", () => {
+      const snapshot = base();
+      snapshot.activeRun = { runId: "run-1", threadId: "thread-1", status: "running" };
+      expect(deriveIsland(args(snapshot, { runningForSelected: true, input: "next" }))).toMatchObject({ mode: "input", end: "send", sendLabel: "Queue message", sendDisabled: false });
+    });
+
+    it("shows the ask kicker when an interaction needs the person", () => {
+      const snapshot = base();
+      snapshot.interactions = [{ id: "i1", toolCallId: "t1", kind: "tool_approval", title: "Edit file", options: [], status: "pending", createdAt: "2026-08-04T00:00:00.000Z" }];
+      expect(deriveIsland(args(snapshot))).toMatchObject({ mode: "ask", askKind: "Approval" });
+      snapshot.interactions[0]!.status = "approved";
+      expect(deriveIsland(args(snapshot)).mode).toBe("input");
+    });
   });
 });

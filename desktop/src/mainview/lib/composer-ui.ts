@@ -1,4 +1,6 @@
-import type { ChatMessage, RuntimeSnapshot } from "../../shared/contracts";
+import type { ChatMessage, ChatToolPart, OrbState, PendingInteraction, RuntimeSnapshot } from "../../shared/contracts";
+import { ORB_STATES } from "../orb/orb-spec";
+import { describeToolActivity } from "./tool-activity";
 
 export type ComposerAction = "send" | "queue" | "stop";
 
@@ -25,10 +27,6 @@ export function composerAction(running: boolean, hasDraft: boolean): ComposerAct
 
 export function shouldSubmitComposerKey(input: { key: string; shiftKey: boolean; isComposing: boolean }): boolean {
   return input.key === "Enter" && !input.shiftKey && !input.isComposing;
-}
-
-export function composerLineCount(value: string): number {
-  return Math.max(1, value.split(/\r\n|\r|\n/).length);
 }
 
 export function canChooseComposerWorkspace(snapshot: RuntimeSnapshot, queuedDraftCount: number): boolean {
@@ -61,4 +59,68 @@ export function reconcileQueuedDrafts(drafts: QueuedDraft[], messages: ChatMessa
   });
   const sendingCount = Math.max(0, remaining.length - queuedCount);
   return remaining.map((draft, index) => ({ ...draft, state: index < sendingCount ? "sending" : "queued" }));
+}
+
+export type IslandMode = "input" | "status" | "ask";
+export type IslandEnd = "send" | "stop";
+export type IslandStatus = { label: string; line: string };
+
+export type IslandView = {
+  mode: IslandMode;
+  end: IslandEnd;
+  sendLabel: string;
+  sendDisabled: boolean;
+  placeholder: string;
+  inputDisabled: boolean;
+  status: IslandStatus;
+  askKind: string;
+};
+
+const ASK_KIND_LABEL: Record<PendingInteraction["kind"], string> = {
+  tool_approval: "Approval",
+  ask_user: "Question",
+  submit_plan: "Plan",
+};
+
+export function openAsks(snapshot: RuntimeSnapshot): PendingInteraction[] {
+  return snapshot.interactions.filter((item) => item.status === "pending" || item.status === "resolving");
+}
+
+const NEUTRAL_ORB_STATES = new Set<OrbState>(["idle", "away", "done", "interrupted", "error", "recovery"]);
+
+/** The live status line: the orb state's word in bold, the step in progress after it. */
+export function islandStatus(snapshot: RuntimeSnapshot, orbState: OrbState, queuedDraftCount = 0): IslandStatus {
+  const label = NEUTRAL_ORB_STATES.has(orbState) ? "Working" : ORB_STATES[orbState].label;
+  const tools = snapshot.messages.flatMap((message) => message.parts).filter((part): part is ChatToolPart => part.type === "tool" && (part.status === "running" || part.status === "streaming_input"));
+  const activeTool = tools[tools.length - 1];
+  let line = "Thinking…";
+  if (activeTool) line = describeToolActivity(activeTool, { tasks: snapshot.workbench.tasks }).title;
+  else if (snapshot.messages.some((message) => message.status === "streaming")) line = "Writing the answer…";
+  const queued = Math.max(snapshot.workbench.queuedFollowUpCount, queuedDraftCount);
+  return { label, line: queued > 0 ? `${line} · ${queued} queued` : line };
+}
+
+export function islandPlaceholder(snapshot: RuntimeSnapshot, canChat: boolean, runningElsewhere: boolean, providerName: string): string {
+  if (runningElsewhere) return "Another conversation is running…";
+  if (!canChat) return `Configure ${providerName} in Settings to chat`;
+  return snapshot.messages.length === 0 && snapshot.activeRun === null ? "Ask Proteus anything" : "Ask a follow-up…";
+}
+
+/** Which Island variants are on. Every variant stays mounted; this only says which one is visible. */
+export function deriveIsland(args: { snapshot: RuntimeSnapshot; orbState: OrbState; input: string; canChat: boolean; runningForSelected: boolean; runningElsewhere: boolean; providerName: string; queuedDraftCount: number }): IslandView {
+  const { snapshot, orbState, input, canChat, runningForSelected, runningElsewhere, providerName, queuedDraftCount } = args;
+  const hasDraft = input.trim().length > 0;
+  const action = composerAction(runningForSelected, hasDraft);
+  const asks = openAsks(snapshot).filter((item) => !item.threadId || item.threadId === snapshot.activeThreadId);
+  const mode: IslandMode = asks.length > 0 ? "ask" : action === "stop" ? "status" : "input";
+  return {
+    mode,
+    end: action === "stop" ? "stop" : "send",
+    sendLabel: action === "queue" ? "Queue message" : "Send",
+    sendDisabled: !canChat || !hasDraft,
+    placeholder: islandPlaceholder(snapshot, canChat, runningElsewhere, providerName),
+    inputDisabled: !canChat,
+    status: islandStatus(snapshot, orbState, queuedDraftCount),
+    askKind: asks[0] ? ASK_KIND_LABEL[asks[0].kind] : "",
+  };
 }

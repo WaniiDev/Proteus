@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { advanceOrbPlacement, measureOrbPlacement, orbPlacementTransform } from "./orb-motion";
+import { ORB_FLY_MS, advanceOrbPlacement, measureOrbPlacement, orbPlacementGap, orbPlacementTransform, type OrbPlacement } from "./orb-motion";
 
 describe("persistent orb motion", () => {
   it("measures an anchor relative to the companion and preserves a fixed canvas size", () => {
@@ -23,5 +23,36 @@ describe("persistent orb motion", () => {
 
   it("emits a compositor-friendly transform", () => {
     expect(orbPlacementTransform({ x: 12.3456, y: 8, scaleX: 0.5, scaleY: 0.5 })).toBe("translate3d(12.346px, 8px, 0) scale(0.5, 0.5)");
+  });
+
+  it("settles on its anchor within the dur-fly budget at 60fps and 30fps, with no overshoot", () => {
+    const hero: OrbPlacement = { x: 420, y: 160, scaleX: 1, scaleY: 1 };
+    const dock: OrbPlacement = { x: 40, y: 640, scaleX: 44 / 220, scaleY: 44 / 220 };
+    for (const frameMs of [1_000 / 60, 1_000 / 30]) {
+      let placement = hero;
+      let elapsed = 0;
+      while (placement !== dock && elapsed < 2_000) {
+        const next = advanceOrbPlacement(placement, dock, frameMs);
+        expect(next.x).toBeGreaterThanOrEqual(dock.x);
+        expect(next.y).toBeLessThanOrEqual(dock.y);
+        expect(next.scaleX).toBeGreaterThanOrEqual(dock.scaleX);
+        placement = next;
+        elapsed += frameMs;
+      }
+      expect(placement).toBe(dock);
+      expect(elapsed).toBeLessThanOrEqual(ORB_FLY_MS + frameMs);
+    }
+  });
+
+  it("re-measures a moving anchor every frame and still lands on it", () => {
+    let placement: OrbPlacement = { x: 300, y: 100, scaleX: 1, scaleY: 1 };
+    let elapsed = 0;
+    const anchorAt = (ms: number): OrbPlacement => ({ x: 40, y: 640 - Math.min(ms, 200) * 0.2, scaleX: 0.2, scaleY: 0.2 });
+    while (orbPlacementGap(placement, anchorAt(elapsed)) > 0 && elapsed < 2_000) {
+      placement = advanceOrbPlacement(placement, anchorAt(elapsed), 16);
+      elapsed += 16;
+    }
+    expect(placement).toEqual(anchorAt(elapsed - 16));
+    expect(elapsed).toBeLessThanOrEqual(ORB_FLY_MS + 16);
   });
 });
