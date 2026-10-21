@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { checkAnswer, containsMarkup, validateAnswer, validateBlock } from "./answer-catalog";
+import { checkAnswer, compositionIssues, containsMarkup, repairComposition, validateAnswer, validateBlock } from "./answer-catalog";
 
 const headline = { type: "headline", text: "Two things need you today." };
 const row = (i = 1) => ({ id: `r${i}`, title: `Row ${i}` });
@@ -264,5 +264,42 @@ describe("plain-text false positives (final review)", () => {
   });
   it("still refuses tags, entities and headings", () => {
     for (const text of ["<b>bold</b>", "</div>", "<img src=x onerror=1>", "<br/>", "<!-- c -->", "<a href=\"x\">y</a>", "fish &amp; chips", "&#60;script", "&#x3c;", "&nbsp;", "# Title", "## Beta", "intro\n# Title", "###### Deep"]) expect(containsMarkup(text)).toBe(true);
+  });
+});
+
+describe("repairComposition", () => {
+  const choice = (id: string) => ({ type: "choice", id, label: "Pick", options: [{ id: "a", title: "A" }, { id: "b", title: "B" }], confirm: { label: "Use", done: "Chosen" } });
+  const row = (id: string) => ({ id, title: `Task ${id}`, act: { label: "Mark done", intent: "approve", done: "Done", primary: true } });
+  const checked = (blocks: unknown[]) => checkAnswer({ v: 2, title: "Interactive demo", blocks }).blocks;
+
+  it("leaves a valid composition unchanged", () => {
+    const blocks = checked([{ type: "headline", text: "H" }, { type: "text", text: "x" }, { type: "suggest", items: ["More"] }]);
+    expect(repairComposition(blocks, "T")).toEqual(blocks);
+  });
+
+  it("brings an interactive demo that breaks every rule within them", () => {
+    const blocks = checked([
+      { type: "sources", items: ["a.md"] },
+      { type: "list", label: "Checklist", rows: [row("1"), row("2"), row("3")] },
+      choice("c1"),
+      { type: "headline", text: "Second headline" },
+      choice("c2"),
+      { type: "headline", text: "Late headline" },
+    ]);
+    expect(compositionIssues(blocks).length).toBeGreaterThan(0);
+    const repaired = repairComposition(blocks, "Interactive demo");
+    expect(compositionIssues(repaired)).toEqual([]);
+    expect(repaired.map((block) => block.type)).toEqual(["headline", "list", "choice", "fallback", "text", "sources"]);
+    expect(repaired[0]).toEqual({ type: "headline", text: "Second headline" });
+    const rows = (repaired[1] as { rows: Array<{ act?: { primary?: boolean } }> }).rows;
+    expect(rows.map((r) => r.act?.primary ?? false)).toEqual([true, false, false]);
+    expect(repaired.every((block) => block.type === "fallback" || validateBlock(block).ok)).toBe(true);
+  });
+
+  it("leads with the title when there is no headline, and keeps the cap", () => {
+    const repaired = repairComposition(checked(Array.from({ length: 11 }, () => ({ type: "text", text: "x" }))), "Interactive demo");
+    expect(repaired[0]).toEqual({ type: "headline", text: "Interactive demo" });
+    expect(repaired).toHaveLength(10);
+    expect(compositionIssues(repaired)).toEqual([]);
   });
 });

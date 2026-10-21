@@ -58,6 +58,7 @@ describe("show_answer payload transform", () => {
   const deep = {
     title: "Tour",
     blocks: [
+      { type: "headline", text: "Every block type" },
       { type: "stats", items: [{ value: "12", label: "Open", delta: "+2", dir: "up", spark: [1, 2, 3] }] },
       { type: "list", label: "To do", rows: [{ id: "r1", title: "Reply", act: { label: "Reply", intent: "reply", done: "Drafted" } }] },
       { type: "bars", label: "Load", aria: "Load by day", bars: [["Mon", 3], ["Tue", 5, true]] },
@@ -68,7 +69,7 @@ describe("show_answer payload transform", () => {
     const transformed = transformToolPayload({ phase: "input-available", toolName: "show_answer", input: deep });
     expect(transformed).toEqual(deep);
     const [part] = projectMessageParts({ id: "m2", role: "assistant", createdAt: new Date(), content: { format: 2, parts: [{ type: "tool-show_answer", toolCallId: "c2", state: "output-available", input: transformed, output: { ok: true, shown: true } }] } } as unknown as MastraMessage);
-    expect((part as { blocks: Array<{ type: string }> }).blocks.map((block) => block.type)).toEqual(["stats", "list", "bars"]);
+    expect((part as { blocks: Array<{ type: string }> }).blocks.map((block) => block.type)).toEqual(["headline", "stats", "list", "bars"]);
     expect(JSON.stringify(part)).not.toContain("[truncated");
   });
 

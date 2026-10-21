@@ -74,7 +74,7 @@ export const tenthsSchema = z.number().int().min(0).max(10);
 const rowActSchema = z.object({
   label: plain(),
   intent: z.enum(ANSWER_INTENTS),
-  primary: z.boolean().optional(),
+  primary: z.boolean().optional().describe("At most one primary action in the whole answer."),
   done: plain(),
 }).strict();
 
@@ -108,7 +108,7 @@ export const statsBlockSchema = z.object({
     label: plain(),
     delta: plain().optional(),
     dir: z.enum(["up", "down", "flat"]).optional(),
-    spark: z.array(tenthsSchema).min(2).max(12).optional(),
+    spark: z.array(tenthsSchema).min(2).max(12).optional().describe("Sparkline values 0-10; only with a delta."),
   }).strict().refine((item) => !item.spark || !!item.delta, { message: "A sparkline needs a delta.", path: ["spark"] })).min(1).max(3),
 }).strict();
 
@@ -123,7 +123,8 @@ export const timelineBlockSchema = z.object({
   type: z.literal("timeline"),
   label: plain(),
   count: plain().optional(),
-  rows: z.array(timelineRowSchema).min(1).max(10).refine((rows) => atMostOne(rows, (row) => row.now), { message: "At most one row can be now." }),
+  rows: z.array(timelineRowSchema).min(1).max(10).refine((rows) => atMostOne(rows, (row) => row.now), { message: "At most one row can be now." })
+    .describe("At most one row is now."),
 }).strict();
 
 export const progressBlockSchema = z.object({
@@ -132,7 +133,7 @@ export const progressBlockSchema = z.object({
   count: plain().optional(),
   items: z.array(z.object({
     label: plain(),
-    now: z.number().min(0),
+    now: z.number().min(0).describe("Between 0 and max."),
     max: z.number().positive(),
     value: plain(),
     warn: z.boolean().optional(),
@@ -143,7 +144,8 @@ export const tableBlockSchema = z.object({
   type: z.literal("table"),
   label: plain(),
   cols: z.array(plain()).min(2).max(6),
-  rows: z.array(z.object({ cells: z.array(plain()), pick: z.boolean().optional() }).strict()).min(1).max(12),
+  rows: z.array(z.object({ cells: z.array(plain()), pick: z.boolean().optional() }).strict()).min(1).max(12)
+    .describe(`Each row has exactly as many cells as cols; at most one row is the pick; at most ${ANSWER_MAX_TABLE_CELLS} cells in all.`),
 }).strict().superRefine((block, ctx) => {
   block.rows.forEach((row, index) => {
     if (row.cells.length !== block.cols.length) {
@@ -173,17 +175,17 @@ export const choiceBlockSchema = z.object({
   label: plain(),
   options: z.array(z.object({ id: plain(), title: plain(), sub: plain().optional(), tag: plain().optional() }).strict()).min(2).max(4),
   confirm: z.object({ label: plain(), done: plain() }).strict(),
-}).strict();
+}).strict().describe("At most one choice per answer.");
 
 export const diffBlockSchema = z.object({
   type: z.literal("diff"),
   id: plain(),
   label: plain(),
-  file: diffPath,
+  file: diffPath.describe("A relative workspace path."),
   where: plain().optional(),
   lines: z.array(z.object({ n: plain().optional(), text: literalLine, del: z.boolean().optional(), ins: z.boolean().optional() }).strict()).min(1).max(12),
   act: z.object({ label: plain(), done: plain(), skipDone: plain() }).strict(),
-}).strict();
+}).strict().describe("At most one diff per answer.");
 
 export const quoteBlockSchema = z.object({ type: z.literal("quote"), text: plain(280), cite: plain() }).strict();
 export const sourcesBlockSchema = z.object({ type: z.literal("sources"), items: z.array(plain()).min(1).max(6) }).strict();
@@ -213,8 +215,11 @@ export type Tenths = z.infer<typeof tenthsSchema>;
 /** Shape only: version, title and 1-10 valid blocks. Used as the tool's input schema. */
 export const answerShapeSchema = z.object({
   v: z.literal(ANSWER_CATALOG_VERSION),
-  title: plain(),
-  blocks: z.array(answerBlockSchema).min(1).max(ANSWER_MAX_BLOCKS),
+  title: plain().describe("Short title of the answer."),
+  blocks: z.array(answerBlockSchema).min(1).max(ANSWER_MAX_BLOCKS).describe(
+    `1-${ANSWER_MAX_BLOCKS} blocks. Exactly one headline, and it comes first. sources, then suggest, come last when used (at most one of each). `
+    + "At most one choice, one diff and one primary action. Every text is plain text: no markup, HTML, Markdown, backticks or links.",
+  ),
 }).strict();
 
 /** Composition rules, checked once the tool call ends. Returns one message per broken rule. */
@@ -243,6 +248,59 @@ export function compositionIssues(all: readonly CheckedBlock[]): string[] {
   }, 0);
   if (primaries > 1) issues.push("An answer has at most one primary action.");
   return issues;
+}
+
+/**
+ * The answer brought within its composition rules without asking the model again: the first headline leads (from the
+ * title when there is none) and later ones become text; a second choice or diff, and a second sources or suggest block,
+ * become fallbacks; only the first primary action stays primary; sources then suggest close the answer; past the block
+ * cap, body blocks are dropped from the end. Valid compositions come back unchanged.
+ */
+export function repairComposition(all: readonly CheckedBlock[], title: string): CheckedBlock[] {
+  if (compositionIssues(all).length === 0) return [...all];
+  const fallback: CheckedBlock = { type: "fallback" };
+  let headline: CheckedBlock | undefined;
+  let sources: CheckedBlock | undefined;
+  let suggest: CheckedBlock | undefined;
+  let choice = false;
+  let diff = false;
+  let primary = false;
+  const body: CheckedBlock[] = [];
+  for (const block of all) {
+    if (block.type === "headline") {
+      if (headline) body.push({ type: "text", text: block.text });
+      else headline = block;
+    } else if (block.type === "sources") {
+      if (sources) body.push(fallback);
+      else sources = block;
+    } else if (block.type === "suggest") {
+      if (suggest) body.push(fallback);
+      else suggest = block;
+    } else if (block.type === "choice" || block.type === "diff") {
+      const seen = block.type === "choice" ? choice : diff;
+      body.push(seen ? fallback : block);
+      if (block.type === "choice") choice = true;
+      else diff = true;
+    } else if (block.type === "list" || block.type === "timeline") {
+      const rows = (block.rows as AnswerRow[]).map((row) => {
+        if (!row.act?.primary) return row;
+        if (!primary) {
+          primary = true;
+          return row;
+        }
+        const { primary: _primary, ...act } = row.act;
+        return { ...row, act };
+      });
+      body.push({ ...block, rows } as CheckedBlock);
+    } else body.push(block);
+  }
+  if (!headline) {
+    const fromTitle = validateBlock({ type: "headline", text: title });
+    if (fromTitle.ok) headline = fromTitle.value;
+  }
+  const head = headline ? [headline] : [];
+  const tail = [sources, suggest].filter((block): block is CheckedBlock => block !== undefined);
+  return [...head, ...body.slice(0, Math.max(0, ANSWER_MAX_BLOCKS - head.length - tail.length)), ...tail];
 }
 
 /** The full answer: shape plus composition. */
@@ -282,20 +340,20 @@ export const answerInputSchema = z.object({
   blocks: z.array(z.object({ type: z.string() }).passthrough()).describe(`1-${ANSWER_MAX_BLOCKS} blocks, each with a type.`),
 }).passthrough();
 
-export type AnswerCheck = { blocks: CheckedBlock[]; issues: string[]; blockIssues: string[] };
+export type AnswerCheck = { blocks: CheckedBlock[]; issues: string[]; blockIssues: string[]; envelopeIssues: string[] };
 
 /**
- * Check a tool input: broken blocks become fallbacks (each one described in `blockIssues`); the issues are composition
- * failures that need a retry.
+ * Check a tool input: broken blocks become fallbacks (each one described in `blockIssues`); the issues are envelope and
+ * composition failures that need a retry, and `envelopeIssues` the ones no repair can fix.
  */
 export function checkAnswer(input: unknown): AnswerCheck {
   const record = input && typeof input === "object" ? (input as { v?: unknown; title?: unknown; blocks?: unknown }) : {};
-  const issues: string[] = [];
-  if (record.v !== ANSWER_CATALOG_VERSION) issues.push(`v must be ${ANSWER_CATALOG_VERSION}.`);
+  const envelopeIssues: string[] = [];
+  if (record.v !== ANSWER_CATALOG_VERSION) envelopeIssues.push(`v must be ${ANSWER_CATALOG_VERSION}.`);
   const title = plain().safeParse(record.title);
-  if (!title.success) issues.push(`title: ${title.error.issues[0]?.message ?? "invalid"}`);
+  if (!title.success) envelopeIssues.push(`title: ${title.error.issues[0]?.message ?? "invalid"}`);
   const raw = Array.isArray(record.blocks) ? record.blocks : [];
-  if (raw.length === 0) issues.push("An answer needs at least one block.");
+  if (raw.length === 0) envelopeIssues.push("An answer needs at least one block.");
   const blockIssues: string[] = [];
   const blocks: CheckedBlock[] = raw.map((block, index) => {
     const result = validateBlock(block);
@@ -304,5 +362,5 @@ export function checkAnswer(input: unknown): AnswerCheck {
     blockIssues.push(`blocks.${index} (${type}): ${result.error}`);
     return { type: "fallback" };
   });
-  return { blocks, issues: [...issues, ...(raw.length ? compositionIssues(blocks) : [])], blockIssues };
+  return { blocks, issues: [...envelopeIssues, ...(raw.length ? compositionIssues(blocks) : [])], blockIssues, envelopeIssues };
 }

@@ -14,6 +14,7 @@ import { createShowAnswerTool } from "./show-answer-tool";
 const headline = { type: "headline", text: "Two things need you today." };
 const valid = { v: 2, title: "Today", blocks: [headline, { type: "sources", items: ["a.md"] }] };
 const noHeadline = { v: 2, title: "Today", blocks: [{ type: "text", text: "Context." }] };
+const badEnvelope = { v: 1, title: "Today", blocks: [headline] };
 
 describe("show_answer tool", () => {
   it("is described in the agent instructions", () => {
@@ -27,18 +28,26 @@ describe("show_answer tool", () => {
 
   it("allows one retry, then tells the model to answer in prose, then resets", async () => {
     const tool = createShowAnswerTool();
-    const run = () => tool.execute!(noHeadline as never, {} as never) as Promise<{ ok: boolean; retry?: boolean; message?: string }>;
+    const run = () => tool.execute!(badEnvelope as never, {} as never) as Promise<{ ok: boolean; retry?: boolean; message?: string }>;
     const first = await run();
     expect(first).toMatchObject({ ok: false, retry: true });
-    expect(first.message).toContain("headline");
+    expect(first.message).toContain("v must be 2");
     expect(await run()).toMatchObject({ ok: false, retry: false });
     expect(await run()).toMatchObject({ ok: false, retry: true });
+  });
+
+  it("repairs a composition that still breaks the rules on the retry instead of rejecting it", async () => {
+    const tool = createShowAnswerTool();
+    const first = await tool.execute!(noHeadline as never, {} as never) as { ok: boolean; retry?: boolean; message?: string };
+    expect(first).toMatchObject({ ok: false, retry: true });
+    expect(first.message).toContain("headline");
+    expect(await tool.execute!(noHeadline as never, {} as never)).toEqual({ ok: true, shown: true });
   });
 
   it("counts failures per turn: turn 2's first failure gets a retry", async () => {
     const tool = createShowAnswerTool();
     const turn = (users: number) => ({ agent: { threadId: "t", messages: Array.from({ length: users }, () => ({ role: "user" })) } }) as never;
-    const run = (users: number) => tool.execute!(noHeadline as never, turn(users)) as Promise<{ retry?: boolean }>;
+    const run = (users: number) => tool.execute!(badEnvelope as never, turn(users)) as Promise<{ retry?: boolean }>;
     expect(await run(1)).toMatchObject({ retry: true });
     expect(await run(1)).toMatchObject({ retry: false });
     expect(await run(2)).toMatchObject({ retry: true });
@@ -50,7 +59,7 @@ describe("show_answer tool", () => {
     const tool = createShowAnswerTool();
     // 20 remembered messages in every turn: the user-message count no longer changes between turns.
     const turn = (runId: string) => ({ agent: { threadId: "t", messages: Array.from({ length: 20 }, () => ({ role: "user" })) }, requestContext: new Map([["proteus-run-id", runId]]) }) as never;
-    const run = (runId: string) => tool.execute!(noHeadline as never, turn(runId)) as Promise<{ retry?: boolean }>;
+    const run = (runId: string) => tool.execute!(badEnvelope as never, turn(runId)) as Promise<{ retry?: boolean }>;
     expect(await run("run-1")).toMatchObject({ retry: true });
     expect(await run("run-1")).toMatchObject({ retry: false });
     expect(await run("run-2")).toMatchObject({ retry: true });
@@ -171,8 +180,8 @@ describe("show_answer retry then prose (Mastra harness)", () => {
 
   it("falls back to prose when the retry fails too", async () => {
     const chunks = await run([
-      { type: "tool", toolName: "show_answer", input: noHeadline },
-      { type: "tool", toolName: "show_answer", input: noHeadline },
+      { type: "tool", toolName: "show_answer", input: badEnvelope },
+      { type: "tool", toolName: "show_answer", input: badEnvelope },
       { type: "text", text: "Here it is in prose." },
     ]);
     const r = results(chunks);
