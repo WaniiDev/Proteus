@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { normalizeError } from "../core/runtime-error-mapping";
-import { isAnthropicModelId, listAnthropicModels, resolveAnthropicModel } from "./anthropic";
+import { isAnthropicModelId, listAnthropicModels } from "./anthropic";
 
 const originalFetch = globalThis.fetch;
 
@@ -89,27 +89,5 @@ describe("Anthropic control-plane client", () => {
     expect(opus48).toMatchObject({ reasoningOptions: ["none", "low", "medium", "high", "xhigh", "max"], reasoningEffort: "medium" });
     expect(haiku?.reasoningOptions).toBeUndefined();
     expect(legacy?.reasoningOptions).toBeUndefined();
-  });
-
-  it("sends the selected thinking level with every request", async () => {
-    const bodies: Array<Record<string, unknown>> = [];
-    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return new Response(JSON.stringify({
-        id: "msg_1", type: "message", role: "assistant", model: "claude-opus-4-8", content: [{ type: "text", text: "ok" }],
-        stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }) as unknown as typeof fetch;
-    const call = { prompt: [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }] };
-
-    await resolveAnthropicModel("anthropic/claude-opus-4-8", "sk-ant-test", "xhigh").doGenerate(call);
-    await resolveAnthropicModel("anthropic/claude-opus-4-8", "sk-ant-test", "none").doGenerate(call);
-    await resolveAnthropicModel("anthropic/claude-opus-4-8", "sk-ant-test", null).doGenerate(call);
-
-    expect(bodies[0]).toMatchObject({ thinking: { type: "adaptive" }, output_config: { effort: "xhigh" } });
-    expect(bodies[1]).toMatchObject({ thinking: { type: "disabled" } });
-    expect(bodies[1]?.output_config).toBeUndefined();
-    expect(bodies[2]?.thinking).toBeUndefined();
-    expect(bodies[2]?.output_config).toBeUndefined();
   });
 });

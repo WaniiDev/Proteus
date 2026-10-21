@@ -28,6 +28,7 @@ import { createMemoryTools } from "../memory/memory-tools";
 import { DEFAULT_MODEL_ID } from "../../shared/constants";
 import { AGENT_ID } from "./constants";
 import { transformToolPayload } from "./message-mapping";
+import { reasoningProviderOptions, withReasoning } from "./reasoning-options";
 import type { RuntimeContext } from "./context";
 
 function productModelFromSession(value: string | undefined): ProviderModelId {
@@ -112,9 +113,11 @@ export function createProteusAgent({ ctx, vault, anthropicVault, codexCredential
         // for free-form follow-up messages and would let an old suspension
         // consume a later, unrelated user turn.
         autoResumeSuspendedTools: false,
-        prepareStep: (args) => ({
-          ...taskToolPolicy.prepareStep(args),
-        }),
+        prepareStep: (args) => withReasoning(
+          args,
+          taskToolPolicy.prepareStep(args),
+          reasoningProviderOptions(ctx.snapshot.models.find((model) => model.id === ctx.snapshot.selectedModelId), ctx.snapshot.selectedReasoningEffort),
+        ),
       },
       transform: {
         targets: ["display", "transcript"],
@@ -128,8 +131,7 @@ export function createProteusAgent({ ctx, vault, anthropicVault, codexCredential
         if (isAnthropicModelId(modelId)) {
           const anthropicKey = await anthropicVault.get();
           if (!anthropicKey) throw new Error("No verified Anthropic credential");
-          const level = ctx.snapshot.selectedReasoningEffort ?? ctx.snapshot.models.find((model) => model.id === modelId)?.reasoningEffort;
-          return resolveAnthropicModel(modelId, anthropicKey, level);
+          return resolveAnthropicModel(modelId, anthropicKey);
         }
         const apiKey = await vault.get();
         if (!apiKey) throw new Error("No verified OpenRouter credential");

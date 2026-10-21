@@ -72,6 +72,20 @@ describe("OpenRouter control-plane client", () => {
     expect(requestedUrls).toContain("https://openrouter.ai/api/v1/models?sort=most-popular");
   });
 
+  it("offers every effort OpenRouter accepts, and Off when reasoning is optional", async () => {
+    const entry = (id: string, reasoning: Record<string, unknown>) => ({ id, architecture: { input_modalities: ["text"], output_modalities: ["text"] }, reasoning });
+    globalThis.fetch = (async () => new Response(JSON.stringify({ data: [
+      entry("openai/gpt-5", { supported_efforts: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"], default_effort: "medium", mandatory: true }),
+      entry("anthropic/claude-sonnet", { supported_efforts: ["low", "medium", "high"], default_effort: "high", default_enabled: false, mandatory: false }),
+      entry("deepseek/r1", { supported_efforts: [], mandatory: false }),
+    ] }), { status: 200 })) as unknown as typeof fetch;
+
+    const [, gpt, sonnet, r1] = await listOpenRouterTextModels("sk-or-v1-test");
+    expect(gpt).toMatchObject({ reasoningOptions: ["minimal", "low", "medium", "high", "xhigh", "max"], reasoningEffort: "medium" });
+    expect(sonnet).toMatchObject({ reasoningOptions: ["none", "low", "medium", "high"], reasoningEffort: "none" });
+    expect(r1?.reasoningOptions).toBeUndefined();
+  });
+
   it("keeps the private catalog when popularity ranking is unavailable", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => String(input).includes("sort=most-popular")
       ? new Response("unavailable", { status: 503 })

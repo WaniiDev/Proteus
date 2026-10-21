@@ -53,24 +53,15 @@ export async function listAnthropicModels(apiKey: string): Promise<ProviderModel
   return models;
 }
 
-/** The provider options for a thinking level: thinking off, or adaptive thinking at that effort. */
 type ReasoningOptions = { thinking: { type: "adaptive" | "disabled" }; effort?: AnthropicEffort };
 
+/** The provider options for a thinking level: thinking off, or adaptive thinking at that effort. */
 export function anthropicReasoningOptions(level: ReasoningEffort | null | undefined): ReasoningOptions | undefined {
   if (level === "none") return { thinking: { type: "disabled" } } satisfies AnthropicLanguageModelOptions;
   if (!level || !(ANTHROPIC_EFFORTS as readonly string[]).includes(level)) return undefined;
   return { thinking: { type: "adaptive" }, effort: level as AnthropicEffort } satisfies AnthropicLanguageModelOptions;
 }
 
-/** A Claude model whose every call carries the selected thinking level. */
-export function resolveAnthropicModel(modelId: AnthropicModelId, apiKey: string, level?: ReasoningEffort | null) {
-  const model = createAnthropic({ apiKey })(modelId.slice("anthropic/".length));
-  const reasoning = anthropicReasoningOptions(level);
-  if (!reasoning) return model;
-  type Call = Parameters<typeof model.doStream>[0];
-  const withReasoning = (call: Call): Call => ({ ...call, providerOptions: { ...call.providerOptions, anthropic: { ...call.providerOptions?.anthropic, ...reasoning } } });
-  return Object.assign(Object.create(model) as typeof model, {
-    doGenerate: (call: Call) => model.doGenerate(withReasoning(call)),
-    doStream: (call: Call) => model.doStream(withReasoning(call)),
-  });
+export function resolveAnthropicModel(modelId: AnthropicModelId, apiKey: string) {
+  return createAnthropic({ apiKey })(modelId.slice("anthropic/".length));
 }

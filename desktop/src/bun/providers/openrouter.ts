@@ -1,6 +1,6 @@
 import { ModelsDevGateway, type ProviderConfig } from "@mastra/core/llm";
 import { DEFAULT_MODEL_ID } from "../../shared/constants";
-import type { OpenRouterModel, OpenRouterModelId, ProviderErrorCode } from "../../shared/contracts";
+import type { OpenRouterModel, OpenRouterModelId, ProviderErrorCode, ReasoningEffort } from "../../shared/contracts";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -24,6 +24,8 @@ type RawOpenRouterModel = {
   reasoning?: {
     supported_efforts?: unknown;
     default_effort?: unknown;
+    default_enabled?: unknown;
+    mandatory?: unknown;
   };
 };
 
@@ -88,6 +90,31 @@ export async function validateOpenRouterKey(apiKey: string): Promise<void> {
   await requestJson<{ data?: unknown }>("/key", apiKey);
 }
 
+/** The `reasoning.effort` values OpenRouter accepts, in runtime order. */
+const OPENROUTER_EFFORTS: readonly ReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * A model's reasoning levels from its catalog entry: the efforts it supports, plus "none" when reasoning is optional.
+ * The default is "none" for a model that does not reason unless asked, otherwise its default effort.
+ */
+function reasoningLevels(reasoning: RawOpenRouterModel["reasoning"]): Pick<OpenRouterModel, "reasoningOptions" | "reasoningEffort"> {
+  const supported = new Set(safeStringArray(reasoning?.supported_efforts, []));
+  if (supported.size === 0) return {};
+  if (reasoning?.mandatory === false) supported.add("none");
+  const levels = OPENROUTER_EFFORTS.filter((level) => supported.has(level));
+  if (!levels.some((level) => level !== "none")) return {};
+  const fallback = reasoning?.default_enabled === false && levels.includes("none") ? "none" : undefined;
+  const preferred = levels.find((level) => level === reasoning?.default_effort);
+  const reasoningEffort = fallback ?? preferred;
+  return { reasoningOptions: levels, ...(reasoningEffort ? { reasoningEffort } : {}) };
+}
+
+/** The provider options for a reasoning level: reasoning off, or reasoning at that effort. */
+export function openRouterReasoningOptions(level: ReasoningEffort): { reasoning: { enabled: false } | { effort: ReasoningEffort } } | undefined {
+  if (level === "none") return { reasoning: { enabled: false } };
+  return OPENROUTER_EFFORTS.includes(level) ? { reasoning: { effort: level } } : undefined;
+}
+
 function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
   if (typeof raw.id !== "string" || raw.id.trim() === "") return null;
   const inputModalities = safeStringArray(raw.architecture?.input_modalities, []);
@@ -97,10 +124,7 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
   const contextLength = typeof raw.context_length === "number" && Number.isInteger(raw.context_length) && raw.context_length > 0
     ? raw.context_length
     : undefined;
-  const supportedReasoning = safeStringArray(raw.reasoning?.supported_efforts, []).filter((effort): effort is "minimal" | "low" | "medium" | "high" => ["minimal", "low", "medium", "high"].includes(effort));
-  const defaultReasoning = typeof raw.reasoning?.default_effort === "string" && supportedReasoning.includes(raw.reasoning.default_effort as "minimal" | "low" | "medium" | "high")
-    ? raw.reasoning.default_effort as "minimal" | "low" | "medium" | "high"
-    : undefined;
+  const { reasoningOptions, reasoningEffort } = reasoningLevels(raw.reasoning);
 
   return {
     id: canonicalizeOpenRouterModelId(raw.id),
@@ -116,8 +140,8 @@ function mapModel(raw: RawOpenRouterModel): OpenRouterModel | null {
       : {}),
     inputModalities,
     outputModalities,
-    ...(supportedReasoning.length > 0 ? { reasoningOptions: supportedReasoning } : {}),
-    ...(defaultReasoning ? { reasoningEffort: defaultReasoning } : {}),
+    ...(reasoningOptions ? { reasoningOptions } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
