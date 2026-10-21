@@ -128,7 +128,8 @@ export function createProteusAgent({ ctx, vault, anthropicVault, codexCredential
         if (isAnthropicModelId(modelId)) {
           const anthropicKey = await anthropicVault.get();
           if (!anthropicKey) throw new Error("No verified Anthropic credential");
-          return resolveAnthropicModel(modelId, anthropicKey);
+          const level = ctx.snapshot.selectedReasoningEffort ?? ctx.snapshot.models.find((model) => model.id === modelId)?.reasoningEffort;
+          return resolveAnthropicModel(modelId, anthropicKey, level);
         }
         const apiKey = await vault.get();
         if (!apiKey) throw new Error("No verified OpenRouter credential");

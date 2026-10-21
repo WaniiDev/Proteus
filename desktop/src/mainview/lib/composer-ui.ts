@@ -170,7 +170,7 @@ export function deriveContextChips(args: { snapshot: RuntimeSnapshot; queuedDraf
   const projectLocked = !canChooseComposerWorkspace(snapshot, queuedDraftCount);
   const modelLocked = askOpen || snapshot.activeRun !== null || runningElsewhere;
   const levels = orderedLevels(model?.reasoningOptions);
-  const effort = nearestLevel(levels, effortOverride ?? snapshot.selectedReasoningEffort);
+  const effort = nearestLevel(levels, effortOverride ?? snapshot.selectedReasoningEffort ?? model?.reasoningEffort);
   const index = levelIndex(levels, effort);
   const effortLabel = effort ? effortName(effort) : "";
   const label = snapshot.activeWorkspace.label;

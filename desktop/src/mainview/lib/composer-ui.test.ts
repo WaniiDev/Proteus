@@ -195,6 +195,11 @@ describe("context chips view", () => {
     expect(view(base({ selectedReasoningEffort: "high" })).atTop).toBe(true);
   });
 
+  it("shows the model's default level when no level was chosen, as the request will send it", () => {
+    const models = base().models.map((model) => (model.id === "openrouter/sonnet" ? { ...model, reasoningEffort: "medium" as const } : model));
+    expect(view(base({ models, selectedReasoningEffort: null })).effort).toBe("medium");
+  });
+
   it("has no effort part for a model without thinking levels", () => {
     const chips = view(base({ selectedModelId: "openrouter/plain" }));
     expect(chips.levels).toEqual([]);
