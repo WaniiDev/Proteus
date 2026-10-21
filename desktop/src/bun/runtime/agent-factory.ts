@@ -27,7 +27,7 @@ import { ScopedMemoryManager } from "../memory/scoped-memory";
 import { createMemoryTools } from "../memory/memory-tools";
 import { DEFAULT_MODEL_ID } from "../../shared/constants";
 import { AGENT_ID } from "./constants";
-import { sanitizeToolDetail } from "./message-mapping";
+import { transformToolPayload } from "./message-mapping";
 import type { RuntimeContext } from "./context";
 
 function productModelFromSession(value: string | undefined): ProviderModelId {
@@ -118,15 +118,7 @@ export function createProteusAgent({ ctx, vault, anthropicVault, codexCredential
       },
       transform: {
         targets: ["display", "transcript"],
-        transformToolPayload: ({ phase, input, inputTextDelta, output, error, suspendPayload, resumeData }) => {
-          if (phase === "input-delta") return inputTextDelta ? { delta: inputTextDelta.slice(0, 2_000) } : undefined;
-          if (phase === "input-available" || phase === "approval") return sanitizeToolDetail(input);
-          if (phase === "output-available") return sanitizeToolDetail(output);
-          if (phase === "error") return { message: error instanceof Error ? error.message : String(error ?? "Tool failed").slice(0, 2_000) };
-          if (phase === "suspend") return sanitizeToolDetail(suspendPayload);
-          if (phase === "resume") return sanitizeToolDetail(resumeData);
-          return undefined;
-        },
+        transformToolPayload,
       },
       model: async () => {
         const modelId = productModelFromSession(ctx.snapshot.selectedModelId);
