@@ -1,5 +1,5 @@
 import { createTool } from "@mastra/core/tools";
-import { answerInputSchema, checkAnswer } from "../../shared/answer-catalog";
+import { answerInputSchema, answerShapeSchema, checkAnswer } from "../../shared/answer-catalog";
 
 export const SHOW_ANSWER_TOOL_ID = "show_answer";
 
@@ -24,27 +24,66 @@ function turnKey(context: ToolContext): string {
   return `${agent?.threadId ?? "default"}:${userMessages}`;
 }
 
+type JsonNode = Record<string, unknown>;
+
+/**
+ * Rewrites the catalog's JSON Schema into the subset every provider accepts: tuples (`items` or `prefixItems` arrays,
+ * which OpenAI rejects) become an array of any of their members, and `oneOf` becomes `anyOf`. `execute` still checks
+ * every block against the catalog itself, so this only changes how the rules are written for the model.
+ */
+function forProviders(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(forProviders);
+  if (!node || typeof node !== "object") return node;
+  const { oneOf, items, prefixItems, additionalItems: _additionalItems, ...rest } = node as JsonNode;
+  const out: JsonNode = Object.fromEntries(Object.entries(rest).map(([key, value]) => [key, forProviders(value)]));
+  const tuple = Array.isArray(prefixItems) ? prefixItems : Array.isArray(items) ? items : undefined;
+  if (tuple) out.items = { anyOf: forProviders(tuple) };
+  else if (items !== undefined) out.items = forProviders(items);
+  if (oneOf !== undefined) out.anyOf = forProviders(oneOf);
+  return out;
+}
+
+/**
+ * The model sees the whole catalog (every block's fields, types and limits) as the tool's JSON Schema, so it can write
+ * valid blocks. Validation stays structural (`answerInputSchema`): `execute` receives the raw blocks and checks them
+ * itself, so a bad block costs one retry or a fallback line instead of failing input validation.
+ */
+const catalog = answerShapeSchema["~standard"];
+const structural = answerInputSchema["~standard"];
+export const showAnswerInputSchema: { "~standard": typeof structural } = {
+  "~standard": {
+    version: 1,
+    vendor: "proteus",
+    validate: structural.validate,
+    jsonSchema: {
+      input: (options) => forProviders(catalog.jsonSchema.input(options)) as JsonNode,
+      output: (options) => forProviders(catalog.jsonSchema.output(options)) as JsonNode,
+    },
+  },
+};
+
 /**
  * `show_answer` renders a catalog v2 answer in the Island (ADR 0003). The tool only acknowledges: the UI reads the
- * streamed input. The input schema is structural only. Here a block that breaks its own limits is shown as a fallback
- * line (the answer stands); a composition failure (order, counts, more than 10 blocks) returns a normal result the model
- * reads, once to retry and then to answer in prose. The person never sees a rejected answer.
+ * streamed input. The first failed attempt in a turn returns a normal result the model reads to retry, naming each
+ * broken block and composition rule. On the retry a block that still breaks its own limits is shown as a fallback line
+ * (the answer stands), while a composition failure (order, counts, more than 10 blocks) tells the model to answer in
+ * prose. The person never sees a rejected answer.
  */
 export function createShowAnswerTool() {
   const failures = new Map<string, number>();
   return createTool({
     id: SHOW_ANSWER_TOOL_ID,
     description: "Show the reply as an answer made of blocks (v: 2, a title, then 1-10 blocks: headline first and once, then text, stats, list, timeline, progress, table, bars, choice, diff, quote; sources then suggest last). Use it when the reply is a set of things to act on, a comparison, a plan, numbers or a trend; answer in prose otherwise. Plain text only: no markup, HTML, Markdown or links.",
-    inputSchema: answerInputSchema,
+    inputSchema: showAnswerInputSchema,
     execute: async (input, context): Promise<ShowAnswerResult> => {
       const key = turnKey(context as ToolContext);
-      const { issues } = checkAnswer(input);
-      if (issues.length === 0) {
+      const { issues, blockIssues } = checkAnswer(input);
+      const attempts = (failures.get(key) ?? 0) + 1;
+      if (issues.length === 0 && (blockIssues.length === 0 || attempts > 1)) {
         failures.delete(key);
         return { ok: true, shown: true };
       }
-      const reasons = issues.join(" ");
-      const attempts = (failures.get(key) ?? 0) + 1;
+      const reasons = [...issues, ...blockIssues].join(" ");
       if (attempts === 1) {
         failures.set(key, attempts);
         return { ok: false, shown: false, retry: true, message: `The answer was not shown. Fix it and call show_answer once more: ${reasons}` };

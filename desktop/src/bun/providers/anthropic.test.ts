@@ -67,4 +67,27 @@ describe("Anthropic control-plane client", () => {
     const error = await listAnthropicModels("sk-ant-bad").catch((caught: unknown) => caught);
     expect(normalizeError(error).code).toBe("invalid-credential");
   });
+
+  it("offers the thinking levels each model's capabilities report", async () => {
+    const support = (supported: boolean) => ({ supported });
+    const capabilities = (disabled: boolean, efforts: string[]) => ({
+      thinking: { supported: true, types: { adaptive: support(true), enabled: support(false), disabled: support(disabled), between_tools: support(false) } },
+      effort: { supported: true, ...Object.fromEntries(["low", "medium", "high", "xhigh", "max"].map((level) => [level, support(efforts.includes(level))])) },
+    });
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      data: [
+        model("claude-opus-5-5", { capabilities: capabilities(false, ["low", "medium", "high", "xhigh", "max"]) }),
+        model("claude-opus-4-8", { capabilities: capabilities(true, ["low", "medium", "high", "xhigh", "max"]) }),
+        model("claude-haiku-4-5", { capabilities: { thinking: { supported: true, types: { adaptive: support(false), enabled: support(true), disabled: support(true), between_tools: support(false) } }, effort: { supported: false } } }),
+        model("claude-legacy", { capabilities: null }),
+      ],
+      has_more: false,
+    }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+
+    const [opus55, opus48, haiku, legacy] = await listAnthropicModels("sk-ant-test");
+    expect(opus55).toMatchObject({ reasoningOptions: ["low", "medium", "high", "xhigh", "max"], reasoningEffort: "medium" });
+    expect(opus48).toMatchObject({ reasoningOptions: ["none", "low", "medium", "high", "xhigh", "max"], reasoningEffort: "medium" });
+    expect(haiku?.reasoningOptions).toBeUndefined();
+    expect(legacy?.reasoningOptions).toBeUndefined();
+  });
 });
