@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
+import { makeCoreToolV5 } from "@mastra/core/utils";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -8,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_INSTRUCTIONS } from "../core/agent-instructions";
 import { scriptedStreamingModel, waitFor } from "../native/native-mastra-test-harness";
-import { z } from "zod";
 import { createShowAnswerTool } from "./show-answer-tool";
 
 const headline = { type: "headline", text: "Two things need you today." };
@@ -65,16 +65,40 @@ describe("show_answer tool", () => {
     expect(typeof result.message).toBe("string");
   });
 
-  it("a block that breaks its limits is a fallback, not a rejection", async () => {
+  it("a broken block gets one retry naming it, then shows as a fallback", async () => {
     const tool = createShowAnswerTool();
-    const input = { v: 2, title: "Today", blocks: [headline, { type: "text", text: "see [x](http://a.b)" }] };
+    const input = { v: 2, title: "Today", blocks: [headline, { type: "table", headers: ["a"], data: [["b"]] }] };
+    const first = await tool.execute!(input as never, {} as never) as { ok: boolean; retry?: boolean; message?: string };
+    expect(first).toMatchObject({ ok: false, retry: true });
+    expect(first.message).toContain("blocks.1 (table)");
     expect(await tool.execute!(input as never, {} as never)).toEqual({ ok: true, shown: true });
   });
 
-  it("sends a JSON schema with no tuple items arrays", () => {
-    const schema = JSON.stringify(z.toJSONSchema(createShowAnswerTool().inputSchema as never));
-    expect(schema).not.toContain('"prefixItems"');
-    expect(/"items":\s*\[/.test(schema)).toBe(false);
+  it("shows the model every block's fields, in a JSON Schema every provider accepts", () => {
+    const { jsonSchema } = createShowAnswerTool().inputSchema!["~standard"] as unknown as { jsonSchema: { input: (options: { target: string }) => unknown } };
+    for (const target of ["draft-07", "draft-2020-12"]) {
+      const schema = JSON.stringify(jsonSchema.input({ target }));
+      for (const field of ['"rows"', '"cols"', '"cells"', '"bars"', '"options"', '"lines"', '"spark"']) expect(schema).toContain(field);
+      expect(schema).not.toContain('"prefixItems"');
+      expect(schema).not.toContain('"oneOf"');
+      expect(/"items":\s*\[/.test(schema)).toBe(false);
+    }
+  });
+
+  it("reaches Anthropic and OpenAI models as the full catalog", () => {
+    for (const provider of ["anthropic.messages", "openai.responses"]) {
+      const model = { provider, modelId: "m", specificationVersion: "v2" };
+      const tool = makeCoreToolV5(createShowAnswerTool() as never, { name: "show_answer", model, requestContext: new Map() } as never) as unknown as { inputSchema: { jsonSchema: unknown } };
+      const schema = JSON.stringify(tool.inputSchema.jsonSchema);
+      for (const field of ['"rows"', '"cols"', '"cells"', '"bars"', '"const":"table"']) expect(schema).toContain(field);
+      expect(/"items":\s*\[/.test(schema)).toBe(false);
+    }
+  });
+
+  it("validates structurally, so execute sees a broken block instead of an input error", async () => {
+    const input = { v: 2, title: "Today", blocks: [headline, { type: "table", headers: ["a"] }] };
+    const result = await createShowAnswerTool().inputSchema!["~standard"].validate(input);
+    expect(result).toEqual({ value: input });
   });
 
   it("a valid answer clears the failure count", async () => {

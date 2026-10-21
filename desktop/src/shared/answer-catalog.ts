@@ -161,7 +161,8 @@ export const barsBlockSchema = z.object({
   label: plain(),
   note: plain().optional(),
   aria: plain(),
-  bars: z.array(z.union([z.tuple([plain(), tenthsSchema]), z.tuple([plain(), tenthsSchema, z.boolean()])])).min(2).max(12),
+  bars: z.array(z.union([z.tuple([plain(), tenthsSchema]), z.tuple([plain(), tenthsSchema, z.boolean()])])).min(2).max(12)
+    .describe("Each bar is [label, value 0-10], or [label, value 0-10, true] for the one highlighted bar."),
 }).strict().superRefine((block, ctx) => {
   if (block.bars.filter((bar) => bar[2] === true).length > 1) ctx.addIssue({ code: "custom", message: "At most one bar can be highlighted.", path: ["bars"] });
 });
@@ -281,9 +282,12 @@ export const answerInputSchema = z.object({
   blocks: z.array(z.object({ type: z.string() }).passthrough()).describe(`1-${ANSWER_MAX_BLOCKS} blocks, each with a type.`),
 }).passthrough();
 
-export type AnswerCheck = { blocks: CheckedBlock[]; issues: string[] };
+export type AnswerCheck = { blocks: CheckedBlock[]; issues: string[]; blockIssues: string[] };
 
-/** Check a tool input: broken blocks become fallbacks; the issues are composition failures that need a retry. */
+/**
+ * Check a tool input: broken blocks become fallbacks (each one described in `blockIssues`); the issues are composition
+ * failures that need a retry.
+ */
 export function checkAnswer(input: unknown): AnswerCheck {
   const record = input && typeof input === "object" ? (input as { v?: unknown; title?: unknown; blocks?: unknown }) : {};
   const issues: string[] = [];
@@ -292,9 +296,13 @@ export function checkAnswer(input: unknown): AnswerCheck {
   if (!title.success) issues.push(`title: ${title.error.issues[0]?.message ?? "invalid"}`);
   const raw = Array.isArray(record.blocks) ? record.blocks : [];
   if (raw.length === 0) issues.push("An answer needs at least one block.");
-  const blocks: CheckedBlock[] = raw.map((block) => {
+  const blockIssues: string[] = [];
+  const blocks: CheckedBlock[] = raw.map((block, index) => {
     const result = validateBlock(block);
-    return result.ok ? result.value : { type: "fallback" };
+    if (result.ok) return result.value;
+    const type = block && typeof block === "object" && typeof (block as { type?: unknown }).type === "string" ? (block as { type: string }).type : "unknown";
+    blockIssues.push(`blocks.${index} (${type}): ${result.error}`);
+    return { type: "fallback" };
   });
-  return { blocks, issues: [...issues, ...(raw.length ? compositionIssues(blocks) : [])] };
+  return { blocks, issues: [...issues, ...(raw.length ? compositionIssues(blocks) : [])], blockIssues };
 }

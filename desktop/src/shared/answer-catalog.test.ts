@@ -215,6 +215,9 @@ describe("checkAnswer", () => {
     const result = checkAnswer({ ...good, blocks: [headline, { type: "text", text: "<b>x</b>" }, { type: "mystery" }] });
     expect(result.issues).toEqual([]);
     expect(result.blocks.map((b) => b.type)).toEqual(["headline", "fallback", "fallback"]);
+    expect(result.blockIssues).toHaveLength(2);
+    expect(result.blockIssues[0]).toMatch(/^blocks\.1 \(text\): text: Plain text only/);
+    expect(result.blockIssues[1]).toStartWith("blocks.2 (mystery): ");
   });
   it("reports composition failures, including more than 10 blocks", () => {
     expect(checkAnswer({ ...good, blocks: [{ type: "text", text: "x" }] }).issues.join(" ")).toContain("headline");

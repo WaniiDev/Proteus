@@ -64,7 +64,8 @@ The host maps an intent to a tool through the existing allowlist and approval po
 
 - The tool's input is parsed as it streams. A block renders once it is complete and valid; rows of a list, timeline, progress or table render one at a time as they complete. Three breathing dots hold the place of the next block until the tool call ends.
 - Each block is validated against its limits when it completes. A block that fails renders as one fallback line ("One part of this answer couldn't be shown.") and the rest of the answer still shows; a half-drawn block is never shown.
-- The complete answer is validated against the composition rules when the tool call ends. If it fails, the model gets the schema error and one retry; if the retry fails too, it answers in prose. The person never sees a rejected answer.
+- The complete answer is validated when the tool call ends. If a block breaks its limits or the answer breaks a composition rule, the answer is withdrawn and the model gets each error and one retry. On the retry, blocks that still fail stay as fallback lines and the answer stands; a composition failure makes the model answer in prose. The person never sees a rejected answer.
+- The tool's JSON Schema, which is what the model sees, is the whole catalog: every block's fields, types and limits. Tuples (bars) are sent as arrays of their members because some providers reject tuple schemas. Validation of the tool input stays structural, so a broken block reaches the retry rule instead of failing as a tool input error.
 - Unknown block types and fields are rejected, and so are answers over the size caps (12 rows or options per block, 6 columns, 200 table cells, 10 blocks).
 
 ## Accessibility
