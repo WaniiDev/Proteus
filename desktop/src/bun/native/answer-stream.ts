@@ -1,4 +1,4 @@
-import { validateBlock } from "../../shared/answer-catalog";
+import { repairComposition, validateBlock } from "../../shared/answer-catalog";
 import type { AnswerPartBlock, ChatAnswerPart } from "../../shared/contracts";
 import { closedValue, entryOf, parsePartialJson, type PartialNode } from "./partial-json";
 
@@ -59,13 +59,13 @@ export function projectAnswerText(text: string): AnswerProjection {
   return { title, blocks };
 }
 
-/** A complete `show_answer` input (tool call args, or stored history). Each block is validated on its own. */
+/** A complete `show_answer` input (tool call args, or stored history). Each block is validated on its own, then the composition is repaired. */
 export function projectAnswerInput(input: unknown): AnswerProjection {
   const record = input && typeof input === "object" ? (input as { title?: unknown; blocks?: unknown }) : {};
-  return {
-    title: typeof record.title === "string" ? record.title : "",
-    blocks: Array.isArray(record.blocks) ? record.blocks.map(checked) : [],
-  };
+  const title = typeof record.title === "string" ? record.title : "";
+  // The same repair the tool applies before it accepts an answer, so what the person sees is what was accepted.
+  const blocks = repairComposition(Array.isArray(record.blocks) ? record.blocks.map(checked) : [], title) as AnswerPartBlock[];
+  return { title, blocks };
 }
 
 export function answerPart(options: { id: string; toolCallId: string; projection: AnswerProjection; streaming: boolean; question?: string; outcomes?: Record<string, string>; confirmed?: boolean }): ChatAnswerPart {

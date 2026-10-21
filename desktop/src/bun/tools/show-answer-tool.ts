@@ -1,5 +1,5 @@
 import { createTool } from "@mastra/core/tools";
-import { answerInputSchema, answerShapeSchema, checkAnswer } from "../../shared/answer-catalog";
+import { answerInputSchema, answerShapeSchema, checkAnswer, compositionIssues, repairComposition } from "../../shared/answer-catalog";
 
 export const SHOW_ANSWER_TOOL_ID = "show_answer";
 
@@ -65,9 +65,9 @@ export const showAnswerInputSchema: { "~standard": typeof structural } = {
 /**
  * `show_answer` renders a catalog v2 answer in the Island (ADR 0003). The tool only acknowledges: the UI reads the
  * streamed input. The first failed attempt in a turn returns a normal result the model reads to retry, naming each
- * broken block and composition rule. On the retry a block that still breaks its own limits is shown as a fallback line
- * (the answer stands), while a composition failure (order, counts, more than 10 blocks) tells the model to answer in
- * prose. The person never sees a rejected answer.
+ * broken block and composition rule. On the retry the answer stands: a block that still breaks its own limits is shown
+ * as a fallback line and a composition failure is repaired (`repairComposition`). Only an answer with no usable block or
+ * a broken envelope (version, title) tells the model to answer in prose. The person never sees a rejected answer.
  */
 export function createShowAnswerTool() {
   const failures = new Map<string, number>();
@@ -77,9 +77,14 @@ export function createShowAnswerTool() {
     inputSchema: showAnswerInputSchema,
     execute: async (input, context): Promise<ShowAnswerResult> => {
       const key = turnKey(context as ToolContext);
-      const { issues, blockIssues } = checkAnswer(input);
+      const { blocks, issues, blockIssues, envelopeIssues } = checkAnswer(input);
       const attempts = (failures.get(key) ?? 0) + 1;
-      if (issues.length === 0 && (blockIssues.length === 0 || attempts > 1)) {
+      // On the retry the answer stands once it is repaired: what the person sees is the repaired composition.
+      const title = (input as { title?: unknown }).title;
+      const repairable = attempts > 1 && envelopeIssues.length === 0
+        && compositionIssues(repairComposition(blocks, typeof title === "string" ? title : "")).length === 0
+        && blocks.some((block) => block.type !== "fallback");
+      if ((issues.length === 0 && blockIssues.length === 0) || repairable) {
         failures.delete(key);
         return { ok: true, shown: true };
       }

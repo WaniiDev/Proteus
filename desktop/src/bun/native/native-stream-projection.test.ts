@@ -144,11 +144,12 @@ describe("native Mastra stream projection", () => {
       expect(errored?.message.parts.filter((part) => part.type === "tool")).toHaveLength(0);
     });
 
-    test("loose input: an 11-block answer still projects, with invalid blocks as fallback", () => {
+    test("loose input: an 11-block answer projects repaired, with invalid blocks as fallback", () => {
       const { feed, answerOf } = run();
       const many = { v: 2, title: "T", blocks: [answer.blocks[0], { type: "text", text: "<b>x</b>" }, ...Array.from({ length: 9 }, () => ({ type: "text", text: "ok" }))] };
       const part = answerOf(feed("tool-call", { args: many }));
-      expect(part?.blocks).toHaveLength(11);
+      expect(part?.blocks).toHaveLength(10);
+      expect(part?.blocks[0]?.type).toBe("headline");
       expect(part?.blocks[1]).toEqual({ type: "fallback" });
     });
 
