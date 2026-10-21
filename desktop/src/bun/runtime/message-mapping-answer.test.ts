@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { NativeStreamProjector } from "../native/native-stream-projection";
-import { projectMessageParts } from "./message-mapping";
+import { projectMessageParts, transformToolPayload } from "./message-mapping";
 import type { MastraMessage } from "./types";
 
 const answer = {
@@ -51,5 +51,33 @@ describe("show_answer history", () => {
 
   test("a valid answer is not also a tool row", () => {
     expect(projectMessageParts(stored({ ok: true, shown: true })).map((part) => part.type)).toEqual(["answer"]);
+  });
+});
+
+describe("show_answer payload transform", () => {
+  const deep = {
+    title: "Tour",
+    blocks: [
+      { type: "stats", items: [{ value: "12", label: "Open", delta: "+2", dir: "up", spark: [1, 2, 3] }] },
+      { type: "list", label: "To do", rows: [{ id: "r1", title: "Reply", act: { label: "Reply", intent: "reply", done: "Drafted" } }] },
+      { type: "bars", label: "Load", aria: "Load by day", bars: [["Mon", 3], ["Tue", 5, true]] },
+    ],
+  };
+
+  test("keeps nested answer blocks intact for display and transcript", () => {
+    const transformed = transformToolPayload({ phase: "input-available", toolName: "show_answer", input: deep });
+    expect(transformed).toEqual(deep);
+    const [part] = projectMessageParts({ id: "m2", role: "assistant", createdAt: new Date(), content: { format: 2, parts: [{ type: "tool-show_answer", toolCallId: "c2", state: "output-available", input: transformed, output: { ok: true, shown: true } }] } } as unknown as MastraMessage);
+    expect((part as { blocks: Array<{ type: string }> }).blocks.map((block) => block.type)).toEqual(["stats", "list", "bars"]);
+    expect(JSON.stringify(part)).not.toContain("[truncated");
+  });
+
+  test("still sanitizes other tools' input", () => {
+    expect(transformToolPayload({ phase: "input-available", toolName: "web_fetch", input: { a: { b: { c: { d: { e: { f: 1 } } } } }, apiKey: "x" } })).toEqual({ a: { b: { c: { d: { e: "[truncated: depth]" } } } }, apiKey: "[redacted]" });
+  });
+
+  test("never returns undefined for a phase Mastra would replace with a placeholder", () => {
+    expect(transformToolPayload({ phase: "output-available", toolName: "show_answer", output: { ok: true, shown: true } })).toEqual({ ok: true, shown: true });
+    expect(transformToolPayload({ phase: "input-delta", toolName: "show_answer", inputTextDelta: "x".repeat(3_000) })).toEqual({ delta: "x".repeat(3_000) });
   });
 });

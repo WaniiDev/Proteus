@@ -63,6 +63,24 @@ export function sanitizeToolDetail(value: unknown): unknown {
   return json.length <= 8_192 ? safe : { preview: `${json.slice(0, 8_000)}…`, truncated: true };
 }
 
+type ToolPayloadContext = { phase: string; toolName: string; input?: unknown; inputTextDelta?: string; output?: unknown; error?: unknown; suspendPayload?: unknown; resumeData?: unknown };
+
+/**
+ * Mastra's display and transcript payload for a tool call. `show_answer` input keeps its full shape:
+ * answer blocks nest deeper than the sanitizer allows, and the answer catalog already validates them.
+ * Undefined makes Mastra store a placeholder, so every phase returns a value.
+ */
+export function transformToolPayload({ phase, toolName, input, inputTextDelta, output, error, suspendPayload, resumeData }: ToolPayloadContext): unknown {
+  if (phase === "input-delta") return inputTextDelta ? { delta: toolName === SHOW_ANSWER_NAME ? inputTextDelta : inputTextDelta.slice(0, 2_000) } : undefined;
+  if (phase === "input-available" && toolName === SHOW_ANSWER_NAME) return input;
+  if (phase === "input-available" || phase === "approval") return sanitizeToolDetail(input);
+  if (phase === "output-available") return sanitizeToolDetail(output);
+  if (phase === "error") return { message: error instanceof Error ? error.message : String(error ?? "Tool failed").slice(0, 2_000) };
+  if (phase === "suspend") return sanitizeToolDetail(suspendPayload);
+  if (phase === "resume") return sanitizeToolDetail(resumeData);
+  return undefined;
+}
+
 export function toolLabel(name: string): string {
   const labels: Record<string, string> = {
     ask_user: "Asked for input",
